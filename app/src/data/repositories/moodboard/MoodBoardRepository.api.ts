@@ -1,5 +1,25 @@
 import type { IMoodBoardRepository, Outfit, SaveOptions, SavedMoodBoard } from '@/src/domain';
-import { apiClient } from '@/src/data/api/client';
+import { apiClient, getApiBaseURL } from '@/src/data/api/client';
+
+const toAbsoluteImageURL = (imageUrl: string | undefined): string => {
+  if (!imageUrl) return '';
+  if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) return imageUrl;
+  return `${getApiBaseURL()}${imageUrl}`;
+};
+
+const hydrateSavedBoard = (board: SavedMoodBoard): SavedMoodBoard => ({
+  ...board,
+  outfit: {
+    ...board.outfit,
+    panelUrl: toAbsoluteImageURL(board.outfit.panelUrl) || undefined,
+    backgroundUrl: toAbsoluteImageURL(board.outfit.backgroundUrl) || undefined,
+    snapshots: board.outfit.snapshots?.map(snapshot => ({
+      ...snapshot,
+      imageUrl: toAbsoluteImageURL(snapshot.imageUrl),
+      pngImageUrl: toAbsoluteImageURL(snapshot.pngImageUrl) || undefined,
+    })),
+  },
+});
 
 /** Accepts either a bare date string (legacy calling convention) or a full
  *  SaveOptions object. Having both avoids breaking callers who only need the
@@ -11,7 +31,7 @@ const normaliseOptions = (options?: string | SaveOptions): SaveOptions =>
 export class ApiMoodBoardRepository implements IMoodBoardRepository {
   async save(outfit: Outfit, options?: string | SaveOptions): Promise<SavedMoodBoard> {
     const opts = normaliseOptions(options);
-    return apiClient.post<SavedMoodBoard>('/v1/moodboards', {
+    const board = await apiClient.post<SavedMoodBoard>('/v1/moodboards', {
       outfit,
       date: opts.date ?? new Date().toISOString().split('T')[0],
       // Send only when present so older server deploys (pre-#8) that reject
@@ -22,10 +42,11 @@ export class ApiMoodBoardRepository implements IMoodBoardRepository {
         : {}),
       ...(opts.jobId ? { jobId: opts.jobId } : {}),
     });
+    return hydrateSavedBoard(board);
   }
 
   async list(): Promise<SavedMoodBoard[]> {
     const response = await apiClient.get<{ moodboards: SavedMoodBoard[] }>('/v1/moodboards');
-    return response.moodboards ?? [];
+    return (response.moodboards ?? []).map(hydrateSavedBoard);
   }
 }
