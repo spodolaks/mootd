@@ -1,4 +1,4 @@
-import { backgrounds, labels } from '@/src/theme/colors';
+import { backgrounds, fills, labels } from '@/src/theme/colors';
 import { typography } from '@/src/theme/typography';
 import type { SavedMoodBoard, WardrobeItem } from '@/src/domain';
 import React from 'react';
@@ -6,6 +6,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Collage } from '@/src/components/moodboard/Collage';
 import { ArchetypeBadges } from '@/src/components/moodboard/ArchetypeBadges';
 import { MAX_CARD_WIDTH } from '@/src/components/moodboard/constants';
+import { formatWeatherChip } from '@/src/components/moodboard/weatherChip';
 
 export interface SavedBoardViewProps {
   board: SavedMoodBoard;
@@ -17,8 +18,11 @@ export interface SavedBoardViewProps {
 export const SavedBoardView: React.FC<SavedBoardViewProps> = ({ board, itemMap, colorScheme, onRegenerate }) => {
   const textColor = labels.primary[colorScheme];
   const secondaryColor = labels.secondary[colorScheme];
+  const tertiaryColor = labels.tertiary[colorScheme];
   const cardBg = backgrounds.secondary[colorScheme];
   const today = new Date().toISOString().split('T')[0];
+  const weatherChip = formatWeatherChip(board.outfit.weather);
+  const palette = board.outfit.palette;
 
   // Flex column layout (not ScrollView) so the Collage can fill the entire
   // height remaining between the header and footer. Header + footer are
@@ -30,7 +34,24 @@ export const SavedBoardView: React.FC<SavedBoardViewProps> = ({ board, itemMap, 
           {board.date === today ? "TODAY'S OUTFIT" : board.date}
         </Text>
         <Text style={[styles.savedName, { color: textColor }]}>{board.outfit.name}</Text>
-        <ArchetypeBadges scores={board.outfit.archetypeScores} colorScheme={colorScheme} />
+        <View style={styles.chipRow}>
+          <ArchetypeBadges scores={board.outfit.archetypeScores} colorScheme={colorScheme} />
+          {palette && palette.length > 0 && (
+            <View style={styles.paletteStripInline}>
+              {palette.slice(0, 4).map((hex, i) => (
+                <View
+                  key={`${hex}-${i}`}
+                  style={[styles.paletteDot, { backgroundColor: hex, borderColor: fills.tertiary[colorScheme] }]}
+                />
+              ))}
+            </View>
+          )}
+        </View>
+        {weatherChip && (
+          <Text style={[styles.weatherChip, { color: tertiaryColor }]} numberOfLines={1}>
+            {weatherChip}
+          </Text>
+        )}
       </View>
       <Collage
         itemIds={board.outfit.items}
@@ -75,7 +96,29 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   savedHeader: {
-    gap: 2,
+    gap: 6,
+  },
+  chipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    alignItems: 'center',
+  },
+  paletteStripInline: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginLeft: 4,
+  },
+  paletteDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  weatherChip: {
+    ...typography.caption2.regular,
+    letterSpacing: 1.2,
   },
   savedDate: {
     ...typography.caption2.regular,

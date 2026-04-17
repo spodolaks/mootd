@@ -7,16 +7,7 @@ import { Collage } from '@/src/components/moodboard/Collage';
 import { ArchetypeBadges } from '@/src/components/moodboard/ArchetypeBadges';
 import { Icon } from '@/src/components';
 import { SCREEN_WIDTH, CONTAINER_PADDING, MAX_CARD_WIDTH } from '@/src/components/moodboard/constants';
-
-const CONDITION_ICON: Record<string, string> = {
-  clear: '☀', sunny: '☀', sun: '☀',
-  cloud: '☁', cloudy: '☁', overcast: '☁',
-  rain: '☂', rainy: '☂', drizzle: '☂', shower: '☂',
-  snow: '❄', snowy: '❄', sleet: '❄',
-  storm: '⚡', thunder: '⚡',
-  fog: '☷', foggy: '☷', mist: '☷', haze: '☷',
-  wind: '≈', windy: '≈',
-};
+import { conditionIcon } from '@/src/components/moodboard/weatherChip';
 
 /** Secondary weather detail — rendered as a small caption under the chip
  *  row so the top of the screen doesn't need a dedicated weather card. */
@@ -45,11 +36,7 @@ const buildEyebrow = (
   if (detail?.location) parts.push(detail.location.toUpperCase());
 
   const temp = weather?.temperature ? `${weather.temperature}°` : '';
-  const icon = weather?.condition
-    ? CONDITION_ICON[weather.condition.toLowerCase()] ??
-      CONDITION_ICON[weather.condition.toLowerCase().split(' ')[0]] ??
-      ''
-    : '';
+  const icon = conditionIcon(weather?.condition);
   const current = [temp, icon].filter(Boolean).join(' ');
   if (current) parts.push(current);
 
