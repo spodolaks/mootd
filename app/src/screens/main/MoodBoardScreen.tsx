@@ -347,6 +347,10 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
     paddingHorizontal: CONTAINER_PADDING,
+    // Matching top and bottom insets — the card is framed by a consistent
+    // dark margin on all sides instead of being flush-top and floating on
+    // an uneven bottom gap (pill + safe-area inset).
+    paddingTop: 8,
     paddingBottom: 20,
     gap: 16,
   },
