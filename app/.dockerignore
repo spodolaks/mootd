@@ -1,0 +1,12 @@
+node_modules
+.expo
+.expo-shared
+web-build
+dist
+.git
+.gitignore
+*.md
+*.log
+ios
+android
+expo-go.apk

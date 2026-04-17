@@ -1,0 +1,44 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Node / Expo
+node_modules/
+.expo/
+.expo-shared/
+web-build/
+dist/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Go
+/backend/tmp/
+/backend/bin/
+*.test
+*.out
+coverage.*
+
+# Docker
+docker-compose.override.yml
+
+# Claude Code state (skills are third-party clones; settings files contain per-machine paths)
+.claude/skills/
+.claude/settings.json
+.claude/settings.local.json
+
+# Local build artefacts
+/app/expo-go.apk

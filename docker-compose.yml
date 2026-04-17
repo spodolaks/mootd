@@ -1,0 +1,91 @@
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: mootd-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  mongo:
+    image: mongo:8.0
+    container_name: mootd-mongo
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: mootd
+      MONGO_INITDB_ROOT_PASSWORD: mootd_dev
+    ports:
+      - "27018:27017"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "mongosh --quiet --eval \"db.adminCommand('ping').ok\" --username $$MONGO_INITDB_ROOT_USERNAME --password $$MONGO_INITDB_ROOT_PASSWORD --authenticationDatabase admin | grep 1 >/dev/null",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: mootd-backend
+    restart: unless-stopped
+    environment:
+      HTTP_ADDR: ":8080"
+      MONGO_URI: "mongodb://mootd:mootd_dev@mongo:27017/?authSource=admin"
+      MONGO_DB: "mootd"
+      MONGO_CONNECT_TIMEOUT: "10s"
+      SHUTDOWN_TIMEOUT: "10s"
+      # Set JWT_SECRET to a strong random value in production.
+      # Leaving it unset uses the insecure dev default and logs a warning.
+      # JWT_SECRET: "replace-with-a-strong-secret-min-32-chars"
+      # CORS_ALLOWED_ORIGINS: "https://app.mootd.com"
+      DETECTION_API_KEY: "${DETECTION_API_KEY}"
+      BG_REMOVER_BASE_URL: "http://bcgrm-api-1:8000"
+      DETECTION_API_BASE_URL: "http://host.docker.internal:8088"
+      # OLLAMA_BASE_URL defaults to http://host.docker.internal:11434
+      # OLLAMA_MODEL defaults to qwen3:14b
+      # Outfit generator. Set OUTFIT_PROVIDER=claude to use Anthropic Claude
+      # for outfit generation; defaults to "ollama" (local Qwen).
+      OUTFIT_PROVIDER: "${OUTFIT_PROVIDER:-ollama}"
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      # ANTHROPIC_MODEL defaults to claude-sonnet-4-5
+      # ANTHROPIC_VISION defaults to "true" — set to "false" to disable image input
+      ANTHROPIC_MODEL: "${ANTHROPIC_MODEL:-}"
+      ANTHROPIC_VISION: "${ANTHROPIC_VISION:-}"
+      REDIS_URL: "redis://redis:6379"
+      # OpenAI DALL-E for generating moodboard backgrounds + surface textures
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+    networks:
+      - default
+      - bcgrm_default
+    ports:
+      - "8081:8080"
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/healthz >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+volumes:
+  mongo_data:
+
+networks:
+  default: {}
+  bcgrm_default:
+    external: true

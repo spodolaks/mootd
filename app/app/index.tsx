@@ -1,0 +1,80 @@
+import { useEffect, useCallback } from 'react';
+import { useRouter } from 'expo-router';
+import { WelcomeScreen } from '@/src/screens';
+import { useAuthStore } from '@/src/store';
+import { useGoogleAuth } from '@/src/hooks';
+import { wardrobeRepository } from '@/src/data/repositories';
+
+export default function Index() {
+  const router = useRouter();
+  const signInWithGoogle = useAuthStore((state) => state.signInWithGoogle);
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+  const isLoading = useAuthStore((state) => state.isLoading);
+  const error = useAuthStore((state) => state.error);
+
+  // If the session was already restored (e.g. browser refresh with valid
+  // localStorage token), skip the login screen and go straight to the app.
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    wardrobeRepository.getItems()
+      .then(({ items }) => {
+        router.replace(items.length === 0 ? '/build-wardrobe' : '/(main)/moodboard');
+      })
+      .catch(() => {
+        router.replace('/(main)/moodboard');
+      });
+  }, [isAuthenticated, router]);
+
+  const { isReady, response, signIn, redirectUri } = useGoogleAuth();
+
+  // Debug: log the redirect URI so we can register it in Google Console
+  useEffect(() => {
+    if (redirectUri) {
+      console.log('[OAuth] Redirect URI:', redirectUri);
+    }
+  }, [redirectUri]);
+
+  /**
+   * When the OAuth response arrives with a token, pass it to the auth store.
+   * The backend verifies the token with Google and returns the verified user profile.
+   */
+  const handleAuthResponse = useCallback(async () => {
+    if (response?.type !== 'success') return;
+
+    const accessToken = response.authentication?.accessToken;
+    if (!accessToken) return;
+
+    try {
+      const isSignedIn = await signInWithGoogle({ accessToken });
+      if (isSignedIn) {
+        try {
+          const { items } = await wardrobeRepository.getItems();
+          router.replace(items.length === 0 ? '/build-wardrobe' : '/(main)/moodboard');
+        } catch {
+          // If the wardrobe check fails, proceed to the main screen.
+          router.replace('/(main)/moodboard');
+        }
+      }
+    } catch {
+      // Error is handled by the auth store
+    }
+  }, [response, signInWithGoogle, router]);
+
+  useEffect(() => {
+    void handleAuthResponse();
+  }, [handleAuthResponse]);
+
+  const handleGoogleSignIn = () => {
+    if (isReady) {
+      void signIn();
+    }
+  };
+
+  return (
+    <WelcomeScreen
+      onGoogleSignIn={handleGoogleSignIn}
+      isLoading={isLoading}
+      errorMessage={error}
+    />
+  );
+}

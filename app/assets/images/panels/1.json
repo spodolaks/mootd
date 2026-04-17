@@ -1,0 +1,12 @@
+{
+  "name": "Distressed Oak",
+  "description": "Warm, weathered wooden planks with visible grain — grounds earthy, rugged, and casual outfits.",
+  "moodTags": ["warm", "rustic", "natural", "casual"],
+  "archetypeAffinity": {
+    "everyman": 0.9,
+    "explorer": 0.8,
+    "rebel": 0.6,
+    "creator": 0.5,
+    "caregiver": 0.5
+  }
+}

@@ -1,0 +1,811 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mootd.ai/schemas/archetype-outfit-prediction.schema.json",
+  "title": "MOOTD Archetype Outfit Prediction",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "request_id",
+    "input",
+    "archetype_inference",
+    "template_selection",
+    "slot_predictions",
+    "outfit_candidates",
+    "final_selection"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0.0"
+    },
+    "request_id": {
+      "type": "string"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "input": {
+      "$ref": "#/$defs/InputPayload"
+    },
+    "archetype_inference": {
+      "$ref": "#/$defs/ArchetypeInference"
+    },
+    "template_selection": {
+      "$ref": "#/$defs/TemplateSelection"
+    },
+    "slot_predictions": {
+      "$ref": "#/$defs/SlotPredictions"
+    },
+    "outfit_candidates": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/OutfitCandidate"
+      }
+    },
+    "final_selection": {
+      "$ref": "#/$defs/FinalSelection"
+    },
+    "debug": {
+      "$ref": "#/$defs/DebugBlock"
+    }
+  },
+  "$defs": {
+    "InputPayload": {
+      "type": "object",
+      "required": [
+        "uploaded_item",
+        "context",
+        "weather"
+      ],
+      "properties": {
+        "uploaded_item": {
+          "$ref": "#/$defs/UploadedItem"
+        },
+        "context": {
+          "$ref": "#/$defs/Context"
+        },
+        "weather": {
+          "$ref": "#/$defs/Weather"
+        },
+        "user_preferences": {
+          "$ref": "#/$defs/UserPreferences"
+        }
+      }
+    },
+
+    "UploadedItem": {
+      "type": "object",
+      "required": [
+        "item_id",
+        "category",
+        "primary_color",
+        "material",
+        "fabric_weight",
+        "pattern",
+        "fit",
+        "silhouette",
+        "formality_level",
+        "temperature_min_celsius",
+        "temperature_max_celsius",
+        "layering_role"
+      ],
+      "properties": {
+        "item_id": { "type": "string" },
+        "source_image_url": { "type": "string", "format": "uri" },
+        "category": { "$ref": "#/$defs/CategoryEnum" },
+        "subcategory": { "type": "string" },
+        "primary_color": { "type": "string" },
+        "secondary_colors": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "material": { "type": "string" },
+        "fabric_weight": {
+          "type": "string",
+          "enum": ["light", "medium", "heavy"]
+        },
+        "pattern": { "type": "string" },
+        "fit": { "type": "string" },
+        "silhouette": { "type": "string" },
+        "formality_level": {
+          "type": "string",
+          "enum": [
+            "casual",
+            "smart_casual",
+            "business_casual",
+            "business",
+            "creative_formal",
+            "formal"
+          ]
+        },
+        "occasion_tags": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "temperature_min_celsius": { "type": "integer" },
+        "temperature_max_celsius": { "type": "integer" },
+        "layering_role": {
+          "type": "string",
+          "enum": ["base", "mid", "outer"]
+        },
+        "wind_resistance": {
+          "type": "string",
+          "enum": ["low", "medium", "high"]
+        },
+        "water_resistance": {
+          "type": "string",
+          "enum": ["none", "water-resistant", "waterproof"]
+        },
+        "breathability": {
+          "type": "string",
+          "enum": ["low", "medium", "high"]
+        },
+        "insulation_level": {
+          "type": "string",
+          "enum": ["low", "medium", "high"]
+        },
+        "sun_protection": {
+          "type": "string",
+          "enum": ["low", "medium", "high"]
+        },
+        "humidity_suitability": {
+          "type": "string",
+          "enum": ["dry", "mild humidity", "high humidity", "versatile"]
+        },
+        "style_signals": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+
+    "Context": {
+      "type": "object",
+      "required": ["occasion", "setting"],
+      "properties": {
+        "occasion": {
+          "type": "string",
+          "enum": [
+            "workday",
+            "meeting",
+            "casual_day",
+            "dinner",
+            "date",
+            "travel",
+            "creative_event",
+            "weekend",
+            "formal_event"
+          ]
+        },
+        "setting": {
+          "type": "string",
+          "enum": [
+            "urban",
+            "office",
+            "outdoor",
+            "social",
+            "mixed"
+          ]
+        },
+        "dress_code": {
+          "type": "string",
+          "enum": [
+            "none",
+            "casual",
+            "smart_casual",
+            "business_casual",
+            "business",
+            "formal"
+          ]
+        }
+      }
+    },
+
+    "Weather": {
+      "type": "object",
+      "required": [
+        "temperature_celsius",
+        "wind_level",
+        "precipitation",
+        "humidity"
+      ],
+      "properties": {
+        "temperature_celsius": { "type": "number" },
+        "wind_level": {
+          "type": "string",
+          "enum": ["low", "medium", "high"]
+        },
+        "precipitation": {
+          "type": "string",
+          "enum": ["none", "light_rain", "heavy_rain", "snow"]
+        },
+        "humidity": {
+          "type": "string",
+          "enum": ["low", "medium", "high"]
+        }
+      }
+    },
+
+    "UserPreferences": {
+      "type": "object",
+      "properties": {
+        "gender_presentation": {
+          "type": "string",
+          "enum": ["feminine", "masculine", "androgynous", "unspecified"]
+        },
+        "risk_tolerance": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "practicality_weight_override": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "aesthetic_weight_override": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+
+    "ArchetypeInference": {
+      "type": "object",
+      "required": [
+        "scores",
+        "posterior",
+        "top_archetypes",
+        "confidence"
+      ],
+      "properties": {
+        "scores": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ArchetypeScore"
+          }
+        },
+        "posterior": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        },
+        "top_archetypes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ArchetypeEnum"
+          },
+          "maxItems": 3
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "expression_intensity": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+
+    "ArchetypeScore": {
+      "type": "object",
+      "required": [
+        "archetype",
+        "raw_score",
+        "posterior_probability",
+        "feature_scores",
+        "realism_cap"
+      ],
+      "properties": {
+        "archetype": {
+          "$ref": "#/$defs/ArchetypeEnum"
+        },
+        "raw_score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "posterior_probability": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "realism_cap": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "feature_scores": {
+          "$ref": "#/$defs/ArchetypeFeatureScores"
+        }
+      }
+    },
+
+    "ArchetypeFeatureScores": {
+      "type": "object",
+      "required": [
+        "color_match",
+        "material_match",
+        "silhouette_match",
+        "formality_match",
+        "pattern_match",
+        "structure_match",
+        "accessory_implication",
+        "symbolic_signal"
+      ],
+      "properties": {
+        "color_match": { "type": "number", "minimum": 0, "maximum": 1 },
+        "material_match": { "type": "number", "minimum": 0, "maximum": 1 },
+        "silhouette_match": { "type": "number", "minimum": 0, "maximum": 1 },
+        "formality_match": { "type": "number", "minimum": 0, "maximum": 1 },
+        "pattern_match": { "type": "number", "minimum": 0, "maximum": 1 },
+        "structure_match": { "type": "number", "minimum": 0, "maximum": 1 },
+        "accessory_implication": { "type": "number", "minimum": 0, "maximum": 1 },
+        "symbolic_signal": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+
+    "TemplateSelection": {
+      "type": "object",
+      "required": [
+        "evaluated_templates",
+        "selected_templates"
+      ],
+      "properties": {
+        "evaluated_templates": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TemplateScore"
+          }
+        },
+        "selected_templates": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TemplateFamilyEnum"
+          },
+          "maxItems": 2
+        }
+      }
+    },
+
+    "TemplateScore": {
+      "type": "object",
+      "required": [
+        "template_family",
+        "score_breakdown",
+        "total_score"
+      ],
+      "properties": {
+        "template_family": {
+          "$ref": "#/$defs/TemplateFamilyEnum"
+        },
+        "score_breakdown": {
+          "type": "object",
+          "required": [
+            "archetype_posterior_fit",
+            "seed_category_fit",
+            "context_fit",
+            "weather_fit"
+          ],
+          "properties": {
+            "archetype_posterior_fit": { "type": "number", "minimum": 0, "maximum": 1 },
+            "seed_category_fit": { "type": "number", "minimum": 0, "maximum": 1 },
+            "context_fit": { "type": "number", "minimum": 0, "maximum": 1 },
+            "weather_fit": { "type": "number", "minimum": 0, "maximum": 1 }
+          }
+        },
+        "total_score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+
+    "SlotPredictions": {
+      "type": "object",
+      "required": [
+        "bottoms",
+        "shoes",
+        "outerwear",
+        "bags",
+        "accessories"
+      ],
+      "properties": {
+        "bottoms": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/SlotCandidate" }
+        },
+        "shoes": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/SlotCandidate" }
+        },
+        "outerwear": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/SlotCandidate" }
+        },
+        "bags": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/SlotCandidate" }
+        },
+        "accessories": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/SlotCandidate" }
+        }
+      }
+    },
+
+    "SlotCandidate": {
+      "type": "object",
+      "required": [
+        "candidate_id",
+        "slot_type",
+        "label",
+        "traits",
+        "score_breakdown",
+        "total_score"
+      ],
+      "properties": {
+        "candidate_id": { "type": "string" },
+        "slot_type": {
+          "type": "string",
+          "enum": ["bottom", "shoes", "outerwear", "bag", "accessory"]
+        },
+        "label": { "type": "string" },
+        "traits": {
+          "$ref": "#/$defs/CandidateTraits"
+        },
+        "score_breakdown": {
+          "$ref": "#/$defs/SlotCandidateScoreBreakdown"
+        },
+        "total_score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "pruned": {
+          "type": "boolean",
+          "default": false
+        },
+        "prune_reason": {
+          "type": "string"
+        }
+      }
+    },
+
+    "CandidateTraits": {
+      "type": "object",
+      "required": [
+        "category",
+        "primary_color",
+        "material",
+        "silhouette",
+        "formality_level"
+      ],
+      "properties": {
+        "category": { "$ref": "#/$defs/CategoryEnum" },
+        "subcategory": { "type": "string" },
+        "primary_color": { "type": "string" },
+        "material": { "type": "string" },
+        "silhouette": { "type": "string" },
+        "formality_level": {
+          "type": "string",
+          "enum": [
+            "casual",
+            "smart_casual",
+            "business_casual",
+            "business",
+            "creative_formal",
+            "formal"
+          ]
+        },
+        "temperature_min_celsius": { "type": "integer" },
+        "temperature_max_celsius": { "type": "integer" }
+      }
+    },
+
+    "SlotCandidateScoreBreakdown": {
+      "type": "object",
+      "required": [
+        "seed_compatibility",
+        "archetype_weighted_compatibility",
+        "realism_contribution",
+        "thermal_contribution",
+        "context_contribution",
+        "silhouette_contribution",
+        "color_contribution",
+        "material_contribution"
+      ],
+      "properties": {
+        "seed_compatibility": { "type": "number", "minimum": 0, "maximum": 1 },
+        "archetype_weighted_compatibility": { "type": "number", "minimum": 0, "maximum": 1 },
+        "realism_contribution": { "type": "number", "minimum": 0, "maximum": 1 },
+        "thermal_contribution": { "type": "number", "minimum": 0, "maximum": 1 },
+        "context_contribution": { "type": "number", "minimum": 0, "maximum": 1 },
+        "silhouette_contribution": { "type": "number", "minimum": 0, "maximum": 1 },
+        "color_contribution": { "type": "number", "minimum": 0, "maximum": 1 },
+        "material_contribution": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+
+    "OutfitCandidate": {
+      "type": "object",
+      "required": [
+        "outfit_id",
+        "template_family",
+        "items",
+        "score_breakdown",
+        "penalties",
+        "total_score"
+      ],
+      "properties": {
+        "outfit_id": { "type": "string" },
+        "template_family": {
+          "$ref": "#/$defs/TemplateFamilyEnum"
+        },
+        "items": {
+          "$ref": "#/$defs/OutfitItems"
+        },
+        "score_breakdown": {
+          "$ref": "#/$defs/OutfitScoreBreakdown"
+        },
+        "penalties": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Penalty"
+          }
+        },
+        "total_score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "accepted": {
+          "type": "boolean"
+        }
+      }
+    },
+
+    "OutfitItems": {
+      "type": "object",
+      "required": ["seed_item", "bottom", "shoes"],
+      "properties": {
+        "seed_item": { "type": "string" },
+        "bottom": { "type": "string" },
+        "shoes": { "type": "string" },
+        "outerwear": { "type": "string" },
+        "bag": { "type": "string" },
+        "accessories": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+
+    "OutfitScoreBreakdown": {
+      "type": "object",
+      "required": [
+        "seed_compatibility",
+        "archetype_alignment",
+        "realism_score",
+        "thermal_fit",
+        "context_fit",
+        "silhouette_balance",
+        "color_harmony",
+        "material_coherence",
+        "accessory_control"
+      ],
+      "properties": {
+        "seed_compatibility": { "type": "number", "minimum": 0, "maximum": 1 },
+        "archetype_alignment": { "type": "number", "minimum": 0, "maximum": 1 },
+        "realism_score": { "type": "number", "minimum": 0, "maximum": 1 },
+        "thermal_fit": { "type": "number", "minimum": 0, "maximum": 1 },
+        "context_fit": { "type": "number", "minimum": 0, "maximum": 1 },
+        "silhouette_balance": { "type": "number", "minimum": 0, "maximum": 1 },
+        "color_harmony": { "type": "number", "minimum": 0, "maximum": 1 },
+        "material_coherence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "accessory_control": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+
+    "Penalty": {
+      "type": "object",
+      "required": [
+        "type",
+        "value"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "severe_thermal_contradiction",
+            "major_formality_contradiction",
+            "costume_level_symbolic_excess",
+            "incompatible_silhouette_conflict",
+            "too_many_statement_items",
+            "category_impossibility",
+            "unrealistic_accessory_stack",
+            "palette_breakdown",
+            "material_season_contradiction"
+          ]
+        },
+        "value": {
+          "type": "integer",
+          "maximum": 0,
+          "minimum": -30
+        },
+        "reason": {
+          "type": "string"
+        }
+      }
+    },
+
+    "FinalSelection": {
+      "type": "object",
+      "required": [
+        "selected_outfit_id",
+        "decision_status"
+      ],
+      "properties": {
+        "selected_outfit_id": { "type": "string" },
+        "decision_status": {
+          "type": "string",
+          "enum": ["accepted", "reranked", "rejected"]
+        },
+        "acceptance_band": {
+          "type": "string",
+          "enum": ["excellent", "good", "acceptable", "weak", "reject"]
+        },
+        "reason_summary": {
+          "type": "string"
+        }
+      }
+    },
+
+    "DebugBlock": {
+      "type": "object",
+      "properties": {
+        "applied_weight_profile": {
+          "$ref": "#/$defs/WeightProfile"
+        },
+        "realism_translation_rules_applied": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "hard_constraints_triggered": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+
+    "WeightProfile": {
+      "type": "object",
+      "properties": {
+        "outfit_score_weights": {
+          "type": "object",
+          "properties": {
+            "seed_compatibility": { "type": "number" },
+            "archetype_alignment": { "type": "number" },
+            "realism_score": { "type": "number" },
+            "thermal_fit": { "type": "number" },
+            "context_fit": { "type": "number" },
+            "silhouette_balance": { "type": "number" },
+            "color_harmony": { "type": "number" },
+            "material_coherence": { "type": "number" },
+            "accessory_control": { "type": "number" }
+          }
+        },
+        "slot_score_weights": {
+          "type": "object",
+          "properties": {
+            "seed_compatibility": { "type": "number" },
+            "archetype_weighted_compatibility": { "type": "number" },
+            "realism_contribution": { "type": "number" },
+            "thermal_contribution": { "type": "number" },
+            "context_contribution": { "type": "number" },
+            "silhouette_contribution": { "type": "number" },
+            "color_contribution": { "type": "number" },
+            "material_contribution": { "type": "number" }
+          }
+        }
+      }
+    },
+
+    "ArchetypeEnum": {
+      "type": "string",
+      "enum": [
+        "caregiver",
+        "creator",
+        "explorer",
+        "hero",
+        "innocent",
+        "jester",
+        "lover",
+        "magician",
+        "orphan",
+        "rebel",
+        "ruler",
+        "sage"
+      ]
+    },
+
+    "TemplateFamilyEnum": {
+      "type": "string",
+      "enum": [
+        "soft_romantic_everyday",
+        "creative_statement_casual",
+        "utility_structured_daily",
+        "polished_authority",
+        "quiet_intellectual_classic",
+        "mystical_layered_refined"
+      ]
+    },
+
+    "CategoryEnum": {
+      "type": "string",
+      "enum": [
+        "top",
+        "shirt",
+        "blouse",
+        "tshirt",
+        "knitwear",
+        "sweater",
+        "cardigan",
+        "hoodie",
+        "jacket",
+        "coat",
+        "blazer",
+        "dress",
+        "skirt",
+        "trousers",
+        "jeans",
+        "shorts",
+        "shoes",
+        "boots",
+        "loafers",
+        "sandals",
+        "sneakers",
+        "bag",
+        "accessory"
+      ]
+    }
+  }
+}
+
+Recommended companion config
+This schema defines the prediction output structure, but you should keep archetype tuning in a separate config document.
+Example: archetype_profiles.json
+
+{
+  "caregiver": {
+    "preferred_colors": ["light_blue", "lavender", "cream", "soft_pink"],
+    "preferred_materials": ["cotton", "jersey", "soft knit", "linen"],
+    "preferred_silhouettes": ["flowing", "loose", "soft"],
+    "preferred_formality": ["casual", "smart_casual"],
+    "pattern_tolerance": 0.35,
+    "structure_tolerance": 0.2,
+    "accessory_intensity": 0.25,
+    "realism_cap": 0.9
+  },
+  "creator": {
+    "preferred_colors": ["red", "purple", "cobalt", "multi"],
+    "preferred_materials": ["silk", "textured knit", "pattern mixes"],
+    "preferred_silhouettes": ["distinctive", "unexpected", "creative tailored"],
+    "preferred_formality": ["casual", "smart_casual", "creative_formal"],
+    "pattern_tolerance": 0.9,
+    "structure_tolerance": 0.55,
+    "accessory_intensity": 0.75,
+    "realism_cap": 0.72
+  }
+}
+
+
