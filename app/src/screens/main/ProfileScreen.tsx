@@ -21,9 +21,11 @@ import {
   separators,
 } from '@/src/theme/colors';
 import { typography } from '@/src/theme/typography';
+import { useTabContentBottomPadding } from '@/app/(main)/_layout';
 
 export const ProfileScreen: React.FC = () => {
   const colorScheme = useColorScheme() ?? 'light';
+  const tabBottomPadding = useTabContentBottomPadding();
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
   const session = useAuthStore((s) => s.session);
@@ -69,7 +71,7 @@ export const ProfileScreen: React.FC = () => {
 
       <ScrollView
         style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: tabBottomPadding }]}
         showsVerticalScrollIndicator={false}
       >
         {/* Avatar + Name Section */}

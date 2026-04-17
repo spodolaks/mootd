@@ -27,6 +27,7 @@ import { wardrobeRepository } from '@/src/data/repositories';
 import { useWardrobeStore, useDetectionJobStore, useUIStore } from '@/src/store';
 import type { DetectionStep } from '@/src/store/wardrobeStore';
 import type { ClothingDetectionResult, WardrobeItem } from '@/src/domain';
+import { useTabContentBottomPadding, PILL_GUTTER } from '@/app/(main)/_layout';
 
 const DARK_GREY = '#3A3A3C';
 
@@ -83,6 +84,7 @@ const toDetectionSteps = (result: ClothingDetectionResult): DetectionStep[] =>
 
 export const WardrobeScreen: React.FC = () => {
   const colorScheme = useColorScheme() ?? 'light';
+  const tabBottomPadding = useTabContentBottomPadding();
   const router = useRouter();
   const { initializeFlow } = useWardrobeStore();
   const startJob = useDetectionJobStore((s) => s.startJob);
@@ -355,17 +357,17 @@ export const WardrobeScreen: React.FC = () => {
         onEndReached={() => { void loadMore(); }}
         onEndReachedThreshold={0.5}
         style={styles.gridContainer}
-        contentContainerStyle={styles.gridContent}
+        contentContainerStyle={[styles.gridContent, { paddingBottom: tabBottomPadding }]}
         columnWrapperStyle={styles.gridRow}
         showsVerticalScrollIndicator={false}
       />
 
-      {/* FAB Button */}
+      {/* FAB Button — lifted above the floating pill so it doesn't overlap. */}
       <GradientIconButton
         icon="plus"
         size="lg"
         onPress={handleAddPress}
-        style={styles.fab}
+        style={[styles.fab, { bottom: PILL_GUTTER + 8 }]}
       />
 
       {/* Add Item Modal */}

@@ -13,6 +13,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { moodBoardRepository, wardrobeRepository } from '@/src/data/repositories';
 import type { OutfitItem, SavedMoodBoard, WardrobeItem } from '@/src/domain';
 import { getApiBaseURL } from '@/src/data/api/client';
+import { useTabContentBottomPadding } from '@/app/(main)/_layout';
 
 const toAbsoluteUrl = (url: string): string => {
   if (!url || url.startsWith('http')) return url;
@@ -21,6 +22,7 @@ const toAbsoluteUrl = (url: string): string => {
 
 export const CalendarScreen: React.FC = () => {
   const colorScheme = useColorScheme() ?? 'light';
+  const tabBottomPadding = useTabContentBottomPadding();
   const [selectedDate, setSelectedDate] = useState<string>(
     new Date().toISOString().split('T')[0],
   );
@@ -106,7 +108,7 @@ export const CalendarScreen: React.FC = () => {
 
       <ScrollView
         style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: tabBottomPadding }]}
         showsVerticalScrollIndicator={false}
       >
         {/* Calendar */}

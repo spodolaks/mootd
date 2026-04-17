@@ -29,6 +29,7 @@ import { classifyZone } from '@/src/components/moodboard/Collage';
 import { OutfitCard } from '@/src/components/moodboard/OutfitCard';
 import { SavedBoardView } from '@/src/components/moodboard/SavedBoardView';
 import { SCREEN_WIDTH, CONTAINER_PADDING } from '@/src/components/moodboard/constants';
+import { useTabContentBottomPadding } from '@/app/(main)/_layout';
 
 type ScreenState = 'loading' | 'empty' | 'generating' | 'choosing' | 'saved';
 
@@ -52,6 +53,7 @@ export const MoodBoardScreen: React.FC = () => {
   const [swapTarget, setSwapTarget] = useState<{ outfitIndex: number; itemId: string } | null>(null);
 
   const { weather, loading: weatherLoading, refresh: refreshWeather } = useWeather();
+  const tabBottomPadding = useTabContentBottomPadding();
 
   const backgroundColor = backgrounds.primary[colorScheme];
   const textColor = labels.primary[colorScheme];
@@ -273,7 +275,7 @@ export const MoodBoardScreen: React.FC = () => {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor }]} edges={['top']}>
-      <View style={styles.content}>
+      <View style={[styles.content, { paddingBottom: tabBottomPadding }]}>
         {weatherLoading && !weather ? (
           <View style={styles.weatherLoading}>
             <ActivityIndicator size="small" color={textColor} />
