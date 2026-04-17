@@ -30,6 +30,21 @@ const formatWeatherChip = (w?: OutfitWeather): string | null => {
   return [icon, temp, cond].filter(Boolean).join(' ');
 };
 
+/** Secondary weather detail — rendered as a small caption under the chip
+ *  row so the top of the screen doesn't need a dedicated weather card. */
+export interface WeatherDetail {
+  location: string;
+  highTemperature: number;
+  lowTemperature: number;
+  unit: 'c' | 'f';
+}
+
+const formatWeatherDetail = (d?: WeatherDetail): string | null => {
+  if (!d) return null;
+  const u = d.unit.toUpperCase();
+  return `${d.location} · H${Math.round(d.highTemperature)}°${u} / L${Math.round(d.lowTemperature)}°${u}`;
+};
+
 export interface OutfitCardProps {
   outfit: Outfit;
   index: number;
@@ -40,10 +55,13 @@ export interface OutfitCardProps {
   isSaving: boolean;
   colorScheme: 'light' | 'dark';
   cardHeight: number;
+  /** Optional location + high/low temp, surfaced as a caption under the
+   *  chip row so the top of the screen can drop its dedicated weather card. */
+  weatherDetail?: WeatherDetail;
 }
 
 export const OutfitCard: React.FC<OutfitCardProps> = ({
-  outfit, index, total, itemMap, onSelect, onItemPress, isSaving, colorScheme, cardHeight,
+  outfit, index, total, itemMap, onSelect, onItemPress, isSaving, colorScheme, cardHeight, weatherDetail,
 }) => {
   const cardBg = backgrounds.secondary[colorScheme];
   const textColor = labels.primary[colorScheme];
@@ -72,6 +90,11 @@ export const OutfitCard: React.FC<OutfitCardProps> = ({
               </View>
             )}
           </View>
+          {formatWeatherDetail(weatherDetail) && (
+            <Text style={[styles.weatherDetail, { color: tertiaryColor }]} numberOfLines={1}>
+              {formatWeatherDetail(weatherDetail)}
+            </Text>
+          )}
           {outfit.palette && outfit.palette.length > 0 && (
             <View style={styles.paletteStrip}>
               {outfit.palette.slice(0, 4).map((hex, i) => (
@@ -155,6 +178,10 @@ const styles = StyleSheet.create({
   },
   weatherChipText: {
     ...typography.caption2.regular,
+  },
+  weatherDetail: {
+    ...typography.caption1.regular,
+    marginTop: 2,
   },
   paletteStrip: {
     flexDirection: 'row',

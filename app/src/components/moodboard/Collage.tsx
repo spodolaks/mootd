@@ -273,9 +273,14 @@ export interface CollageProps {
   panelUrl?: string;
   /** Backend-resolved URL for the ambient background. Same fallback rule. */
   backgroundUrl?: string;
+  /** When true, the collage fills its parent's remaining vertical space via
+   *  flex instead of its default 3:4 portrait aspect ratio. Use this when
+   *  the collage is the only focal content on the screen (saved board view)
+   *  so the image doesn't leave empty space below it. */
+  fill?: boolean;
 }
 
-export const Collage: React.FC<CollageProps> = ({ itemIds, itemMap, snapshots, layoutRoles, onItemPress, colorScheme, panelUrl, backgroundUrl }) => {
+export const Collage: React.FC<CollageProps> = ({ itemIds, itemMap, snapshots, layoutRoles, onItemPress, colorScheme, panelUrl, backgroundUrl, fill }) => {
   // Build a snapshot lookup for fallback when items have been deleted.
   const snapshotMap = useMemo(() => {
     const map = new Map<string, OutfitItem>();
@@ -326,7 +331,7 @@ export const Collage: React.FC<CollageProps> = ({ itemIds, itemMap, snapshots, l
   const iconFallbackColor = labels.quaternary[colorScheme];
 
   return (
-    <View style={[styles.collage, { backgroundColor: collageBg }]}>
+    <View style={[fill ? styles.collageFill : styles.collage, { backgroundColor: collageBg }]}>
       {/* Environment behind the panel. Fully opaque; the visible strip
           around the panel is the 3.5% inset applied below. The backend's
           LLM-chosen background URL takes priority; falls back to a bundled
@@ -392,6 +397,16 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     flexShrink: 1,
     minHeight: 0,
+  },
+  // Fill variant — grows to consume all remaining vertical space in a flex
+  // column parent. Item positions are percentages so they scale with the
+  // larger surface without layout changes.
+  collageFill: {
+    flex: 1,
+    width: '100%',
+    alignSelf: 'center',
+    borderRadius: 16,
+    overflow: 'hidden',
   },
   // Clothing item image — fills its positioned container.
   collageItem: {

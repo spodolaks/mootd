@@ -2,7 +2,6 @@ import {
   GradientButton,
   Icon,
   Modal,
-  WeatherCard,
 } from '@/src/components';
 import { useColorScheme, useWeather } from '@/src/hooks';
 import { backgrounds, fills, labels } from '@/src/theme/colors';
@@ -52,7 +51,7 @@ export const MoodBoardScreen: React.FC = () => {
   // Swap item modal state
   const [swapTarget, setSwapTarget] = useState<{ outfitIndex: number; itemId: string } | null>(null);
 
-  const { weather, loading: weatherLoading, refresh: refreshWeather } = useWeather();
+  const { weather } = useWeather();
   const tabBottomPadding = useTabContentBottomPadding();
 
   const backgroundColor = backgrounds.primary[colorScheme];
@@ -239,6 +238,16 @@ export const MoodBoardScreen: React.FC = () => {
                     isSaving={isSaving}
                     colorScheme={colorScheme}
                     cardHeight={cardHeight}
+                    weatherDetail={
+                      weather
+                        ? {
+                            location: weather.location,
+                            highTemperature: weather.highTemperature,
+                            lowTemperature: weather.lowTemperature,
+                            unit: weather.unit,
+                          }
+                        : undefined
+                    }
                   />
                 )}
               />
@@ -276,23 +285,6 @@ export const MoodBoardScreen: React.FC = () => {
   return (
     <SafeAreaView style={[styles.container, { backgroundColor }]} edges={['top']}>
       <View style={[styles.content, { paddingBottom: tabBottomPadding }]}>
-        {weatherLoading && !weather ? (
-          <View style={styles.weatherLoading}>
-            <ActivityIndicator size="small" color={textColor} />
-          </View>
-        ) : weather ? (
-          <WeatherCard
-            temperature={weather.temperature}
-            unit={weather.unit}
-            condition={weather.condition}
-            icon={weather.icon}
-            lowTemperature={weather.lowTemperature}
-            highTemperature={weather.highTemperature}
-            location={weather.location}
-            onLocationPress={refreshWeather}
-          />
-        ) : null}
-
         <View style={styles.mainContent}>
           {renderContent()}
         </View>

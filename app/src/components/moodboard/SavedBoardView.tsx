@@ -2,7 +2,7 @@ import { backgrounds, labels } from '@/src/theme/colors';
 import { typography } from '@/src/theme/typography';
 import type { SavedMoodBoard, WardrobeItem } from '@/src/domain';
 import React from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Collage } from '@/src/components/moodboard/Collage';
 import { ArchetypeBadges } from '@/src/components/moodboard/ArchetypeBadges';
 import { MAX_CARD_WIDTH } from '@/src/components/moodboard/constants';
@@ -20,12 +20,11 @@ export const SavedBoardView: React.FC<SavedBoardViewProps> = ({ board, itemMap, 
   const cardBg = backgrounds.secondary[colorScheme];
   const today = new Date().toISOString().split('T')[0];
 
+  // Flex column layout (not ScrollView) so the Collage can fill the entire
+  // height remaining between the header and footer. Header + footer are
+  // intrinsic-height; the collage grows to absorb the rest of the card.
   return (
-    <ScrollView
-      style={[styles.savedCard, { backgroundColor: cardBg }]}
-      contentContainerStyle={styles.savedCardContent}
-      showsVerticalScrollIndicator={false}
-    >
+    <View style={[styles.savedCard, { backgroundColor: cardBg }]}>
       <View style={styles.savedHeader}>
         <Text style={[styles.savedDate, { color: secondaryColor }]}>
           {board.date === today ? "TODAY'S OUTFIT" : board.date}
@@ -41,6 +40,7 @@ export const SavedBoardView: React.FC<SavedBoardViewProps> = ({ board, itemMap, 
         colorScheme={colorScheme}
         panelUrl={board.outfit.panelUrl}
         backgroundUrl={board.outfit.backgroundUrl}
+        fill
       />
       <View style={styles.savedFooter}>
         <Text style={[styles.savedDescription, { color: secondaryColor }]} numberOfLines={2}>
@@ -60,7 +60,7 @@ export const SavedBoardView: React.FC<SavedBoardViewProps> = ({ board, itemMap, 
           <Text style={[styles.regenerateText, { color: secondaryColor }]}>Generate new outfit</Text>
         </Pressable>
       </View>
-    </ScrollView>
+    </View>
   );
 };
 
@@ -72,8 +72,6 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: MAX_CARD_WIDTH,
     alignSelf: 'center',
-  },
-  savedCardContent: {
     gap: 10,
   },
   savedHeader: {
