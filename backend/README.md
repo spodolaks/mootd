@@ -257,11 +257,11 @@ Permanently removes an item. Only the authenticated user's items can be deleted.
 | `MONGO_CONNECT_TIMEOUT` | `10s` | |
 | `SHUTDOWN_TIMEOUT` | `10s` | Graceful shutdown grace period |
 | `JWT_SECRET` | `dev-secret-change-in-production-min-32-chars!!` | **Must be changed in production** (min 32 chars) |
-| `CORS_ALLOWED_ORIGINS` | `*` | Set to specific origins in production |
+| `CORS_ALLOWED_ORIGINS` | `*` | Comma-separated list of allowed origins. **Before deploying to production, set this to an explicit list (e.g. `https://app.example.com,https://admin.example.com`).** When `ENVIRONMENT=production`, the server refuses to start if this is `*` or empty. |
 | `DETECTION_API_BASE_URL` | `http://35.188.207.123:8080` | External clothing detection service |
 | `DETECTION_API_KEY` | *(required)* | API key for detection service — set in `.env` |
 
-The server warns on startup if `JWT_SECRET` or `DETECTION_API_KEY` are unset.
+The server warns on startup if `JWT_SECRET` or `DETECTION_API_KEY` are unset. When `ENVIRONMENT=production`, the server also refuses to start if `JWT_SECRET` is unset or `CORS_ALLOWED_ORIGINS` is left as the wildcard default.
 
 ## Running Locally
 

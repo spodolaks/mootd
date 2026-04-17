@@ -181,7 +181,7 @@ Use `response.WriteJSON(w, status, payload)` for all JSON responses. For decodin
 |----------|---------|
 | `JWT_SECRET` | HMAC signing key — **must change in production** |
 | `DETECTION_API_KEY` | External clothing detection service API key |
-| `CORS_ALLOWED_ORIGINS` | Comma-separated allowed origins (default: `*`) |
+| `CORS_ALLOWED_ORIGINS` | Comma-separated allowed origins (default: `*`). **Must be set to an explicit origin list in production** — the server refuses to start when `ENVIRONMENT=production` and the list is `*` or empty. |
 | `MONGO_URI` | MongoDB connection string |
 | `DETECTION_API_BASE_URL` | External detection service base URL |
 | `OUTFIT_PROVIDER` | Outfit generation backend: `ollama`, `claude`, or `openai` |
