@@ -1,5 +1,4 @@
 import { backgrounds, button, fills, labels } from '@/src/theme/colors';
-import { radius } from '@/src/theme/radius';
 import { typography } from '@/src/theme/typography';
 import type { Outfit, OutfitWeather, WardrobeItem } from '@/src/domain';
 import React from 'react';
@@ -18,18 +17,6 @@ const CONDITION_ICON: Record<string, string> = {
   wind: '≈', windy: '≈',
 };
 
-const formatWeatherChip = (w?: OutfitWeather): string | null => {
-  if (!w) return null;
-  const { temperature, condition, unit } = w;
-  if (!temperature && !condition) return null;
-  const icon = condition
-    ? CONDITION_ICON[condition.toLowerCase()] ?? CONDITION_ICON[condition.toLowerCase().split(' ')[0]] ?? ''
-    : '';
-  const temp = temperature ? `${temperature}°${unit ?? ''}`.trim() : '';
-  const cond = condition ?? '';
-  return [icon, temp, cond].filter(Boolean).join(' ');
-};
-
 /** Secondary weather detail — rendered as a small caption under the chip
  *  row so the top of the screen doesn't need a dedicated weather card. */
 export interface WeatherDetail {
@@ -39,10 +26,39 @@ export interface WeatherDetail {
   unit: 'c' | 'f';
 }
 
-const formatWeatherDetail = (d?: WeatherDetail): string | null => {
-  if (!d) return null;
-  const u = d.unit.toUpperCase();
-  return `${d.location} · H${Math.round(d.highTemperature)}°${u} / L${Math.round(d.lowTemperature)}°${u}`;
+/**
+ * Builds the tracking-caps eyebrow line combining the LOOK counter with
+ * condensed weather context. Folding all meta into a single line is the
+ * main noise-reduction trick — saves two rows vs. separate weather chip +
+ * location/H-L caption, and reads as editorial rather than data-dense.
+ *
+ * Example: `LOOK 1 / 3  ·  NEW YORK  ·  19° ☁  H26 / L15`
+ */
+const buildEyebrow = (
+  index: number,
+  total: number,
+  detail?: WeatherDetail,
+  weather?: OutfitWeather,
+): string => {
+  const parts: string[] = [`LOOK ${index + 1} / ${total}`];
+  if (detail?.location) parts.push(detail.location.toUpperCase());
+
+  const temp = weather?.temperature ? `${weather.temperature}°` : '';
+  const icon = weather?.condition
+    ? CONDITION_ICON[weather.condition.toLowerCase()] ??
+      CONDITION_ICON[weather.condition.toLowerCase().split(' ')[0]] ??
+      ''
+    : '';
+  const current = [temp, icon].filter(Boolean).join(' ');
+  if (current) parts.push(current);
+
+  if (detail) {
+    const u = detail.unit.toUpperCase();
+    parts.push(
+      `H${Math.round(detail.highTemperature)}°${u} / L${Math.round(detail.lowTemperature)}°${u}`,
+    );
+  }
+  return parts.join('   ·   ');
 };
 
 export interface OutfitCardProps {
@@ -73,38 +89,32 @@ export const OutfitCard: React.FC<OutfitCardProps> = ({
     <View style={[styles.card, { width: SCREEN_WIDTH, height: cardHeight || undefined }]}>
       <View style={[styles.cardInner, { backgroundColor: cardBg }]}>
         <View style={styles.cardHeader}>
-          {/* Editorial eyebrow — uppercase mood label + counter, all caps */}
-          <Text style={[styles.cardEyebrow, { color: tertiaryColor }]}>
-            LOOK   ·   {index + 1} / {total}
+          {/* Editorial eyebrow — counter + weather/location condensed into a
+              single tracking-caps line. All metadata that used to live on
+              four separate rows is folded here so the title + image get the
+              screen real estate. */}
+          <Text style={[styles.cardEyebrow, { color: tertiaryColor }]} numberOfLines={1}>
+            {buildEyebrow(index, total, weatherDetail, outfit.weather)}
           </Text>
           <Text style={[styles.cardName, { color: textColor }]} numberOfLines={1}>
             {outfit.name}
           </Text>
+          {/* Archetype names + palette dots share one compact row — one
+              visual signal for style, one for colour. No percentages; the
+              dual-chip shape already communicates a blend. */}
           <View style={styles.chipRow}>
             <ArchetypeBadges scores={outfit.archetypeScores} colorScheme={colorScheme} />
-            {formatWeatherChip(outfit.weather) && (
-              <View style={[styles.weatherChip, { backgroundColor: fills.tertiary[colorScheme] }]}>
-                <Text style={[styles.weatherChipText, { color: labels.secondary[colorScheme] }]}>
-                  {formatWeatherChip(outfit.weather)}
-                </Text>
+            {outfit.palette && outfit.palette.length > 0 && (
+              <View style={styles.paletteStripInline}>
+                {outfit.palette.slice(0, 4).map((hex, i) => (
+                  <View
+                    key={`${hex}-${i}`}
+                    style={[styles.paletteDot, { backgroundColor: hex, borderColor: fills.tertiary[colorScheme] }]}
+                  />
+                ))}
               </View>
             )}
           </View>
-          {formatWeatherDetail(weatherDetail) && (
-            <Text style={[styles.weatherDetail, { color: tertiaryColor }]} numberOfLines={1}>
-              {formatWeatherDetail(weatherDetail)}
-            </Text>
-          )}
-          {outfit.palette && outfit.palette.length > 0 && (
-            <View style={styles.paletteStrip}>
-              {outfit.palette.slice(0, 4).map((hex, i) => (
-                <View
-                  key={`${hex}-${i}`}
-                  style={[styles.paletteChip, { backgroundColor: hex, borderColor: fills.tertiary[colorScheme] }]}
-                />
-              ))}
-            </View>
-          )}
         </View>
         <Collage
           itemIds={outfit.items}
@@ -171,27 +181,19 @@ const styles = StyleSheet.create({
     gap: 6,
     alignItems: 'center',
   },
-  weatherChip: {
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: radius.full,
-  },
-  weatherChipText: {
-    ...typography.caption2.regular,
-  },
-  weatherDetail: {
-    ...typography.caption1.regular,
-    marginTop: 2,
-  },
-  paletteStrip: {
+  // Small inline colour dots that sit next to the archetype chips on the
+  // same row. Smaller than the old standalone palette strip so they read
+  // as an accent, not a separate UI element.
+  paletteStripInline: {
     flexDirection: 'row',
+    alignItems: 'center',
     gap: 4,
-    marginTop: 2,
+    marginLeft: 4,
   },
-  paletteChip: {
-    width: 18,
-    height: 18,
-    borderRadius: 5,
+  paletteDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
     borderWidth: StyleSheet.hairlineWidth,
   },
   cardEyebrow: {
