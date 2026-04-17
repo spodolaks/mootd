@@ -1,0 +1,60 @@
+# Dev-environment deploy workflow.
+#
+# Triggered manually (workflow_dispatch) until you're confident in the flow;
+# switch to `push: branches: [main]` once it's proven. SSHes into the dev
+# server, pulls the latest GHCR image, and restarts the backend container
+# via docker compose. Mongo + Redis stay running across deploys.
+#
+# Required repo secrets (Settings → Secrets and variables → Actions):
+#   DEV_SSH_HOST       — e.g. dev.mootd.app or a bare IP
+#   DEV_SSH_USER       — e.g. deploy
+#   DEV_SSH_KEY        — private key with write access on the server
+#   DEV_SSH_PORT       — (optional) defaults to 22
+#
+# On the server you must have, once, set up:
+#   - Docker + docker-compose-plugin
+#   - A checkout of this repo at $DEPLOY_DIR (defaults to /srv/mootd)
+#   - An .env file at $DEPLOY_DIR/.env with production secrets
+#   - `docker login ghcr.io -u <user> -p <PAT>` (if image is private)
+name: Deploy to dev
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: Backend image tag to deploy (defaults to latest)
+        required: false
+        default: latest
+
+env:
+  DEPLOY_DIR: /srv/mootd
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Sanity-check required secrets
+        run: |
+          : "${{ secrets.DEV_SSH_HOST?Missing DEV_SSH_HOST secret }}"
+          : "${{ secrets.DEV_SSH_USER?Missing DEV_SSH_USER secret }}"
+          : "${{ secrets.DEV_SSH_KEY?Missing DEV_SSH_KEY secret }}"
+
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.DEV_SSH_HOST }}
+          username: ${{ secrets.DEV_SSH_USER }}
+          key: ${{ secrets.DEV_SSH_KEY }}
+          port: ${{ secrets.DEV_SSH_PORT || 22 }}
+          script: |
+            set -euo pipefail
+            cd "${{ env.DEPLOY_DIR }}"
+            git fetch --prune origin
+            git reset --hard origin/main
+            export BACKEND_IMAGE=ghcr.io/${{ github.repository }}-backend:${{ github.event.inputs.image_tag }}
+            echo "Deploying image: $BACKEND_IMAGE"
+            docker pull "$BACKEND_IMAGE"
+            docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --no-build --pull=never backend
+            docker compose ps

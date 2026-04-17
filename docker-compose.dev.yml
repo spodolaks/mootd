@@ -1,0 +1,14 @@
+# Dev-server compose overlay. Layered on top of docker-compose.yml via:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+#
+# Replaces the `build:` directive with a pre-built image pulled from GHCR so
+# the server never compiles Go. Set BACKEND_IMAGE before invoking compose:
+#
+#   export BACKEND_IMAGE=ghcr.io/<owner>/<repo>-backend:latest
+services:
+  backend:
+    image: ${BACKEND_IMAGE:-ghcr.io/mootd-ai/mootd-backend:latest}
+    build: null
+    restart: unless-stopped
+    pull_policy: always

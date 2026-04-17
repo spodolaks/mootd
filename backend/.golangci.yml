@@ -1,0 +1,32 @@
+# golangci-lint config. Kept intentionally close to defaults so CI is not
+# overly noisy on the dev-stage project — tighten as the codebase matures.
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  disable-all: true
+  enable:
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - misspell
+    - revive
+
+linters-settings:
+  revive:
+    rules:
+      - name: exported
+        disabled: true # too noisy on early-stage code
+
+issues:
+  exclude-dirs:
+    - cmd/seed-surfaces # one-shot ops script, lint-exempt
+  exclude-rules:
+    # Test helpers often ignore errors deliberately.
+    - path: _test\.go
+      linters:
+        - errcheck
