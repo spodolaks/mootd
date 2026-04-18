@@ -76,12 +76,30 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 	mux := http.NewServeMux()
 	authMiddleware := middleware.Auth(a.JWTSecret)
 
+	// Per-route rate limiters. Only wired when Redis is available — the global
+	// in-memory fallback already covers the "service under flood" case at a
+	// coarser granularity, and we don't want two independent counters drifting
+	// across instances in a multi-pod deploy.
+	var authLimit middleware.Middleware
+	var outfitBurstLimit middleware.Middleware
+	var outfitDailyLimit middleware.Middleware
+	if redisClient != nil {
+		// 20/min per IP on unauth'd auth endpoints blunts refresh-token spraying
+		// and credential enumeration without annoying a real user.
+		authLimit = middleware.RedisRateLimitScoped(redisClient, "auth", 20, 1*time.Minute)
+		// 5/min per user contains accidental spam from a retry loop; 50/day is
+		// the real cost ceiling against a determined caller hitting the LLM
+		// provider.
+		outfitBurstLimit = middleware.RedisRateLimitScoped(redisClient, "outfit:generate:burst", 5, 1*time.Minute)
+		outfitDailyLimit = middleware.RedisRateLimitScoped(redisClient, "outfit:generate:daily", 50, 24*time.Hour)
+	}
+
 	// Mock-login is only registered when explicitly opted-in via config. Any
 	// production deploy that forgets to set ENVIRONMENT stays safe — the default
 	// is off.
 	enableMockLogin := a.EnableMockLogin && a.Environment != "production"
 	authRepo := auth.NewMongoRepository(a.MongoClient, a.MongoDB)
-	auth.NewHandler(a.Logger, authRepo, a.JWTSecret).RegisterRoutes(mux, enableMockLogin)
+	auth.NewHandler(a.Logger, authRepo, a.JWTSecret).RegisterRoutes(mux, enableMockLogin, authLimit)
 
 	userRepo := user.NewMongoRepository(a.MongoClient, a.MongoDB)
 	health.NewHandler(a.Logger, a.MongoClient, a.MongoDB).RegisterRoutes(mux)
@@ -209,7 +227,7 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 		Service:   outfitService,
 		JobStore:  jobStore,
 		WorkerCtx: workerCtx,
-	}).RegisterRoutes(mux, authMiddleware)
+	}).RegisterRoutes(mux, authMiddleware, outfitBurstLimit, outfitDailyLimit)
 
 	genericRepo := generic.NewMongoRepository(a.MongoClient, a.MongoDB)
 	generic.NewHandler(a.Logger, genericRepo, wardrobeRepo, profileProvider).RegisterRoutes(mux, authMiddleware)
@@ -223,9 +241,21 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 		rateLimiter, rateLimitCloser = middleware.RateLimit(100, 1*time.Minute)
 	}
 
-	handler := middleware.Logging(a.Logger)(
-		middleware.CORS(a.CORSAllowedOrigins)(
-			rateLimiter(mux),
+	// Middleware chain (outermost → innermost):
+	//   RequestID → Recover → Logging → CORS → global rate limit → mux
+	//
+	// RequestID is outermost so panics, log lines, and the response header all
+	// carry the same correlation ID. Recover sits just inside so it can log
+	// with that ID before any handler state can be touched. Logging is inside
+	// Recover so it sees the real status code (including 500s written by the
+	// recovery handler).
+	handler := middleware.RequestID(
+		middleware.Recover(a.Logger)(
+			middleware.Logging(a.Logger)(
+				middleware.CORS(a.CORSAllowedOrigins)(
+					rateLimiter(mux),
+				),
+			),
 		),
 	)
 	return handler, wardrobeRepo, moodboardRepo, rateLimitCloser

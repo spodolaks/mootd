@@ -4,26 +4,30 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
 )
 
 // RedisRateLimit returns middleware that limits requests per user (or per IP for
-// unauthenticated requests) using Redis INCR + EXPIRE.
+// unauthenticated requests) using Redis INCR + EXPIRE under the "global" scope.
+// Kept for backwards compatibility; new code should prefer RedisRateLimitScoped.
 func RedisRateLimit(client *redis.Client, maxRequests int, window time.Duration) func(http.Handler) http.Handler {
+	return RedisRateLimitScoped(client, "global", maxRequests, window)
+}
+
+// RedisRateLimitScoped is like RedisRateLimit but isolates the counter under the
+// given scope so multiple limiters can coexist (e.g. a global 300/min per user
+// plus an outfit-generate 5/min per user). The scope is a short, stable
+// identifier — use "outfit:generate", "auth", etc.
+func RedisRateLimitScoped(client *redis.Client, scope string, maxRequests int, window time.Duration) func(http.Handler) http.Handler {
+	// Cache window seconds as string to save an alloc per request.
+	windowSeconds := int(window.Seconds())
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Prefer user ID from context (set by auth middleware), fall back to IP.
-			key := r.RemoteAddr
-			if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
-				key = forwarded
-			}
-			if userID, ok := UserIDFromContext(r.Context()); ok {
-				key = "user:" + userID
-			}
-
-			redisKey := fmt.Sprintf("ratelimit:%s", key)
+			key := rateLimitKey(r)
+			redisKey := fmt.Sprintf("ratelimit:%s:%s", scope, key)
 			ctx := context.Background()
 
 			count, err := client.Incr(ctx, redisKey).Result()
@@ -37,6 +41,8 @@ func RedisRateLimit(client *redis.Client, maxRequests int, window time.Duration)
 			}
 
 			if count > int64(maxRequests) {
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("Retry-After", fmt.Sprintf("%d", windowSeconds))
 				http.Error(w, `{"error":"rate limit exceeded"}`, http.StatusTooManyRequests)
 				return
 			}
@@ -44,4 +50,22 @@ func RedisRateLimit(client *redis.Client, maxRequests int, window time.Duration)
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// rateLimitKey picks the most specific identifier available for the request:
+// authenticated user ID when present, else the first X-Forwarded-For hop, else
+// the remote address. Used by both per-scope and global Redis limiters so the
+// identity rules are consistent.
+func rateLimitKey(r *http.Request) string {
+	if userID, ok := UserIDFromContext(r.Context()); ok && userID != "" {
+		return "user:" + userID
+	}
+	if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
+		// X-Forwarded-For is a comma-separated chain; take the leftmost (original client).
+		if i := strings.Index(forwarded, ","); i >= 0 {
+			return "ip:" + strings.TrimSpace(forwarded[:i])
+		}
+		return "ip:" + strings.TrimSpace(forwarded)
+	}
+	return "ip:" + r.RemoteAddr
 }

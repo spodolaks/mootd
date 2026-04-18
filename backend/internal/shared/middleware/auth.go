@@ -14,6 +14,9 @@ type contextKey string
 // UserIDKey is the context key under which the authenticated user's ID is stored.
 const UserIDKey contextKey = "userID"
 
+// Middleware is the standard net/http middleware signature used across the app.
+type Middleware = func(http.Handler) http.Handler
+
 // Auth returns a middleware that validates a Bearer JWT from the Authorization header.
 // On success it stores the user ID in the request context; on failure it responds 401.
 func Auth(jwtSecret string) func(http.Handler) http.Handler {
