@@ -10,4 +10,5 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, enableMockLogin bool) {
 	}
 	mux.HandleFunc("/v1/auth/google", h.Google)
 	mux.HandleFunc("/v1/auth/refresh", h.Refresh)
+	mux.HandleFunc("/v1/auth/logout", h.Logout)
 }

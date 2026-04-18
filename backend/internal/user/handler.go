@@ -12,18 +12,25 @@ import (
 	"mootd/backend/internal/shared/response"
 )
 
+// CascadeFn deletes every piece of data owned by userID across the domains the
+// user package doesn't import directly (wardrobe, moodboard, etc). It is wired
+// in app.go so that user stays free of cross-domain imports.
+type CascadeFn func(ctx context.Context, userID string) error
+
 // Handler handles user profile endpoints.
 type Handler struct {
-	logger *log.Logger
-	repo   Repository
+	logger  *log.Logger
+	repo    Repository
+	cascade CascadeFn
 }
 
-// NewHandler creates a new user Handler.
-func NewHandler(logger *log.Logger, repo Repository) *Handler {
-	return &Handler{logger: logger, repo: repo}
+// NewHandler creates a new user Handler. cascade may be nil in contexts where
+// account deletion is not wired; the DELETE endpoint will then respond 503.
+func NewHandler(logger *log.Logger, repo Repository, cascade CascadeFn) *Handler {
+	return &Handler{logger: logger, repo: repo, cascade: cascade}
 }
 
-// Profile routes GET and PUT requests to the appropriate sub-handler.
+// Profile routes GET, PUT, and DELETE requests to the appropriate sub-handler.
 // The authenticated user's ID is resolved from the JWT via Auth middleware.
 func (h *Handler) Profile(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
@@ -31,6 +38,8 @@ func (h *Handler) Profile(w http.ResponseWriter, r *http.Request) {
 		h.getProfile(w, r)
 	case http.MethodPut:
 		h.updateProfile(w, r)
+	case http.MethodDelete:
+		h.deleteAccount(w, r)
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
@@ -103,4 +112,43 @@ func (h *Handler) updateProfile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response.WriteJSON(w, http.StatusOK, updated)
+}
+
+// deleteAccount handles DELETE /v1/user/profile.
+//
+// Erases all data owned by the authenticated user: wardrobe items and their
+// images, moodboards, and the user document itself. The cascade is orchestrated
+// by a CascadeFn wired at app startup, so this handler stays free of
+// cross-domain imports.
+//
+// Response: 204 No Content on success
+// Response: 401 — missing/invalid JWT
+// Response: 500 — cascade or deletion failure
+// Response: 503 — cascade not configured
+func (h *Handler) deleteAccount(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.UserIDFromContext(r.Context())
+	if !ok || userID == "" {
+		response.WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+
+	if h.cascade == nil {
+		h.logger.Printf("delete account: cascade not configured")
+		response.WriteJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "account deletion unavailable"})
+		return
+	}
+
+	// Generous timeout — GridFS cleanup on a large wardrobe takes time, and a
+	// partial deletion is worse than a slow one.
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+
+	if err := h.cascade(ctx, userID); err != nil {
+		h.logger.Printf("delete account: cascade for user %s failed: %v", userID, err)
+		response.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to delete account"})
+		return
+	}
+
+	h.logger.Printf("delete account: user %s erased", userID)
+	w.WriteHeader(http.StatusNoContent)
 }

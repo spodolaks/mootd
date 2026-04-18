@@ -49,6 +49,11 @@ type App struct {
 
 	// Redis URL for caching, rate limiting, and async jobs.
 	RedisURL string
+
+	// EnableMockLogin gates the /v1/auth/mock-login development endpoint.
+	// Fail-closed: must be explicitly true in config *and* Environment must not
+	// be "production".
+	EnableMockLogin bool
 }
 
 // NewHTTPHandler wires up all domain routes and wraps the mux with shared middleware.
@@ -71,12 +76,14 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 	mux := http.NewServeMux()
 	authMiddleware := middleware.Auth(a.JWTSecret)
 
-	enableMockLogin := a.Environment != "production"
+	// Mock-login is only registered when explicitly opted-in via config. Any
+	// production deploy that forgets to set ENVIRONMENT stays safe — the default
+	// is off.
+	enableMockLogin := a.EnableMockLogin && a.Environment != "production"
 	authRepo := auth.NewMongoRepository(a.MongoClient, a.MongoDB)
 	auth.NewHandler(a.Logger, authRepo, a.JWTSecret).RegisterRoutes(mux, enableMockLogin)
 
 	userRepo := user.NewMongoRepository(a.MongoClient, a.MongoDB)
-	user.NewHandler(a.Logger, userRepo).RegisterRoutes(mux, authMiddleware)
 	health.NewHandler(a.Logger, a.MongoClient, a.MongoDB).RegisterRoutes(mux)
 
 	bgRemover := wardrobe.NewBackgroundRemover(a.BgRemoverBaseURL)
@@ -111,6 +118,25 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 
 	moodboardRepo := moodboard.NewMongoRepository(a.MongoClient, a.MongoDB)
 	moodboard.NewHandler(a.Logger, moodboardRepo, wardrobeRepo, profileUpdater).RegisterRoutes(mux, authMiddleware)
+
+	// Wire the user-deletion cascade now that we have all the owning repos.
+	// Order: images + items → moodboards → user doc. The user doc is deleted
+	// last so that if any earlier step fails, the user can still re-authenticate
+	// and retry; deleting the user first would strand orphaned data.
+	userCascade := user.CascadeFn(func(ctx context.Context, userID string) error {
+		if n, err := wardrobeRepo.DeleteAllByUser(ctx, userID); err != nil {
+			return err
+		} else if n > 0 {
+			a.Logger.Printf("delete account: removed %d wardrobe items for user %s", n, userID)
+		}
+		if n, err := moodboardRepo.DeleteAllByUser(ctx, userID); err != nil {
+			return err
+		} else if n > 0 {
+			a.Logger.Printf("delete account: removed %d moodboards for user %s", n, userID)
+		}
+		return userRepo.DeleteByID(ctx, userID)
+	})
+	user.NewHandler(a.Logger, userRepo, userCascade).RegisterRoutes(mux, authMiddleware)
 
 	// Surfaces (panel + background textures) — public image endpoint, no auth.
 	surfaceRepo := surface.NewMongoRepository(a.MongoClient, a.MongoDB)

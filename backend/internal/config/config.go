@@ -82,6 +82,10 @@ type Config struct {
 	OllamaModel         string
 	BgRemoverBaseURL    string
 	Environment         string
+	// EnableMockLogin gates the /v1/auth/mock-login dev endpoint. Fail-closed:
+	// must be explicitly set to "true" via ENABLE_MOCK_LOGIN, and is refused in
+	// production regardless.
+	EnableMockLogin bool
 
 	// Outfit generation provider selection.
 	OutfitProvider   string // "claude" or "ollama"
@@ -157,6 +161,14 @@ func Load(logger *log.Logger) Config {
 
 	anthropicVision := strings.EqualFold(GetEnv("ANTHROPIC_VISION", defaultAnthropicVision), "true")
 
+	// Mock-login is fail-closed: it is only enabled when ENABLE_MOCK_LOGIN=true
+	// *and* we are not in production. A missing or misspelled env var in a prod
+	// deploy must never silently expose the dev login endpoint.
+	enableMockLogin := strings.EqualFold(GetEnv("ENABLE_MOCK_LOGIN", "false"), "true") && env != "production"
+	if enableMockLogin {
+		logger.Printf("WARNING: mock-login endpoint is enabled (ENABLE_MOCK_LOGIN=true, ENVIRONMENT=%s). Do NOT enable this in production.", env)
+	}
+
 	cfg := Config{
 		HTTPAddr:            GetEnv("HTTP_ADDR", defaultHTTPAddr),
 		MongoURI:            GetEnv("MONGO_URI", defaultMongoURI),
@@ -179,6 +191,7 @@ func Load(logger *log.Logger) Config {
 		OpenAIBaseURL:       GetEnv("OPENAI_BASE_URL", defaultOpenAIBaseURL),
 		OpenAIAPIKey:        GetEnv("OPENAI_API_KEY", ""),
 		RedisURL:            GetEnv("REDIS_URL", defaultRedisURL),
+		EnableMockLogin:     enableMockLogin,
 	}
 
 	return cfg

@@ -18,6 +18,9 @@ type Repository interface {
 	FindByUserPaginated(ctx context.Context, userID string, limit int, cursor *pagination.Cursor) ([]SavedMoodBoard, error)
 	// FindRecent returns the N most recent moodboards for the user, newest first.
 	FindRecent(ctx context.Context, userID string, limit int) ([]SavedMoodBoard, error)
+	// DeleteAllByUser removes every moodboard owned by userID. Used for GDPR
+	// account erasure.
+	DeleteAllByUser(ctx context.Context, userID string) (int, error)
 }
 
 // MongoRepository implements Repository using MongoDB.
@@ -84,6 +87,15 @@ func (r *MongoRepository) FindByUserPaginated(ctx context.Context, userID string
 		return nil, err
 	}
 	return boards, nil
+}
+
+// DeleteAllByUser removes every moodboard owned by userID.
+func (r *MongoRepository) DeleteAllByUser(ctx context.Context, userID string) (int, error) {
+	res, err := r.collection().DeleteMany(ctx, bson.M{"userId": userID})
+	if err != nil {
+		return 0, err
+	}
+	return int(res.DeletedCount), nil
 }
 
 // FindRecent returns the N most recent moodboards for the user, newest first.

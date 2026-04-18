@@ -28,6 +28,7 @@ type Repository interface {
 	SaveRefreshToken(ctx context.Context, userID, tokenHash string, expiresAt time.Time) error
 	FindByRefreshToken(ctx context.Context, tokenHash string) (*UserDocument, error)
 	ClearRefreshToken(ctx context.Context, userID string) error
+	ClearRefreshTokenByHash(ctx context.Context, tokenHash string) (bool, error)
 }
 
 // MongoRepository implements Repository using MongoDB.
@@ -108,4 +109,23 @@ func (r *MongoRepository) ClearRefreshToken(ctx context.Context, userID string) 
 	}
 	_, err := r.collection().UpdateOne(ctx, filter, update)
 	return err
+}
+
+// ClearRefreshTokenByHash removes the refresh token hash from the user document
+// that currently holds it, so logout only invalidates the caller's session and
+// can't nuke a newer session that rotated in after the caller's token was issued.
+// Returns true when a document matched.
+func (r *MongoRepository) ClearRefreshTokenByHash(ctx context.Context, tokenHash string) (bool, error) {
+	filter := bson.M{"refreshTokenHash": tokenHash}
+	update := bson.M{
+		"$unset": bson.M{
+			"refreshTokenHash": "",
+			"refreshExpiresAt": "",
+		},
+	}
+	res, err := r.collection().UpdateOne(ctx, filter, update)
+	if err != nil {
+		return false, err
+	}
+	return res.MatchedCount > 0, nil
 }

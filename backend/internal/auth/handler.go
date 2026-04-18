@@ -250,3 +250,45 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 		},
 	})
 }
+
+// Logout handles POST /v1/auth/logout.
+//
+// Revokes the caller's refresh token server-side by clearing the matching
+// refreshTokenHash on the user document. The endpoint is self-authenticating:
+// possession of a valid refresh token is sufficient, so it also works when the
+// access token has expired.
+//
+// Request body:
+//
+//	{ "refreshToken": "<opaque refresh token>" }
+//
+// Responses always return 204 No Content — whether or not the token matched —
+// so the endpoint can't be used as a refresh-token oracle.
+func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req LogoutRequest
+	if err := response.DecodeJSONBody(w, r, &req); err != nil {
+		response.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if req.RefreshToken == "" {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	hash := jwtutil.HashRefreshToken(req.RefreshToken)
+	if _, err := h.repo.ClearRefreshTokenByHash(ctx, hash); err != nil {
+		h.logger.Printf("logout: clear refresh token failed: %v", err)
+		response.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}

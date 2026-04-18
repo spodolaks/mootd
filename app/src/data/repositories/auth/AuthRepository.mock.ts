@@ -55,4 +55,8 @@ export class MockAuthRepository implements IAuthRepository {
       mode: 'mock',
     };
   }
+
+  async logout(_refreshToken: string): Promise<void> {
+    await this.delay(200);
+  }
 }

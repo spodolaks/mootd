@@ -80,4 +80,13 @@ export class ApiAuthRepository implements IAuthRepository {
       mode: 'api',
     };
   }
+
+  async logout(refreshToken: string): Promise<void> {
+    // Revoke on the server, but never let a network failure block local sign-out.
+    try {
+      await apiClient.post<unknown>('/v1/auth/logout', { refreshToken });
+    } catch {
+      // Swallow — caller clears local state regardless.
+    }
+  }
 }

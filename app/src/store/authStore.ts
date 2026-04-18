@@ -200,6 +200,14 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   signOut: async () => {
+    // Revoke the refresh token server-side first so a lost device can't keep
+    // minting new access tokens. We do NOT await this call — network failures
+    // must not block local sign-out, and the user expects an instant UI.
+    const refreshToken = useAuthStore.getState().session?.refreshToken;
+    if (refreshToken) {
+      void authRepository.logout(refreshToken).catch(() => { /* already swallowed in repo */ });
+    }
+
     setAuthToken(null);
     await clearTokenSecurely().catch((err) => {
       console.warn('[Auth] Failed to clear secure token:', err);

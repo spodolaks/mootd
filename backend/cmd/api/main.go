@@ -65,6 +65,7 @@ func main() {
 		OpenAIBaseURL:       cfg.OpenAIBaseURL,
 		OpenAIAPIKey:        cfg.OpenAIAPIKey,
 		RedisURL:            cfg.RedisURL,
+		EnableMockLogin:     cfg.EnableMockLogin,
 	}
 
 	// workerCtx is tied to server lifetime — cancelled on shutdown so background

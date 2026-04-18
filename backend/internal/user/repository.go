@@ -14,6 +14,8 @@ type Repository interface {
 	FindByID(ctx context.Context, id string) (*UserDocument, error)
 	Update(ctx context.Context, id string, fields UpdateProfileRequest) (*UserDocument, error)
 	UpdateArchetypeProfile(ctx context.Context, id string, profile map[string]float64) error
+	// DeleteByID removes the user document. Used for GDPR account erasure.
+	DeleteByID(ctx context.Context, id string) error
 }
 
 // MongoRepository implements Repository using MongoDB.
@@ -64,6 +66,13 @@ func (r *MongoRepository) Update(ctx context.Context, id string, req UpdateProfi
 	}
 
 	return r.FindByID(ctx, id)
+}
+
+// DeleteByID removes the user document identified by id.
+// Absence is treated as success so erasure is idempotent.
+func (r *MongoRepository) DeleteByID(ctx context.Context, id string) error {
+	_, err := r.collection().DeleteOne(ctx, bson.M{"_id": id})
+	return err
 }
 
 // UpdateArchetypeProfile sets the archetype profile scores on the user document.

@@ -65,6 +65,13 @@ services:
       REDIS_URL: "redis://redis:6379"
       # OpenAI DALL-E for generating moodboard backgrounds + surface textures
       OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      # Environment — set to "production" in real deploys. Mock-login is
+      # unconditionally disabled when ENVIRONMENT=production, regardless of
+      # ENABLE_MOCK_LOGIN below.
+      ENVIRONMENT: "${ENVIRONMENT:-development}"
+      # Mock-login dev endpoint. Fail-closed default ("false"). Only set to
+      # "true" for local development.
+      ENABLE_MOCK_LOGIN: "${ENABLE_MOCK_LOGIN:-true}"
     networks:
       - default
       - bcgrm_default

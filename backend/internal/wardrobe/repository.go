@@ -21,6 +21,9 @@ type Repository interface {
 	// UpdateItem sets traits and optionally label and imageUrl. Empty strings are ignored.
 	UpdateItem(ctx context.Context, id, userID string, traits map[string]string, label, imageURL string) error
 	Delete(ctx context.Context, id, userID string) error
+	// DeleteAllByUser removes every wardrobe item (plus its GridFS image) owned
+	// by userID. Used for GDPR account erasure.
+	DeleteAllByUser(ctx context.Context, userID string) (int, error)
 	SaveImage(ctx context.Context, itemID string, data []byte, contentType string) error
 	GetImage(ctx context.Context, itemID string) ([]byte, string, error)
 	// FindMissingPNG returns items that have an imageUrl but no pngImageUrl yet.
@@ -204,6 +207,37 @@ func (r *MongoRepository) FindByUserPaginated(ctx context.Context, userID string
 		return nil, err
 	}
 	return items, nil
+}
+
+// DeleteAllByUser removes every wardrobe item for userID along with its GridFS
+// image blob. Returns the number of items deleted. Image-delete failures are
+// logged via the returned error only when the item-delete itself fails — orphan
+// GridFS files left behind do not block account erasure, but count as a repo
+// consistency issue the caller can alert on.
+func (r *MongoRepository) DeleteAllByUser(ctx context.Context, userID string) (int, error) {
+	// Fetch IDs first so we can clean up GridFS blobs that are keyed by item ID.
+	cursor, err := r.collection().Find(ctx, bson.M{"userId": userID}, options.Find().SetProjection(bson.M{"_id": 1}))
+	if err != nil {
+		return 0, err
+	}
+	var ids []struct {
+		ID string `bson:"_id"`
+	}
+	if err := cursor.All(ctx, &ids); err != nil {
+		return 0, err
+	}
+
+	bucket := r.gridFSBucket()
+	for _, row := range ids {
+		// Best-effort GridFS cleanup — a missing file is not an error.
+		_ = r.deleteGridFSByName(ctx, bucket, row.ID)
+	}
+
+	res, err := r.collection().DeleteMany(ctx, bson.M{"userId": userID})
+	if err != nil {
+		return 0, err
+	}
+	return int(res.DeletedCount), nil
 }
 
 // FindByUser returns all clothing items for the given user, newest first.

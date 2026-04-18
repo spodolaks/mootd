@@ -12,4 +12,6 @@ export interface IAuthRepository {
   signInWithGoogle: (params: GoogleOAuthParams) => Promise<AuthSession>;
   /** Exchange a refresh token for a new access + refresh token pair */
   refresh: (refreshToken: string) => Promise<AuthSession>;
+  /** Revoke the refresh token server-side. Best-effort: never throws. */
+  logout: (refreshToken: string) => Promise<void>;
 }

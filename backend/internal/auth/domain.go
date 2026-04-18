@@ -51,3 +51,8 @@ type RefreshResponse struct {
 	ExpiresAt    string   `json:"expiresAt"`
 	User         AuthUser `json:"user"`
 }
+
+// LogoutRequest is the request body for POST /v1/auth/logout.
+type LogoutRequest struct {
+	RefreshToken string `json:"refreshToken"`
+}

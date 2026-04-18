@@ -159,7 +159,8 @@ func (h *Handler) runAsyncGeneration(jobID, userID string, weather Weather) {
 }
 
 // PollJob handles GET /v1/outfits/jobs/{id} — returns the current state of an
-// async outfit generation job.
+// async outfit generation job. The caller must own the job; mismatches are
+// reported as 404 to avoid leaking job existence across users.
 func (h *Handler) PollJob(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -171,6 +172,12 @@ func (h *Handler) PollJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	userID, ok := middleware.UserIDFromContext(r.Context())
+	if !ok {
+		response.WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+
 	jobID := strings.TrimPrefix(r.URL.Path, "/v1/outfits/jobs/")
 	if jobID == "" {
 		response.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "missing job ID"})
@@ -178,7 +185,7 @@ func (h *Handler) PollJob(w http.ResponseWriter, r *http.Request) {
 	}
 
 	job, err := h.jobStore.Get(r.Context(), jobID)
-	if err != nil {
+	if err != nil || job.UserID != userID {
 		response.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "job not found"})
 		return
 	}
