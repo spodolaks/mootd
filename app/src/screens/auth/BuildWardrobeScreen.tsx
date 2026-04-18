@@ -4,7 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useColorScheme } from '@/src/hooks';
 import { Text, GradientButton, Button, LoadingOverlay } from '@/src/components';
 import { ProfilePlaceholder } from '@/src/components/icons/ProfilePlaceholder';
-import { backgrounds, labels } from '@/src/theme/colors';
+import { accents, backgrounds, labels } from '@/src/theme/colors';
 
 interface BuildWardrobeScreenProps {
   onTakePhoto?: () => void;
@@ -27,6 +27,7 @@ export const BuildWardrobeScreen: React.FC<BuildWardrobeScreenProps> = ({
 
   const backgroundColor = backgrounds.primary[colorScheme];
   const secondaryTextColor = labels.tertiary[colorScheme];
+  const errorColor = accents.red[colorScheme];
 
   const handleTakePhoto = () => {
     onTakePhoto?.();
@@ -67,7 +68,7 @@ export const BuildWardrobeScreen: React.FC<BuildWardrobeScreenProps> = ({
         {/* Error message */}
         {error && (
           <View style={styles.errorContainer}>
-            <Text variant="footnote" style={styles.errorText}>
+            <Text variant="footnote" style={[styles.errorText, { color: errorColor }]}>
               {error}
             </Text>
           </View>
@@ -155,7 +156,6 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   errorText: {
-    color: '#FF3B30',
     textAlign: 'center',
   },
 });
