@@ -1,14 +1,24 @@
 import { accents, backgrounds, button, fills, labels } from '@/src/theme/colors';
 import { typography } from '@/src/theme/typography';
 import type { Outfit, OutfitWeather, WardrobeItem } from '@/src/domain';
-import React from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useImperativeHandle, useRef } from 'react';
+import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import ViewShot from 'react-native-view-shot';
 import { Collage } from '@/src/components/moodboard/Collage';
 import { ArchetypeBadges } from '@/src/components/moodboard/ArchetypeBadges';
 import { Icon } from '@/src/components';
 import { SCREEN_WIDTH, CONTAINER_PADDING, MAX_CARD_WIDTH } from '@/src/components/moodboard/constants';
 import { conditionIcon } from '@/src/components/moodboard/weatherChip';
+import { toPng } from '@/src/lib/htmlToImage';
+
+/** Platform-agnostic capture handle exposed by OutfitCard. Parent calls
+ *  capture() at Save time; the implementation swaps between
+ *  react-native-view-shot (iOS/Android) and html-to-image (web) so the
+ *  same call site works everywhere. Returns a full data URL
+ *  ("data:image/png;base64,…") or null when capture isn't possible. */
+export interface CollageCaptureHandle {
+  capture: () => Promise<string | null>;
+}
 
 /** Secondary weather detail — rendered as a small caption under the chip
  *  row so the top of the screen doesn't need a dedicated weather card. */
@@ -72,17 +82,50 @@ export interface OutfitCardProps {
    *  button can render in an active state. Immutable-per-card: once set the
    *  buttons lock (append-only event log, no undo). `null` means unrated. */
   rating?: 'up' | 'down' | null;
-  /** Parent-supplied ref that receives the ViewShot wrapping the collage.
-   *  When provided the parent can call `.capture()` at Save time to grab a
-   *  PNG of exactly what the user sees and forward it to the moodboard
-   *  save API. Optional — omitted on screens that don't need the capture. */
-  collageShotRef?: React.Ref<ViewShot>;
+  /** Parent-supplied ref that receives a CollageCaptureHandle. Calling
+   *  .capture() returns a full data URL (PNG) suitable for POST
+   *  /v1/moodboards `boardImage`. The handle hides the native / web split:
+   *  on iOS/Android it captures the ViewShot wrapping the collage, on web
+   *  it uses html-to-image on the underlying DOM node. */
+  collageCaptureRef?: React.Ref<CollageCaptureHandle>;
 }
 
 export const OutfitCard: React.FC<OutfitCardProps> = ({
   outfit, index, total, itemMap, onSelect, onItemPress, isSaving, colorScheme, cardHeight, weatherDetail,
-  onThumbsUp, onThumbsDown, rating, collageShotRef,
+  onThumbsUp, onThumbsDown, rating, collageCaptureRef,
 }) => {
+  const viewShotRef = useRef<ViewShot | null>(null);
+  const webNodeRef = useRef<View | null>(null);
+
+  // Expose a unified capture() to the parent. Dynamic-dispatch over the two
+  // refs keeps the render tree identical on both platforms; only the call
+  // path branches. Errors here are swallowed and surfaced as null so the
+  // caller can decide whether to skip the boardImage forward without a
+  // visible error.
+  useImperativeHandle(
+    collageCaptureRef,
+    () => ({
+      capture: async (): Promise<string | null> => {
+        try {
+          if (Platform.OS === 'web') {
+            // react-native-web's View renders as a div; its ref is the DOM
+            // element, which html-to-image can rasterize directly.
+            const node = webNodeRef.current as unknown as HTMLElement | null;
+            if (!node) return null;
+            return await toPng(node, { pixelRatio: 2, cacheBust: true });
+          }
+          const shot = viewShotRef.current;
+          if (!shot || typeof shot.capture !== 'function') return null;
+          const base64 = await shot.capture();
+          return base64 ? `data:image/png;base64,${base64}` : null;
+        } catch (err) {
+          console.warn('[OutfitCard] collage capture failed', err);
+          return null;
+        }
+      },
+    }),
+    [],
+  );
   const cardBg = backgrounds.secondary[colorScheme];
   const textColor = labels.primary[colorScheme];
   const tertiaryColor = labels.tertiary[colorScheme];
@@ -125,26 +168,47 @@ export const OutfitCard: React.FC<OutfitCardProps> = ({
             )}
           </View>
         </View>
-        {/* Wrap the Collage in a ViewShot when the parent wants to capture a
-            render of this card (used on Save to persist a PNG of the outfit
-            to the backend). options.result='base64' keeps the capture payload
-            self-contained — no temp-file handling needed. */}
-        <ViewShot
-          ref={collageShotRef}
-          options={{ format: 'png', result: 'base64', quality: 0.92 }}
-          style={styles.collageWrapper}
-        >
-          <Collage
-            itemIds={outfit.items}
-            itemMap={itemMap}
-            layoutRoles={outfit.layoutRoles}
-            onItemPress={onItemPress}
-            colorScheme={colorScheme}
-            panelUrl={outfit.panelUrl}
-            backgroundUrl={outfit.backgroundUrl}
-            fill
-          />
-        </ViewShot>
+        {/* Wrap the Collage so the parent can snapshot it at Save time.
+            Two renderers, one Collage: native uses react-native-view-shot
+            (stable, fast, native rendering); web renders inside a plain
+            View whose DOM node html-to-image rasterizes. Keeping the
+            Collage identical on both paths means the captured image
+            matches what the user actually sees. */}
+        {Platform.OS === 'web' ? (
+          <View
+            ref={webNodeRef}
+            collapsable={false}
+            style={styles.collageWrapper}
+          >
+            <Collage
+              itemIds={outfit.items}
+              itemMap={itemMap}
+              layoutRoles={outfit.layoutRoles}
+              onItemPress={onItemPress}
+              colorScheme={colorScheme}
+              panelUrl={outfit.panelUrl}
+              backgroundUrl={outfit.backgroundUrl}
+              fill
+            />
+          </View>
+        ) : (
+          <ViewShot
+            ref={viewShotRef}
+            options={{ format: 'png', result: 'base64', quality: 0.92 }}
+            style={styles.collageWrapper}
+          >
+            <Collage
+              itemIds={outfit.items}
+              itemMap={itemMap}
+              layoutRoles={outfit.layoutRoles}
+              onItemPress={onItemPress}
+              colorScheme={colorScheme}
+              panelUrl={outfit.panelUrl}
+              backgroundUrl={outfit.backgroundUrl}
+              fill
+            />
+          </ViewShot>
+        )}
         {outfit.rationale ? (
           <Text style={[styles.rationale, { color: tertiaryColor }]} numberOfLines={2}>
             {outfit.rationale}
