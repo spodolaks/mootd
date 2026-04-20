@@ -11,7 +11,7 @@ import { useRouter } from 'expo-router';
 import { Icon, Text } from '@/src/components';
 import { useColorScheme } from '@/src/hooks';
 import { useDetectionJobStore, type DetectionJob } from '@/src/store';
-import { backgrounds, fills, grays, labels, separators } from '@/src/theme/colors';
+import { accents, backgrounds, fills, grays, labels, separators } from '@/src/theme/colors';
 import { typography } from '@/src/theme/typography';
 import { spacing } from '@/src/theme/spacing';
 import { radius } from '@/src/theme/radius';
@@ -37,10 +37,10 @@ const JobCard: React.FC<{
 
   const statusColor =
     job.status === 'completed'
-      ? '#34C759'
+      ? accents.green[colorScheme]
       : job.status === 'failed'
-        ? '#FF3B30'
-        : '#007AFF';
+        ? accents.red[colorScheme]
+        : accents.blue[colorScheme];
 
   return (
     <View style={[styles.jobCard, { backgroundColor: cardBg }]}>

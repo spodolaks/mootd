@@ -13,6 +13,7 @@ import { Icon, Button } from '@/src/components';
 import { useColorScheme } from '@/src/hooks';
 import { useAuthStore, usePreferencesStore, useDetectionJobStore } from '@/src/store';
 import {
+  accents,
   backgrounds,
   button,
   fills,
@@ -45,7 +46,9 @@ export const ProfileScreen: React.FC = () => {
   const tertiaryText = labels.tertiary[colorScheme];
   const cardBg = grays.gray5[colorScheme];
   const dividerColor = separators.primary[colorScheme];
-  const dangerColor = '#FF3B30';
+  const dangerColor = accents.red[colorScheme];
+  const activeBadgeColor = accents.blue[colorScheme];
+  const idleBadgeColor = accents.green[colorScheme];
 
   const handleSignOut = () => {
     signOut();
@@ -109,7 +112,7 @@ export const ProfileScreen: React.FC = () => {
             textColor={textColor}
             dividerColor={dividerColor}
             badge={jobCount > 0 ? String(jobCount) : null}
-            badgeColor={hasActiveJob() ? '#007AFF' : '#34C759'}
+            badgeColor={hasActiveJob() ? activeBadgeColor : idleBadgeColor}
             onPress={() => {
               router.push('/detection-activity');
             }}

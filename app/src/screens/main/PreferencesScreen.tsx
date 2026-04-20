@@ -31,6 +31,7 @@ import { useColorScheme } from '@/src/hooks';
 import { usePreferencesStore } from '@/src/store/preferencesStore';
 import { useAuthStore } from '@/src/store';
 import {
+  accents,
   backgrounds,
   grays,
   labels,
@@ -72,8 +73,8 @@ export const PreferencesScreen: React.FC = () => {
   const tertiary = labels.tertiary[colorScheme];
   const cardBg = grays.gray5[colorScheme];
   const divider = separators.primary[colorScheme];
-  const accent = '#007AFF';
-  const danger = '#FF3B30';
+  const accent = accents.blue[colorScheme];
+  const danger = accents.red[colorScheme];
 
   // ─── Handlers ──────────────────────────────────────────────────────────────
   const handleSaveName = useCallback(() => {
