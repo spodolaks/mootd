@@ -12,6 +12,7 @@ import (
 
 	"mootd/backend/internal/auth"
 	"mootd/backend/internal/brands"
+	"mootd/backend/internal/feedback"
 	"mootd/backend/internal/generic"
 	"mootd/backend/internal/health"
 	"mootd/backend/internal/moodboard"
@@ -83,6 +84,7 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 	var authLimit middleware.Middleware
 	var outfitBurstLimit middleware.Middleware
 	var outfitDailyLimit middleware.Middleware
+	var feedbackLimit middleware.Middleware
 	if redisClient != nil {
 		// 20/min per IP on unauth'd auth endpoints blunts refresh-token spraying
 		// and credential enumeration without annoying a real user.
@@ -92,6 +94,9 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 		// provider.
 		outfitBurstLimit = middleware.RedisRateLimitScoped(redisClient, "outfit:generate:burst", 5, 1*time.Minute)
 		outfitDailyLimit = middleware.RedisRateLimitScoped(redisClient, "outfit:generate:daily", 50, 24*time.Hour)
+		// Feedback is cheap to store but easy to spam from a broken client loop;
+		// 120/min per user is well above normal usage and prevents log-flood.
+		feedbackLimit = middleware.RedisRateLimitScoped(redisClient, "feedback", 120, 1*time.Minute)
 	}
 
 	// Mock-login is only registered when explicitly opted-in via config. Any
@@ -137,10 +142,17 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 	moodboardRepo := moodboard.NewMongoRepository(a.MongoClient, a.MongoDB)
 	moodboard.NewHandler(a.Logger, moodboardRepo, wardrobeRepo, profileUpdater).RegisterRoutes(mux, authMiddleware)
 
+	// Feedback collection is registered alongside moodboard because that's
+	// where save/skip events will originate from in a later PR. The endpoint
+	// itself is callable now; nothing yet emits to it.
+	feedbackRepo := feedback.NewMongoRepository(a.MongoClient, a.MongoDB)
+	feedback.NewHandler(a.Logger, feedbackRepo).RegisterRoutes(mux, authMiddleware, feedbackLimit)
+
 	// Wire the user-deletion cascade now that we have all the owning repos.
-	// Order: images + items → moodboards → user doc. The user doc is deleted
-	// last so that if any earlier step fails, the user can still re-authenticate
-	// and retry; deleting the user first would strand orphaned data.
+	// Order: images + items → moodboards → feedback → user doc. The user doc
+	// is deleted last so that if any earlier step fails, the user can still
+	// re-authenticate and retry; deleting the user first would strand
+	// orphaned data.
 	userCascade := user.CascadeFn(func(ctx context.Context, userID string) error {
 		if n, err := wardrobeRepo.DeleteAllByUser(ctx, userID); err != nil {
 			return err
@@ -151,6 +163,11 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 			return err
 		} else if n > 0 {
 			a.Logger.Printf("delete account: removed %d moodboards for user %s", n, userID)
+		}
+		if n, err := feedbackRepo.DeleteAllByUser(ctx, userID); err != nil {
+			return err
+		} else if n > 0 {
+			a.Logger.Printf("delete account: removed %d feedback events for user %s", n, userID)
 		}
 		return userRepo.DeleteByID(ctx, userID)
 	})

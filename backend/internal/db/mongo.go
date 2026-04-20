@@ -88,6 +88,15 @@ func EnsureIndexes(ctx context.Context, client *mongo.Client, dbName string, log
 				Keys: bson.D{{Key: "imageUrl", Value: 1}, {Key: "pngImageUrl", Value: 1}},
 			},
 		},
+		// Feedback events are queried by user (export/DSAR) and scanned by
+		// (userId, createdAt) descending for "recent preference" prompt
+		// lookups.
+		{
+			collection: "outfit_feedback",
+			model: mongo.IndexModel{
+				Keys: bson.D{{Key: "userId", Value: 1}, {Key: "createdAt", Value: -1}},
+			},
+		},
 	}
 
 	for _, idx := range indexes {
