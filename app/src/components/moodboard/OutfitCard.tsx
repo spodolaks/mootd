@@ -1,10 +1,11 @@
-import { backgrounds, button, fills, labels } from '@/src/theme/colors';
+import { accents, backgrounds, button, fills, labels } from '@/src/theme/colors';
 import { typography } from '@/src/theme/typography';
 import type { Outfit, OutfitWeather, WardrobeItem } from '@/src/domain';
 import React from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Collage } from '@/src/components/moodboard/Collage';
 import { ArchetypeBadges } from '@/src/components/moodboard/ArchetypeBadges';
+import { Icon } from '@/src/components';
 import { SCREEN_WIDTH, CONTAINER_PADDING, MAX_CARD_WIDTH } from '@/src/components/moodboard/constants';
 
 const CONDITION_ICON: Record<string, string> = {
@@ -74,16 +75,31 @@ export interface OutfitCardProps {
   /** Optional location + high/low temp, surfaced as a caption under the
    *  chip row so the top of the screen can drop its dedicated weather card. */
   weatherDetail?: WeatherDetail;
+  /** Fires when the user taps thumbs-up on this outfit. No-op when absent —
+   *  the whole rating row is hidden so there's no dead UI. */
+  onThumbsUp?: () => void;
+  /** Fires when the user taps thumbs-down on this outfit. */
+  onThumbsDown?: () => void;
+  /** Current rating the parent has recorded for this outfit, so the selected
+   *  button can render in an active state. Immutable-per-card: once set the
+   *  buttons lock (append-only event log, no undo). `null` means unrated. */
+  rating?: 'up' | 'down' | null;
 }
 
 export const OutfitCard: React.FC<OutfitCardProps> = ({
   outfit, index, total, itemMap, onSelect, onItemPress, isSaving, colorScheme, cardHeight, weatherDetail,
+  onThumbsUp, onThumbsDown, rating,
 }) => {
   const cardBg = backgrounds.secondary[colorScheme];
   const textColor = labels.primary[colorScheme];
   const tertiaryColor = labels.tertiary[colorScheme];
   const btnBg = button.primary.background[colorScheme];
   const btnText = button.primary.foreground[colorScheme];
+  const thumbBg = fills.tertiary[colorScheme];
+  const thumbUpActive = accents.green[colorScheme];
+  const thumbDownActive = accents.red[colorScheme];
+  const showRating = Boolean(onThumbsUp || onThumbsDown);
+  const isRated = rating === 'up' || rating === 'down';
 
   return (
     <View style={[styles.card, { width: SCREEN_WIDTH, height: cardHeight || undefined }]}>
@@ -141,17 +157,61 @@ export const OutfitCard: React.FC<OutfitCardProps> = ({
             Would be nice: {outfit.suggestions.join(' · ')}
           </Text>
         )}
-        <Pressable
-          style={[styles.chooseBtn, { backgroundColor: btnBg }]}
-          onPress={onSelect}
-          disabled={isSaving}
-        >
-          {isSaving ? (
-            <ActivityIndicator size="small" color={btnText} />
-          ) : (
-            <Text style={[styles.chooseBtnText, { color: btnText }]}>Choose this outfit</Text>
+        <View style={styles.actionRow}>
+          {showRating && (
+            <>
+              <Pressable
+                style={[
+                  styles.thumbBtn,
+                  { backgroundColor: rating === 'up' ? thumbUpActive : thumbBg },
+                ]}
+                onPress={onThumbsUp}
+                disabled={isRated || isSaving}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="Rate outfit thumbs up"
+                accessibilityState={{ selected: rating === 'up', disabled: isRated || isSaving }}
+              >
+                <Icon
+                  name="thumbs-up"
+                  size={20}
+                  color={rating === 'up' ? '#FFFFFF' : textColor}
+                />
+              </Pressable>
+              <Pressable
+                style={[
+                  styles.thumbBtn,
+                  { backgroundColor: rating === 'down' ? thumbDownActive : thumbBg },
+                ]}
+                onPress={onThumbsDown}
+                disabled={isRated || isSaving}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="Rate outfit thumbs down"
+                accessibilityState={{ selected: rating === 'down', disabled: isRated || isSaving }}
+              >
+                <Icon
+                  name="thumbs-down"
+                  size={20}
+                  color={rating === 'down' ? '#FFFFFF' : textColor}
+                />
+              </Pressable>
+            </>
           )}
-        </Pressable>
+          <Pressable
+            style={[styles.chooseBtn, { backgroundColor: btnBg }]}
+            onPress={onSelect}
+            disabled={isSaving}
+            accessibilityRole="button"
+            accessibilityLabel="Choose this outfit"
+          >
+            {isSaving ? (
+              <ActivityIndicator size="small" color={btnText} />
+            ) : (
+              <Text style={[styles.chooseBtnText, { color: btnText }]}>Choose this outfit</Text>
+            )}
+          </Pressable>
+        </View>
       </View>
     </View>
   );
@@ -205,8 +265,21 @@ const styles = StyleSheet.create({
     ...typography.title2.semiBold,
     marginTop: 2,
   },
-  chooseBtn: {
+  actionRow: {
     marginTop: 'auto',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  thumbBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  chooseBtn: {
+    flex: 1,
     height: 44,
     borderRadius: 22,
     justifyContent: 'center',
