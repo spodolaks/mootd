@@ -42,8 +42,17 @@ OUTPUT:
 - Each outfit needs: name (2-4 words), description (per rules above), rationale (per rules above), items (array of IDs), layoutRoles (mapping each item ID to "hero", "support", or "accent"), and optional suggestions for missing items.`
 
 // buildSystemPrompt constructs the full system prompt with archetype, weather, and history context.
-// It is shared by both the Ollama and Claude generators.
-func buildSystemPrompt(weather Weather, recentOutfits []string, topArchetypes []archetype.ScoredArchetype, panels, backgrounds []SurfaceOption) string {
+// It is shared by Ollama, Claude, and OpenAI generators.
+//
+// recentBoards drives two sections:
+//  1. Anti-example list ("avoid repeating by name") — prevents stale outputs.
+//  2. Positive few-shot list ("user recently chose these — notice the specific
+//     pairings and stylistic register") — uses description + rationale from
+//     the saved moodboards so the model sees the user's *accepted* voice,
+//     not just archetype scores. This is the largest non-infra quality bump
+//     available: it replaces a generic prompt with one that carries the
+//     user's actual taste trail.
+func buildSystemPrompt(weather Weather, recentBoards []RecentBoard, topArchetypes []archetype.ScoredArchetype, panels, backgrounds []SurfaceOption) string {
 	var sb strings.Builder
 	sb.WriteString(baseSystemPrompt)
 
@@ -89,10 +98,54 @@ func buildSystemPrompt(weather Weather, recentOutfits []string, topArchetypes []
 			weather.Temperature, weather.Unit, weather.Condition)
 	}
 
-	if len(recentOutfits) > 0 {
-		sb.WriteString("\nRECENTLY WORN (avoid repeating):\n")
-		for _, name := range recentOutfits {
-			fmt.Fprintf(&sb, "- %q\n", name)
+	if len(recentBoards) > 0 {
+		// Anti-example list: just names, so the model knows what not to recycle.
+		sb.WriteString("\nRECENTLY WORN (avoid repeating the exact combination):\n")
+		for _, b := range recentBoards {
+			if b.OutfitName == "" {
+				continue
+			}
+			fmt.Fprintf(&sb, "- %q\n", b.OutfitName)
+		}
+
+		// Positive examples: only emit when we actually have description or
+		// rationale worth showing. A bare name tells the model nothing about
+		// why the pairing worked, and would just bloat the context window.
+		hasRichExample := false
+		for _, b := range recentBoards {
+			if b.Description != "" || b.Rationale != "" {
+				hasRichExample = true
+				break
+			}
+		}
+		if hasRichExample {
+			sb.WriteString("\nRECENTLY CHOSEN — the user saved these. Lean into the same stylistic register (item interplay, specificity of language, archetype nods). Do NOT copy them; generate fresh outfits that feel authored by the same person.\n")
+			for _, b := range recentBoards {
+				// Skip if either the name is missing (nothing to anchor the
+				// example to) or both description and rationale are empty
+				// (nothing to learn from).
+				if b.OutfitName == "" {
+					continue
+				}
+				if b.Description == "" && b.Rationale == "" {
+					continue
+				}
+				// Use a compact multi-line format — LLMs absorb structure
+				// better than prose here.
+				fmt.Fprintf(&sb, "- %q\n", b.OutfitName)
+				if b.Description != "" {
+					fmt.Fprintf(&sb, "    description: %s\n", b.Description)
+				}
+				if b.Rationale != "" {
+					fmt.Fprintf(&sb, "    rationale: %s\n", b.Rationale)
+				}
+				if b.TopArchetype != "" {
+					fmt.Fprintf(&sb, "    top archetype at save: %s\n", b.TopArchetype)
+				}
+				if len(b.Palette) > 0 {
+					fmt.Fprintf(&sb, "    palette: %s\n", strings.Join(b.Palette, ", "))
+				}
+			}
 		}
 	}
 

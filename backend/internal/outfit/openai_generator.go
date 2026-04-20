@@ -46,7 +46,7 @@ func (g *OpenAIGenerator) Generate(ctx context.Context, req GeneratorRequest) ([
 		return nil, errors.New("openai generator: OPENAI_API_KEY is not set")
 	}
 
-	systemPrompt := buildSystemPrompt(req.Weather, req.RecentOutfits, req.TopArchetypes, req.Panels, req.Backgrounds)
+	systemPrompt := buildSystemPrompt(req.Weather, req.RecentBoards, req.TopArchetypes, req.Panels, req.Backgrounds)
 	userMessage := BuildUserMessage(req.Items)
 
 	payload := openaiChatRequest{

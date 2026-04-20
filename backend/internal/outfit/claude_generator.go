@@ -76,7 +76,7 @@ func (g *ClaudeGenerator) Generate(ctx context.Context, req GeneratorRequest) ([
 		return nil, errors.New("claude generator: ANTHROPIC_API_KEY is not set")
 	}
 
-	systemPrompt := buildSystemPrompt(req.Weather, req.RecentOutfits, req.TopArchetypes, req.Panels, req.Backgrounds)
+	systemPrompt := buildSystemPrompt(req.Weather, req.RecentBoards, req.TopArchetypes, req.Panels, req.Backgrounds)
 	tool := g.buildOutfitTool(req.Items)
 	userContent := g.buildUserContent(ctx, req)
 
