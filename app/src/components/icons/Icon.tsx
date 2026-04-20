@@ -47,7 +47,9 @@ export type IconName =
   | 'alert'
   | 'help'
   | 'closet'
-  | 'google';
+  | 'google'
+  | 'thumbs-up'
+  | 'thumbs-down';
 
 interface IconProps {
   name: IconName;
@@ -960,6 +962,51 @@ export function Icon({ name, size = 24, color = '#000000', style }: IconProps) {
             d="M21.8055 10.0415H21V10H12V14H17.6515C16.827 16.3285 14.6115 18 12 18C8.6865 18 6 15.3135 6 12C6 8.6865 8.6865 6 12 6C13.5295 6 14.921 6.577 15.9805 7.5195L18.809 4.691C17.023 3.0265 14.634 2 12 2C6.4775 2 2 6.4775 2 12C2 17.5225 6.4775 22 12 22C17.5225 22 22 17.5225 22 12C22 11.3295 21.931 10.675 21.8055 10.0415Z"
             fill={color}
           />
+        );
+
+      case 'thumbs-up':
+        // Canonical Feather-style thumbs-up: cuff below at y=22, palm curves
+        // up from y=22 to meet the extended thumb at y=8. Stroke-only so it
+        // inherits color cleanly in both light/dark modes.
+        return (
+          <>
+            <Path
+              d="M7 22V11"
+              stroke={color}
+              strokeWidth={strokeWidth}
+              strokeLinecap={strokeLinecap}
+              strokeLinejoin={strokeLinejoin}
+            />
+            <Path
+              d="M3 22H7V11L10 2C11.1046 2 12 2.89543 12 4V7H17.5C18.8807 7 19.8955 8.29148 19.5673 9.63246L17.8673 16.6325C17.6349 17.5908 16.7783 18.2636 15.7968 18.2636H7"
+              stroke={color}
+              strokeWidth={strokeWidth}
+              strokeLinecap={strokeLinecap}
+              strokeLinejoin={strokeLinejoin}
+            />
+          </>
+        );
+
+      case 'thumbs-down':
+        // Mirror of thumbs-up around the horizontal axis — cuff above, palm
+        // curves down to the extended thumb at y=16.
+        return (
+          <>
+            <Path
+              d="M17 2V13"
+              stroke={color}
+              strokeWidth={strokeWidth}
+              strokeLinecap={strokeLinecap}
+              strokeLinejoin={strokeLinejoin}
+            />
+            <Path
+              d="M21 2H17V13L14 22C12.8954 22 12 21.1046 12 20V17H6.5C5.1193 17 4.1045 15.7085 4.4327 14.3675L6.1327 7.36754C6.3651 6.40919 7.2217 5.73638 8.2032 5.73638H17"
+              stroke={color}
+              strokeWidth={strokeWidth}
+              strokeLinecap={strokeLinecap}
+              strokeLinejoin={strokeLinejoin}
+            />
+          </>
         );
 
       default:

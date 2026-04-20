@@ -7,8 +7,9 @@ import { useColorScheme, useWeather } from '@/src/hooks';
 import { backgrounds, fills, labels } from '@/src/theme/colors';
 import { typography } from '@/src/theme/typography';
 import { radius } from '@/src/theme/radius';
-import { wardrobeRepository, moodBoardRepository } from '@/src/data/repositories';
+import { wardrobeRepository, moodBoardRepository, feedbackRepository } from '@/src/data/repositories';
 import type { Outfit, SavedMoodBoard, WardrobeItem } from '@/src/domain';
+import { outfitToSnapshot, topArchetypeOf, weatherContextString } from '@/src/domain';
 import React, { useState, useCallback, useRef, useMemo } from 'react';
 import {
   ActivityIndicator,
@@ -50,6 +51,15 @@ export const MoodBoardScreen: React.FC = () => {
 
   // Swap item modal state
   const [swapTarget, setSwapTarget] = useState<{ outfitIndex: number; itemId: string } | null>(null);
+
+  // Per-outfit thumbs state, immutable-per-render once set. Keyed by the
+  // client-assigned outfit.id generated at receive time. Cleared on every
+  // fresh generation so the user rates each batch independently.
+  const [ratings, setRatings] = useState<Record<string, 'up' | 'down'>>({});
+  // Ties every feedback event from this batch back to the generation job, so
+  // the training pipeline can reconstruct the (batch → series-of-actions)
+  // trajectory for this user.
+  const [currentJobId, setCurrentJobId] = useState<string | undefined>(undefined);
 
   const { weather } = useWeather();
   const tabBottomPadding = useTabContentBottomPadding();
@@ -94,9 +104,10 @@ export const MoodBoardScreen: React.FC = () => {
         : undefined;
 
       let outfits: Outfit[];
+      let jobId: string | undefined;
       try {
         // Submit async job
-        const jobId = await wardrobeRepository.submitOutfitGeneration(weatherParams);
+        jobId = await wardrobeRepository.submitOutfitGeneration(weatherParams);
 
         // Poll every 2 seconds until complete
         let result: { status: string; outfits?: Outfit[]; error?: string };
@@ -124,8 +135,18 @@ export const MoodBoardScreen: React.FC = () => {
         setScreenState(todayBoard ? 'saved' : 'empty');
         return;
       }
+      // Stamp each outfit with a locally-unique ID so rating and swap
+      // feedback events can identify which member of the batch they refer
+      // to. Scope is this generation only; IDs aren't persisted beyond the
+      // save call. Collisions within a batch are effectively impossible.
+      const stamped = outfits.map((o) => ({
+        ...o,
+        id: o.id ?? `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+      }));
       setItemMap(buildItemMap(items));
-      setOutfitOptions(outfits);
+      setOutfitOptions(stamped);
+      setCurrentJobId(jobId);
+      setRatings({});
       setActiveIndex(0);
       setScreenState('choosing');
     } catch (e) {
@@ -182,6 +203,47 @@ export const MoodBoardScreen: React.FC = () => {
     updated[swapTarget.outfitIndex] = outfit;
     setOutfitOptions(updated);
     setSwapTarget(null);
+
+    // Emit a feedback event reflecting the swap. The generatedBatch captures
+    // the post-swap state of the whole batch (so later training can compare
+    // it to the version stored on the "saved" event if the user proceeds to
+    // save). Best-effort: we never block the UI on this.
+    void feedbackRepository
+      .submit({
+        action: 'item_swapped',
+        jobId: currentJobId,
+        chosenOutfitId: outfit.id,
+        generatedBatch: updated.map(outfitToSnapshot),
+        context: {
+          weather: weatherContextString(outfit),
+          archetype: topArchetypeOf(outfit),
+        },
+      })
+      .catch((err) => {
+        console.warn('[MoodBoard] feedback: item_swapped failed', err);
+      });
+  };
+
+  const handleRateOutfit = (outfit: Outfit, direction: 'up' | 'down') => {
+    if (!outfit.id) return;
+    if (ratings[outfit.id]) return; // already rated — immutable per card
+    setRatings((prev) => ({ ...prev, [outfit.id!]: direction }));
+
+    void feedbackRepository
+      .submit({
+        action: 'rated',
+        jobId: currentJobId,
+        chosenOutfitId: outfit.id,
+        rating: direction === 'up' ? 5 : 1,
+        generatedBatch: outfitOptions.map(outfitToSnapshot),
+        context: {
+          weather: weatherContextString(outfit),
+          archetype: topArchetypeOf(outfit),
+        },
+      })
+      .catch((err) => {
+        console.warn('[MoodBoard] feedback: rated failed', err);
+      });
   };
 
   const renderContent = () => {
@@ -248,6 +310,9 @@ export const MoodBoardScreen: React.FC = () => {
                           }
                         : undefined
                     }
+                    onThumbsUp={() => handleRateOutfit(item, 'up')}
+                    onThumbsDown={() => handleRateOutfit(item, 'down')}
+                    rating={item.id ? (ratings[item.id] ?? null) : null}
                   />
                 )}
               />

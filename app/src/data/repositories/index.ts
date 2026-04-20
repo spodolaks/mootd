@@ -1,4 +1,10 @@
-import type { IAuthRepository, IBrandsRepository, IMoodBoardRepository, IWardrobeRepository } from '@/src/domain';
+import type {
+  IAuthRepository,
+  IBrandsRepository,
+  IFeedbackRepository,
+  IMoodBoardRepository,
+  IWardrobeRepository,
+} from '@/src/domain';
 import { ApiAuthRepository } from './auth/AuthRepository.api';
 import { MockAuthRepository } from './auth/AuthRepository.mock';
 import { ApiBrandsRepository } from './brands/BrandsRepository.api';
@@ -7,6 +13,8 @@ import { ApiWardrobeRepository } from './wardrobe/WardrobeRepository.api';
 import { MockWardrobeRepository } from './wardrobe/WardrobeRepository.mock';
 import { ApiMoodBoardRepository } from './moodboard/MoodBoardRepository.api';
 import { MockMoodBoardRepository } from './moodboard/MoodBoardRepository.mock';
+import { ApiFeedbackRepository } from './feedback/FeedbackRepository.api';
+import { MockFeedbackRepository } from './feedback/FeedbackRepository.mock';
 
 export type DataSource = 'mock' | 'api';
 
@@ -34,3 +42,8 @@ export const moodBoardRepository: IMoodBoardRepository =
   activeDataSource === 'api'
     ? new ApiMoodBoardRepository()
     : new MockMoodBoardRepository();
+
+export const feedbackRepository: IFeedbackRepository =
+  activeDataSource === 'api'
+    ? new ApiFeedbackRepository()
+    : new MockFeedbackRepository();

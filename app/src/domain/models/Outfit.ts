@@ -19,6 +19,11 @@ export interface OutfitWeather {
 
 /** A suggested outfit composed of wardrobe item IDs. */
 export interface Outfit {
+  /** Client-assigned ID used to correlate rating / swap feedback events with
+   *  a specific outfit in a generated batch. Generated locally at receive
+   *  time (see MoodBoardScreen#handleGeneratePress); the backend treats it
+   *  as opaque. Optional so legacy data without IDs still deserialises. */
+  id?: string;
   name: string;
   description: string;
   /** Wardrobe item IDs that make up the outfit (tops, bottoms, shoes, accessories). */
