@@ -9,6 +9,11 @@ export interface SaveOptions {
   date?: string;
   generatedBatch?: Outfit[];
   jobId?: string;
+  /** Base64-encoded PNG of the rendered collage, captured on-device before
+   *  save. Optional — servers that don't receive it will skip GridFS storage
+   *  and the calendar will render from outfit.snapshots as a fallback.
+   *  Accepts either a raw base64 string or a `data:image/png;base64,…` URL. */
+  boardImage?: string;
 }
 
 export interface IMoodBoardRepository {

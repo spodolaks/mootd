@@ -9,5 +9,9 @@ export interface SavedMoodBoard {
   outfit: Outfit;
   /** ISO date string, YYYY-MM-DD */
   date: string;
+  /** Optional path to the rendered collage PNG captured at save time.
+   *  Undefined on legacy rows (saved before the render-capture feature) —
+   *  callers should fall back to rendering from outfit.snapshots. */
+  imageUrl?: string;
   createdAt: string;
 }

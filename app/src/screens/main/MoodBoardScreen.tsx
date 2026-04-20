@@ -24,6 +24,7 @@ import {
 import { Image } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
+import type ViewShot from 'react-native-view-shot';
 
 import { classifyZone } from '@/src/components/moodboard/Collage';
 import { OutfitCard } from '@/src/components/moodboard/OutfitCard';
@@ -56,6 +57,11 @@ export const MoodBoardScreen: React.FC = () => {
   // client-assigned outfit.id generated at receive time. Cleared on every
   // fresh generation so the user rates each batch independently.
   const [ratings, setRatings] = useState<Record<string, 'up' | 'down'>>({});
+  // One ViewShot ref per card in the batch, indexed by the outfit's client
+  // ID. Populated by OutfitCard; read at Save time to capture a PNG of the
+  // collage exactly as the user saw it. Missing entries are tolerated — a
+  // failed capture just means the saved row ships without a render.
+  const collageShotRefs = useRef<Record<string, ViewShot | null>>({});
   // Ties every feedback event from this batch back to the generation job, so
   // the training pipeline can reconstruct the (batch → series-of-actions)
   // trajectory for this user.
@@ -147,6 +153,9 @@ export const MoodBoardScreen: React.FC = () => {
       setOutfitOptions(stamped);
       setCurrentJobId(jobId);
       setRatings({});
+      // Discard stale refs from the previous batch so we don't accidentally
+      // capture an old card's ViewShot on the next Save.
+      collageShotRefs.current = {};
       setActiveIndex(0);
       setScreenState('choosing');
     } catch (e) {
@@ -164,6 +173,21 @@ export const MoodBoardScreen: React.FC = () => {
   const handleSelectOutfit = async (outfit: Outfit) => {
     setIsSaving(true);
     try {
+      // Capture a PNG of the collage exactly as the user sees it — this is
+      // what the calendar will render as the "hero" image for the saved
+      // moodboard. Best-effort: on any capture failure we simply omit the
+      // image and the calendar falls back to rendering from snapshots.
+      let boardImage: string | undefined;
+      const shot = outfit.id ? collageShotRefs.current[outfit.id] : null;
+      if (shot && typeof shot.capture === 'function') {
+        try {
+          const base64 = await shot.capture();
+          boardImage = base64 ? `data:image/png;base64,${base64}` : undefined;
+        } catch (err) {
+          console.warn('[MoodBoard] collage capture failed', err);
+        }
+      }
+
       // Forward the full generatedBatch plus jobId so the server-side
       // feedback emit captures the rejected members of this generation.
       // Without the batch, a saved event records only the pick — training
@@ -172,6 +196,7 @@ export const MoodBoardScreen: React.FC = () => {
         date: today,
         generatedBatch: outfitOptions,
         jobId: currentJobId,
+        boardImage,
       });
       setTodayBoard(saved);
       setScreenState('saved');
@@ -325,6 +350,13 @@ export const MoodBoardScreen: React.FC = () => {
                     onThumbsUp={() => handleRateOutfit(item, 'up')}
                     onThumbsDown={() => handleRateOutfit(item, 'down')}
                     rating={item.id ? (ratings[item.id] ?? null) : null}
+                    collageShotRef={item.id
+                      ? (ref) => {
+                          if (item.id) {
+                            collageShotRefs.current[item.id] = ref;
+                          }
+                        }
+                      : undefined}
                   />
                 )}
               />

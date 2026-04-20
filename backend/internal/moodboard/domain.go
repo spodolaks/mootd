@@ -46,12 +46,19 @@ type Outfit struct {
 }
 
 // SavedMoodBoard is a moodboard selected by the user for a specific date.
+//
+// ImageURL is the path to the rendered collage PNG captured client-side at
+// save time and stored in GridFS under the filename "moodboard:{id}". It is
+// populated only when the client supplied BoardImage on the save request;
+// older rows render from Outfit.Snapshots alone (current calendar behaviour
+// is preserved as a fallback).
 type SavedMoodBoard struct {
-	ID        string    `bson:"_id"       json:"id"`
-	UserID    string    `bson:"userId"    json:"userId"`
-	Outfit    Outfit    `bson:"outfit"    json:"outfit"`
-	Date      string    `bson:"date"      json:"date"` // YYYY-MM-DD
-	CreatedAt time.Time `bson:"createdAt" json:"createdAt"`
+	ID        string    `bson:"_id"                json:"id"`
+	UserID    string    `bson:"userId"             json:"userId"`
+	Outfit    Outfit    `bson:"outfit"             json:"outfit"`
+	Date      string    `bson:"date"               json:"date"` // YYYY-MM-DD
+	ImageURL  string    `bson:"imageUrl,omitempty" json:"imageUrl,omitempty"`
+	CreatedAt time.Time `bson:"createdAt"          json:"createdAt"`
 }
 
 // SaveRequest is the body for POST /v1/moodboards.
@@ -70,6 +77,12 @@ type SaveRequest struct {
 	Date           string   `json:"date"` // YYYY-MM-DD; if empty, today is used
 	GeneratedBatch []Outfit `json:"generatedBatch,omitempty"`
 	JobID          string   `json:"jobId,omitempty"`
+	// BoardImage is the rendered collage captured on-device before save, as
+	// base64-encoded PNG bytes (with or without a data: URL prefix). Optional
+	// — when present, the server stores it in GridFS and populates
+	// SavedMoodBoard.ImageURL on the response. When absent, the calendar
+	// continues to render the collage from Outfit.Snapshots.
+	BoardImage string `json:"boardImage,omitempty"`
 }
 
 // ListResponse is returned from GET /v1/moodboards.

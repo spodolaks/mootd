@@ -3,6 +3,7 @@ import { typography } from '@/src/theme/typography';
 import type { Outfit, OutfitWeather, WardrobeItem } from '@/src/domain';
 import React from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import ViewShot from 'react-native-view-shot';
 import { Collage } from '@/src/components/moodboard/Collage';
 import { ArchetypeBadges } from '@/src/components/moodboard/ArchetypeBadges';
 import { Icon } from '@/src/components';
@@ -71,11 +72,16 @@ export interface OutfitCardProps {
    *  button can render in an active state. Immutable-per-card: once set the
    *  buttons lock (append-only event log, no undo). `null` means unrated. */
   rating?: 'up' | 'down' | null;
+  /** Parent-supplied ref that receives the ViewShot wrapping the collage.
+   *  When provided the parent can call `.capture()` at Save time to grab a
+   *  PNG of exactly what the user sees and forward it to the moodboard
+   *  save API. Optional — omitted on screens that don't need the capture. */
+  collageShotRef?: React.Ref<ViewShot>;
 }
 
 export const OutfitCard: React.FC<OutfitCardProps> = ({
   outfit, index, total, itemMap, onSelect, onItemPress, isSaving, colorScheme, cardHeight, weatherDetail,
-  onThumbsUp, onThumbsDown, rating,
+  onThumbsUp, onThumbsDown, rating, collageShotRef,
 }) => {
   const cardBg = backgrounds.secondary[colorScheme];
   const textColor = labels.primary[colorScheme];
@@ -119,16 +125,26 @@ export const OutfitCard: React.FC<OutfitCardProps> = ({
             )}
           </View>
         </View>
-        <Collage
-          itemIds={outfit.items}
-          itemMap={itemMap}
-          layoutRoles={outfit.layoutRoles}
-          onItemPress={onItemPress}
-          colorScheme={colorScheme}
-          panelUrl={outfit.panelUrl}
-          backgroundUrl={outfit.backgroundUrl}
-          fill
-        />
+        {/* Wrap the Collage in a ViewShot when the parent wants to capture a
+            render of this card (used on Save to persist a PNG of the outfit
+            to the backend). options.result='base64' keeps the capture payload
+            self-contained — no temp-file handling needed. */}
+        <ViewShot
+          ref={collageShotRef}
+          options={{ format: 'png', result: 'base64', quality: 0.92 }}
+          style={styles.collageWrapper}
+        >
+          <Collage
+            itemIds={outfit.items}
+            itemMap={itemMap}
+            layoutRoles={outfit.layoutRoles}
+            onItemPress={onItemPress}
+            colorScheme={colorScheme}
+            panelUrl={outfit.panelUrl}
+            backgroundUrl={outfit.backgroundUrl}
+            fill
+          />
+        </ViewShot>
         {outfit.rationale ? (
           <Text style={[styles.rationale, { color: tertiaryColor }]} numberOfLines={2}>
             {outfit.rationale}
@@ -228,6 +244,13 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 6,
     alignItems: 'center',
+  },
+  // The ViewShot wrapper inherits the Collage's flex sizing, so the render
+  // captures exactly what the user sees on the card — no extra padding or
+  // layout drift between the on-screen and snapshotted output.
+  collageWrapper: {
+    flex: 1,
+    width: '100%',
   },
   // Small inline colour dots that sit next to the archetype chips on the
   // same row. Smaller than the old standalone palette strip so they read

@@ -152,6 +152,19 @@ export const CalendarScreen: React.FC = () => {
               {selectedBoard.outfit.description}
             </Text>
 
+            {/* Rendered moodboard hero — present only on saves made after the
+                client-side capture feature shipped. Older rows fall through
+                to the item-thumbnail row below, unchanged. */}
+            {selectedBoard.imageUrl ? (
+              <Image
+                source={{ uri: toAbsoluteUrl(selectedBoard.imageUrl) }}
+                style={styles.heroImage}
+                contentFit="cover"
+                cachePolicy="memory-disk"
+                accessibilityLabel="Saved moodboard collage"
+              />
+            ) : null}
+
             {/* Item thumbnails */}
             <ScrollView
               horizontal
@@ -261,6 +274,12 @@ const styles = StyleSheet.create({
   },
   outfitDescription: {
     lineHeight: 20,
+  },
+  heroImage: {
+    width: '100%',
+    aspectRatio: 1,
+    borderRadius: radius.lg,
+    marginTop: spacing.sm,
   },
   itemsRow: {
     gap: spacing.sm,
