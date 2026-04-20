@@ -5,7 +5,7 @@ import { typography } from '@/src/theme/typography';
 import { spacing } from '@/src/theme/spacing';
 import { radius } from '@/src/theme/radius';
 import React, { useState, useCallback, useMemo } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Image } from 'expo-image';
 import { Calendar, DateData } from 'react-native-calendars';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -14,6 +14,8 @@ import { moodBoardRepository, wardrobeRepository } from '@/src/data/repositories
 import type { OutfitItem, SavedMoodBoard, WardrobeItem } from '@/src/domain';
 import { getApiBaseURL } from '@/src/data/api/client';
 import { useTabContentBottomPadding } from '@/app/(main)/_layout';
+import { useUIStore } from '@/src/store';
+import { shareMoodboard, type SharePlatform } from '@/src/lib/shareMoodboard';
 
 const toAbsoluteUrl = (url: string): string => {
   if (!url || url.startsWith('http')) return url;
@@ -76,6 +78,29 @@ export const CalendarScreen: React.FC = () => {
   }, [boards]);
 
   const selectedBoard = boardsByDate.get(selectedDate) ?? null;
+
+  const showToast = useUIStore(s => s.showToast);
+
+  const handleShare = useCallback(
+    async (platform: SharePlatform) => {
+      if (!selectedBoard?.imageUrl) return;
+      const result = await shareMoodboard(platform, {
+        imageUrl: toAbsoluteUrl(selectedBoard.imageUrl),
+        caption: selectedBoard.outfit.name,
+      });
+      switch (result.kind) {
+        case 'downloaded':
+          showToast(result.message, 'info');
+          break;
+        case 'error':
+          showToast('Couldn\'t open share sheet — try again.', 'error');
+          break;
+        // 'shared' and 'dismissed' don't need a toast — the share sheet /
+        // downloaded tab is its own feedback.
+      }
+    },
+    [selectedBoard, showToast],
+  );
 
   // Build marked dates: dots for dates with outfits, highlight for selected
   const markedDates = useMemo(() => {
@@ -156,13 +181,41 @@ export const CalendarScreen: React.FC = () => {
                 client-side capture feature shipped. Older rows fall through
                 to the item-thumbnail row below, unchanged. */}
             {selectedBoard.imageUrl ? (
-              <Image
-                source={{ uri: toAbsoluteUrl(selectedBoard.imageUrl) }}
-                style={styles.heroImage}
-                contentFit="cover"
-                cachePolicy="memory-disk"
-                accessibilityLabel="Saved moodboard collage"
-              />
+              <>
+                <Image
+                  source={{ uri: toAbsoluteUrl(selectedBoard.imageUrl) }}
+                  style={styles.heroImage}
+                  contentFit="cover"
+                  cachePolicy="memory-disk"
+                  accessibilityLabel="Saved moodboard collage"
+                />
+                {/* Share row — surfaces only when we actually have a render
+                    to share. Legacy rows without a collage image keep the
+                    existing thumbnail-only layout. */}
+                <View style={styles.shareRow}>
+                  <Text variant="footnote" style={{ color: tertiaryText }}>
+                    Share
+                  </Text>
+                  <Pressable
+                    onPress={() => { void handleShare('instagram'); }}
+                    style={[styles.shareBtn, { backgroundColor: fills.tertiary[colorScheme] }]}
+                    hitSlop={8}
+                    accessibilityRole="button"
+                    accessibilityLabel="Share to Instagram"
+                  >
+                    <Icon name="instagram" size={20} color={textColor} />
+                  </Pressable>
+                  <Pressable
+                    onPress={() => { void handleShare('facebook'); }}
+                    style={[styles.shareBtn, { backgroundColor: fills.tertiary[colorScheme] }]}
+                    hitSlop={8}
+                    accessibilityRole="button"
+                    accessibilityLabel="Share to Facebook"
+                  >
+                    <Icon name="facebook" size={20} color={textColor} />
+                  </Pressable>
+                </View>
+              </>
             ) : null}
 
             {/* Item thumbnails */}
@@ -280,6 +333,19 @@ const styles = StyleSheet.create({
     aspectRatio: 1,
     borderRadius: radius.lg,
     marginTop: spacing.sm,
+  },
+  shareRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+  },
+  shareBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: radius.full,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   itemsRow: {
     gap: spacing.sm,
