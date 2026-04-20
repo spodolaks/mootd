@@ -74,6 +74,8 @@ func (h *Handler) Submit(w http.ResponseWriter, r *http.Request) {
 		Context:          req.Context,
 		PromptVersion:    req.PromptVersion,
 		GeneratorVersion: req.GeneratorVersion,
+		SwappedFrom:      req.SwappedFrom,
+		SwappedTo:        req.SwappedTo,
 		SchemaVersion:    CurrentSchemaVersion,
 		CreatedAt:        time.Now().UTC(),
 	}

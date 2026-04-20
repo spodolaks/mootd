@@ -50,6 +50,13 @@ export interface FeedbackSubmitRequest {
    *  where the batch isn't relevant. */
   generatedBatch?: FeedbackOutfitSnapshot[];
   context?: FeedbackContext;
+  /** Populated only for action === 'item_swapped'. The wardrobe item IDs
+   *  involved in the swap: swappedFrom is the item the user removed,
+   *  swappedTo is the one they picked. Stored explicitly so training
+   *  doesn't have to diff sequential generatedBatch snapshots to recover
+   *  the (rejected → accepted) pair. */
+  swappedFrom?: string;
+  swappedTo?: string;
 }
 
 export interface IFeedbackRepository {

@@ -205,22 +205,26 @@ export const MoodBoardScreen: React.FC = () => {
 
   const handleSwapItem = (replacementId: string) => {
     if (!swapTarget) return;
+    const removedItemId = swapTarget.itemId;
     const updated = [...outfitOptions];
     const outfit = { ...updated[swapTarget.outfitIndex] };
-    outfit.items = outfit.items.map(id => (id === swapTarget.itemId ? replacementId : id));
+    outfit.items = outfit.items.map(id => (id === removedItemId ? replacementId : id));
     updated[swapTarget.outfitIndex] = outfit;
     setOutfitOptions(updated);
     setSwapTarget(null);
 
-    // Emit a feedback event reflecting the swap. The generatedBatch captures
-    // the post-swap state of the whole batch (so later training can compare
-    // it to the version stored on the "saved" event if the user proceeds to
-    // save). Best-effort: we never block the UI on this.
+    // Emit a feedback event reflecting the swap. swappedFrom / swappedTo
+    // give training the explicit (rejected → accepted) pair without having
+    // to diff sequential generatedBatch snapshots; the post-swap
+    // generatedBatch is still included so the full state is preserved.
+    // Best-effort: we never block the UI on this.
     void feedbackRepository
       .submit({
         action: 'item_swapped',
         jobId: currentJobId,
         chosenOutfitId: outfit.id,
+        swappedFrom: removedItemId,
+        swappedTo: replacementId,
         generatedBatch: updated.map(outfitToSnapshot),
         context: {
           weather: weatherContextString(outfit),
