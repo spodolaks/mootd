@@ -49,7 +49,9 @@ export type IconName =
   | 'closet'
   | 'google'
   | 'thumbs-up'
-  | 'thumbs-down';
+  | 'thumbs-down'
+  | 'instagram'
+  | 'facebook';
 
 interface IconProps {
   name: IconName;
@@ -1007,6 +1009,52 @@ export function Icon({ name, size = 24, color = '#000000', style }: IconProps) {
               strokeLinejoin={strokeLinejoin}
             />
           </>
+        );
+
+      case 'instagram':
+        // Feather-style Instagram: rounded-rectangle body, camera lens
+        // circle, and viewfinder dot. Stroke-only keeps it on-style with
+        // the rest of the icon set and inherits color cleanly.
+        return (
+          <>
+            <Rect
+              x={3}
+              y={3}
+              width={18}
+              height={18}
+              rx={5}
+              ry={5}
+              stroke={color}
+              strokeWidth={strokeWidth}
+              strokeLinecap={strokeLinecap}
+              strokeLinejoin={strokeLinejoin}
+              fill="none"
+            />
+            <Circle
+              cx={12}
+              cy={12}
+              r={4}
+              stroke={color}
+              strokeWidth={strokeWidth}
+              fill="none"
+            />
+            <Circle cx={17.5} cy={6.5} r={1} fill={color} />
+          </>
+        );
+
+      case 'facebook':
+        // Feather-style Facebook: lowercase "f" on a vertical axis. Kept
+        // stroke-only so it doesn't look heavier than the other branded
+        // icons at the same size.
+        return (
+          <Path
+            d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"
+            stroke={color}
+            strokeWidth={strokeWidth}
+            strokeLinecap={strokeLinecap}
+            strokeLinejoin={strokeLinejoin}
+            fill="none"
+          />
         );
 
       default:
