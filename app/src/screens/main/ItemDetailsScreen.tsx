@@ -15,7 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { GradientButton, Icon, Input, Modal } from '@/src/components';
 import { useColorScheme } from '@/src/hooks';
-import { backgrounds, button, fills, grays, labels } from '@/src/theme/colors';
+import { accents, backgrounds, button, fills, grays, labels } from '@/src/theme/colors';
 import { typography } from '@/src/theme/typography';
 import { wardrobeRepository } from '@/src/data/repositories';
 
@@ -60,8 +60,9 @@ export const ItemDetailsScreen: React.FC = () => {
   const backgroundColor = backgrounds.primary[colorScheme];
   const textColor = labels.primary[colorScheme];
   const secondaryTextColor = labels.secondary[colorScheme];
-  const imagePlaceholderBg = '#3A3A3C';
+  const imagePlaceholderBg = grays.gray4[colorScheme];
   const placeholderColor = labels.tertiary[colorScheme];
+  const destructiveColor = accents.red[colorScheme];
   const chipBg = fills.tertiary[colorScheme];
   const cancelBg = button.secondary.background[colorScheme];
   const cancelText = button.secondary.foreground[colorScheme];
@@ -106,7 +107,13 @@ export const ItemDetailsScreen: React.FC = () => {
       >
         {/* Header */}
         <View style={styles.header}>
-          <Pressable style={styles.backButton} onPress={() => router.back()}>
+          <Pressable
+            style={styles.backButton}
+            onPress={() => router.back()}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+          >
             <Icon name="chevron-left" size={24} color={textColor} />
           </Pressable>
           <Text style={[styles.title, { color: textColor }]} numberOfLines={1}>
@@ -116,8 +123,12 @@ export const ItemDetailsScreen: React.FC = () => {
             style={styles.deleteButton}
             onPress={() => setShowDeleteModal(true)}
             disabled={isDeleting}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Delete item"
+            accessibilityState={{ disabled: isDeleting }}
           >
-            <Icon name="bin" size={22} color={isDeleting ? placeholderColor : '#FF3B30'} />
+            <Icon name="bin" size={22} color={isDeleting ? placeholderColor : destructiveColor} />
           </Pressable>
         </View>
 
@@ -188,14 +199,18 @@ export const ItemDetailsScreen: React.FC = () => {
       >
         <View style={styles.modalButtons}>
           <Pressable
-            style={[styles.modalButton, { backgroundColor: '#FF3B30' }]}
+            style={[styles.modalButton, { backgroundColor: destructiveColor }]}
             onPress={() => { void handleDeleteConfirm(); }}
+            accessibilityRole="button"
+            accessibilityLabel="Confirm remove"
           >
             <Text style={[styles.modalButtonText, { color: '#FFFFFF' }]}>Remove</Text>
           </Pressable>
           <Pressable
             style={[styles.modalButton, { backgroundColor: cancelBg }]}
             onPress={() => setShowDeleteModal(false)}
+            accessibilityRole="button"
+            accessibilityLabel="Cancel"
           >
             <Text style={[styles.modalButtonText, { color: cancelText }]}>Cancel</Text>
           </Pressable>
