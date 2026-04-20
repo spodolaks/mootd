@@ -164,7 +164,15 @@ export const MoodBoardScreen: React.FC = () => {
   const handleSelectOutfit = async (outfit: Outfit) => {
     setIsSaving(true);
     try {
-      const saved = await moodBoardRepository.save(outfit, today);
+      // Forward the full generatedBatch plus jobId so the server-side
+      // feedback emit captures the rejected members of this generation.
+      // Without the batch, a saved event records only the pick — training
+      // can't reconstruct preference pairs from that alone.
+      const saved = await moodBoardRepository.save(outfit, {
+        date: today,
+        generatedBatch: outfitOptions,
+        jobId: currentJobId,
+      });
       setTodayBoard(saved);
       setScreenState('saved');
     } catch {

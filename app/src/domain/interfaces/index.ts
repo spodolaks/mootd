@@ -1,7 +1,7 @@
 export type { IAuthRepository, GoogleOAuthParams } from "./IAuthRepository";
 export type { IWardrobeRepository } from "./IWardrobeRepository";
 export type { IBrandsRepository } from "./IBrandsRepository";
-export type { IMoodBoardRepository } from './IMoodBoardRepository';
+export type { IMoodBoardRepository, SaveOptions } from './IMoodBoardRepository';
 export type {
   IFeedbackRepository,
   FeedbackAction,
