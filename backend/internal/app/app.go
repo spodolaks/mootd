@@ -147,6 +147,13 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 	feedbackRepo := feedback.NewMongoRepository(a.MongoClient, a.MongoDB)
 	feedback.NewHandler(a.Logger, feedbackRepo).RegisterRoutes(mux, authMiddleware, feedbackLimit)
 
+	// Forward-declared so the moodboard onSave closure can stamp the name of
+	// the currently-active generator on every feedback event. The generator
+	// is actually constructed further down (it depends on OutfitProvider +
+	// Anthropic config); the closure reads this variable at emit time — long
+	// after wiring is done — so late assignment is safe.
+	var generatorName string
+
 	// Emit a "saved" feedback event every time a moodboard is saved. We keep
 	// this wiring here so the moodboard package doesn't import feedback
 	// directly; the hook translates moodboard types to feedback types at the
@@ -154,15 +161,17 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 	// must never block a user save.
 	moodboardOnSave := moodboard.SaveEventFn(func(ctx context.Context, userID string, req moodboard.SaveRequest, saved moodboard.SavedMoodBoard) {
 		event := feedback.Event{
-			ID:             saved.ID + ":saved",
-			UserID:         userID,
-			JobID:          req.JobID,
-			ChosenOutfitID: req.Outfit.ID,
-			Action:         feedback.ActionSaved,
-			GeneratedBatch: toFeedbackSnapshots(req.GeneratedBatch, req.Outfit),
-			Context:        toFeedbackContext(req.Outfit),
-			SchemaVersion:  feedback.CurrentSchemaVersion,
-			CreatedAt:      saved.CreatedAt,
+			ID:               saved.ID + ":saved",
+			UserID:           userID,
+			JobID:            req.JobID,
+			ChosenOutfitID:   req.Outfit.ID,
+			Action:           feedback.ActionSaved,
+			GeneratedBatch:   toFeedbackSnapshots(req.GeneratedBatch, req.Outfit),
+			Context:          toFeedbackContext(req.Outfit),
+			PromptVersion:    outfit.PromptVersion,
+			GeneratorVersion: generatorName,
+			SchemaVersion:    feedback.CurrentSchemaVersion,
+			CreatedAt:        saved.CreatedAt,
 		}
 		if err := feedbackRepo.Insert(ctx, event); err != nil {
 			a.Logger.Printf("moodboard: emit saved-feedback for user %s board %s: %v", userID, saved.ID, err)
@@ -258,6 +267,10 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 		generator = outfit.NewOllamaGenerator(outfit.OllamaConfig{BaseURL: a.OllamaBaseURL, Model: a.OllamaModel})
 		a.Logger.Printf("outfit: using Ollama generator (model=%s)", a.OllamaModel)
 	}
+	// Populate the name variable captured by moodboardOnSave. At this point
+	// no request has been served yet, so the closure will always read a
+	// populated value by the time it fires.
+	generatorName = generator.Name()
 
 	var outfitCache outfit.Cache
 	if redisClient != nil {

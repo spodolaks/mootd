@@ -7,6 +7,13 @@ import (
 	"mootd/backend/internal/archetype"
 )
 
+// PromptVersion tags the system-prompt generation. Bump whenever baseSystemPrompt
+// or buildSystemPrompt change in a way that could alter training data quality
+// (new sections, reworded rules, changed few-shot structure). Stamped onto
+// feedback events so the training pipeline can filter out data collected under
+// retired prompts.
+const PromptVersion = "v1"
+
 // baseSystemPrompt is the shared rule-set for all outfit generators (Claude + Ollama).
 // It establishes the stylist persona, the structural rules, and the response shape.
 const baseSystemPrompt = `You are a professional fashion stylist building daily outfits from a user's existing wardrobe.
