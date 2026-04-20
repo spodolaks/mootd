@@ -30,14 +30,6 @@ type GenerateResponse struct {
 	Outfits []Outfit `json:"outfits"`
 }
 
-// wardrobeSnapshot is the trimmed item shape sent to the LLM (no imageUrl/userId/createdAt).
-type wardrobeSnapshot struct {
-	ID       string            `json:"id"`
-	Category string            `json:"category"`
-	Label    string            `json:"label"`
-	Traits   map[string]string `json:"traits,omitempty"`
-}
-
 // ollamaRequest is sent to POST /api/chat.
 type ollamaRequest struct {
 	Model    string          `json:"model"`
@@ -109,10 +101,12 @@ func parseLLMResponse(raw string) ([]Outfit, error) {
 	for _, ro := range rawOutfits {
 		o := Outfit{}
 
-		// Extract name from "name" or "outfit_name".
+		// Extract name from "name" or "outfit_name". Best-effort parses —
+		// bad values fall through to the next key; we ignore decode errors
+		// on purpose and rely on the caller's validation.
 		for _, key := range []string{"name", "outfit_name"} {
 			if v, ok := ro[key]; ok {
-				json.Unmarshal(v, &o.Name)
+				_ = json.Unmarshal(v, &o.Name)
 				if o.Name != "" {
 					break
 				}
@@ -121,20 +115,20 @@ func parseLLMResponse(raw string) ([]Outfit, error) {
 
 		// Extract description.
 		if v, ok := ro["description"]; ok {
-			json.Unmarshal(v, &o.Description)
+			_ = json.Unmarshal(v, &o.Description)
 		}
 
 		// Extract suggestions.
 		if v, ok := ro["suggestions"]; ok {
-			json.Unmarshal(v, &o.Suggestions)
+			_ = json.Unmarshal(v, &o.Suggestions)
 		}
 
 		// Extract surface picks — raw IDs the service validates/resolves.
 		if v, ok := ro["panelId"]; ok {
-			json.Unmarshal(v, &o.PanelID)
+			_ = json.Unmarshal(v, &o.PanelID)
 		}
 		if v, ok := ro["backgroundId"]; ok {
-			json.Unmarshal(v, &o.BackgroundID)
+			_ = json.Unmarshal(v, &o.BackgroundID)
 		}
 
 		// Extract items — could be flat array of strings, array of objects, or slot-based.

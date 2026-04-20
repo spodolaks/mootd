@@ -3,8 +3,6 @@ package outfit
 import (
 	"context"
 	"fmt"
-
-	"mootd/backend/internal/archetype"
 )
 
 // OllamaGenerator implements Generator against a local Ollama server (Qwen3 etc).
@@ -39,22 +37,3 @@ func (g *OllamaGenerator) Generate(ctx context.Context, req GeneratorRequest) ([
 	return parsed, nil
 }
 
-
-// genItemsToTraits adapts the generator-facing GenItem list to the archetype
-// scoring trait struct. Used by the handler when re-scoring chosen outfits.
-func genItemsToTraits(items []GenItem) []archetype.ItemTraits {
-	out := make([]archetype.ItemTraits, len(items))
-	for i, item := range items {
-		out[i] = archetype.ItemTraits{
-			Category:       item.Category,
-			Color:          item.Traits["color"],
-			ColorSecondary: item.Traits["color_secondary"],
-			Fabric:         item.Traits["fabric"],
-			Style:          item.Traits["style"],
-			Occasion:       item.Traits["occasion"],
-			OverallStyle:   item.Traits["overall_style"],
-			Details:        item.Traits["details"],
-		}
-	}
-	return out
-}
