@@ -22,7 +22,7 @@ func (g *OllamaGenerator) Name() string { return "ollama" }
 // Generate calls the local Ollama chat API with a JSON-mode system prompt and
 // parses whatever shape the model returns into []Outfit.
 func (g *OllamaGenerator) Generate(ctx context.Context, req GeneratorRequest) ([]Outfit, error) {
-	sysPrompt := buildSystemPrompt(req.Weather, req.RecentOutfits, req.TopArchetypes, req.Panels, req.Backgrounds)
+	sysPrompt := buildSystemPrompt(req.Weather, req.RecentBoards, req.TopArchetypes, req.Panels, req.Backgrounds)
 	userMessage := BuildUserMessage(req.Items)
 
 	llmContent, err := g.client.chat(ctx, sysPrompt, userMessage)

@@ -13,10 +13,16 @@ type GeneratorRequest struct {
 	Items         []GenItem
 	TopArchetypes []archetype.ScoredArchetype
 	Weather       Weather
-	RecentOutfits []string        // names of recently-worn outfits to avoid repeating
-	Panels        []SurfaceOption // surfaces the LLM may pick a panel from
-	Backgrounds   []SurfaceOption // surfaces the LLM may pick a background from
-	UseVision     bool            // ask the provider to use image input if it supports it
+	// RecentBoards carries the last few outfits the user actually saved. They
+	// appear in the prompt twice: as "avoid repeating" (by name) and as
+	// concrete positive examples (with description + rationale) so the model
+	// learns the user's preferred stylistic register instead of re-deriving
+	// it every call. Pass the richest data the caller has — empty strings
+	// are elided in the prompt.
+	RecentBoards []RecentBoard
+	Panels       []SurfaceOption // surfaces the LLM may pick a panel from
+	Backgrounds  []SurfaceOption // surfaces the LLM may pick a background from
+	UseVision    bool            // ask the provider to use image input if it supports it
 }
 
 // GenItem is the trimmed wardrobe-item shape passed to generators.

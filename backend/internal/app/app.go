@@ -184,7 +184,26 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 		}
 		result := make([]outfit.RecentBoard, len(boards))
 		for i, b := range boards {
-			result[i] = outfit.RecentBoard{OutfitName: b.Outfit.Name, ItemIDs: b.Outfit.Items}
+			// Pull the top archetype by score so the prompt can reference the
+			// user's dominant taste at the time of the save — useful because
+			// the archetype profile evolves and this pins the example to the
+			// register it was authored under.
+			var topArch string
+			var topScore float64
+			for name, score := range b.Outfit.ArchetypeScores {
+				if score > topScore {
+					topScore = score
+					topArch = name
+				}
+			}
+			result[i] = outfit.RecentBoard{
+				OutfitName:   b.Outfit.Name,
+				ItemIDs:      b.Outfit.Items,
+				Description:  b.Outfit.Description,
+				Rationale:    b.Outfit.Rationale,
+				TopArchetype: topArch,
+				Palette:      b.Outfit.Palette,
+			}
 		}
 		return result, nil
 	})

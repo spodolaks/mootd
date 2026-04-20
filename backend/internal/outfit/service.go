@@ -40,8 +40,12 @@ type recentOutfitProvider interface {
 }
 
 type recentBoard struct {
-	OutfitName string
-	ItemIDs    []string
+	OutfitName    string
+	ItemIDs       []string
+	Description   string // free-text description saved with the outfit
+	Rationale     string // one-line stylist reasoning saved with the outfit
+	TopArchetype  string // highest-scoring archetype at save time (may be empty)
+	Palette       []string // dominant colors as #RRGGBB (may be empty)
 }
 
 // RecentOutfitFunc is a function type that satisfies recentOutfitProvider.
@@ -151,16 +155,15 @@ func (s *Service) GenerateOutfits(ctx context.Context, userID string, weather We
 	}
 	topArchetypes := archetype.TopN(effectiveScores, 2)
 
-	// Recent outfits to avoid repeating.
-	var recentNames []string
+	// Recent outfits — feeds both the "avoid repeating" anti-list and the
+	// positive few-shot examples built in buildSystemPrompt.
+	var recentBoards []RecentBoard
 	if s.recent != nil {
 		recent, err := s.recent.FindRecent(ctx, userID, 7)
 		if err != nil {
 			s.logger.Printf("outfit: recent-outfit fetch failed for user %s: %v (proceeding without dedup)", userID, err)
 		}
-		for _, b := range recent {
-			recentNames = append(recentNames, b.OutfitName)
-		}
+		recentBoards = recent
 	}
 
 	genItems := itemsToGenItems(items)
@@ -226,14 +229,14 @@ func (s *Service) GenerateOutfits(ctx context.Context, userID string, weather We
 		Items:         genItems,
 		TopArchetypes: topArchetypes,
 		Weather:       weather,
-		RecentOutfits: recentNames,
+		RecentBoards:  recentBoards,
 		Panels:        panels,
 		Backgrounds:   backgrounds,
 		UseVision:     s.useVision,
 	}
 
 	s.logger.Printf("outfit: %s generator for user %s (%d items, weather=%s/%s, recent=%d, archetype=%s)",
-		s.generator.Name(), userID, len(items), weather.Temperature, weather.Condition, len(recentNames),
+		s.generator.Name(), userID, len(items), weather.Temperature, weather.Condition, len(recentBoards),
 		formatTopArchetypes(topArchetypes))
 
 	parsedOutfits, err := s.generator.Generate(ctx, req)
