@@ -2,9 +2,14 @@ package moodboard
 
 import (
 	"context"
+	"encoding/base64"
+	"errors"
 	"log"
 	"net/http"
+	"strings"
 	"time"
+
+	"go.mongodb.org/mongo-driver/v2/mongo"
 
 	"mootd/backend/internal/archetype"
 	"mootd/backend/internal/shared/id"
@@ -13,6 +18,12 @@ import (
 	"mootd/backend/internal/shared/response"
 	"mootd/backend/internal/wardrobe"
 )
+
+// maxBoardImageBytes caps how large a rendered collage PNG we accept per
+// save. Well above a typical ~600KB retina capture so legitimate uploads go
+// through, tight enough that a malicious or broken client can't bloat
+// GridFS. Decoded bytes, not base64 length.
+const maxBoardImageBytes = 5 * 1024 * 1024
 
 // SaveEventFn is called after a moodboard is successfully saved. Implementations
 // typically append a feedback.Event so later training jobs can reconstruct
@@ -89,11 +100,31 @@ func (h *Handler) Save(w http.ResponseWriter, r *http.Request) {
 	outfit := req.Outfit
 	outfit.Snapshots = snapshots
 
+	boardID := id.Generate()
+
+	// Persist the rendered collage image first (best-effort). On success we
+	// stamp the board with its image URL so a single insert covers both the
+	// doc and its render reference. On failure we log and fall through — the
+	// calendar can still render from Outfit.Snapshots.
+	var imageURL string
+	if req.BoardImage != "" {
+		if data, ct, err := decodeBoardImage(req.BoardImage); err != nil {
+			h.logger.Printf("moodboard: decode board image for user %s: %v (saving without render)", userID, err)
+		} else if len(data) > maxBoardImageBytes {
+			h.logger.Printf("moodboard: board image %d bytes exceeds cap %d for user %s (saving without render)", len(data), maxBoardImageBytes, userID)
+		} else if err := h.repo.SaveImage(r.Context(), boardID, data, ct); err != nil {
+			h.logger.Printf("moodboard: save board image for user %s board %s: %v (saving without render)", userID, boardID, err)
+		} else {
+			imageURL = "/v1/moodboards/" + boardID + "/image"
+		}
+	}
+
 	board := SavedMoodBoard{
-		ID:        id.Generate(),
+		ID:        boardID,
 		UserID:    userID,
 		Outfit:    outfit,
 		Date:      date,
+		ImageURL:  imageURL,
 		CreatedAt: time.Now().UTC(),
 	}
 
@@ -199,3 +230,73 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	response.WriteJSON(w, http.StatusOK, ListResponse{MoodBoards: boards, NextCursor: nextCursor})
 }
 
+// ServeImage handles GET /v1/moodboards/{id}/image.
+//
+// Like the wardrobe item-image endpoint this is unauthenticated — the
+// moodboard ID is a UUID, and gating behind auth would require the RN
+// `expo-image` component to send the Bearer token, which we don't wire
+// today. That's a known P1 from the earlier security review; we reapply
+// the same tradeoff here so behaviour stays consistent until signed URLs
+// land.
+func (h *Handler) ServeImage(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Path: /v1/moodboards/{id}/image
+	path := strings.TrimPrefix(r.URL.Path, "/v1/moodboards/")
+	boardID := strings.TrimSuffix(path, "/image")
+	if boardID == "" || boardID == path {
+		http.NotFound(w, r)
+		return
+	}
+
+	data, contentType, err := h.repo.GetImage(r.Context(), boardID)
+	if err != nil {
+		if errors.Is(err, mongo.ErrFileNotFound) {
+			http.NotFound(w, r)
+			return
+		}
+		h.logger.Printf("moodboard: serve image %s: %v", boardID, err)
+		http.Error(w, "failed to read image", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+	_, _ = w.Write(data)
+}
+
+// decodeBoardImage accepts either a raw base64 string or a full
+// "data:image/png;base64,..." URL and returns the decoded bytes plus the
+// MIME type advertised in the prefix (defaulting to image/png). Any parse
+// failure surfaces as an error so the caller can fall back to saving
+// without a render.
+func decodeBoardImage(raw string) ([]byte, string, error) {
+	contentType := "image/png"
+	payload := raw
+	if strings.HasPrefix(raw, "data:") {
+		comma := strings.Index(raw, ",")
+		if comma < 0 {
+			return nil, "", errors.New("malformed data URL (missing comma)")
+		}
+		header := raw[5:comma]
+		payload = raw[comma+1:]
+		// header is e.g. "image/png;base64"
+		if semi := strings.Index(header, ";"); semi >= 0 {
+			ct := strings.TrimSpace(header[:semi])
+			if ct != "" {
+				contentType = ct
+			}
+		} else if header != "" {
+			contentType = header
+		}
+	}
+
+	data, err := base64.StdEncoding.DecodeString(payload)
+	if err != nil {
+		return nil, "", err
+	}
+	return data, contentType, nil
+}

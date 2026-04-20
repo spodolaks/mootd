@@ -9,6 +9,7 @@ const toAbsoluteImageURL = (imageUrl: string | undefined): string => {
 
 const hydrateSavedBoard = (board: SavedMoodBoard): SavedMoodBoard => ({
   ...board,
+  imageUrl: toAbsoluteImageURL(board.imageUrl) || undefined,
   outfit: {
     ...board.outfit,
     panelUrl: toAbsoluteImageURL(board.outfit.panelUrl) || undefined,
@@ -41,6 +42,7 @@ export class ApiMoodBoardRepository implements IMoodBoardRepository {
         ? { generatedBatch: opts.generatedBatch }
         : {}),
       ...(opts.jobId ? { jobId: opts.jobId } : {}),
+      ...(opts.boardImage ? { boardImage: opts.boardImage } : {}),
     });
     return hydrateSavedBoard(board);
   }

@@ -21,11 +21,13 @@ import (
 var errBoom = errors.New("boom")
 
 // stubRepo is the minimum Repository implementation needed for Save tests.
-// Only Save + DeleteAllByUser have real bodies; the rest satisfy the
-// interface so we can hand this to NewHandler.
+// Only Save + SaveImage have real bodies; the rest satisfy the interface so
+// we can hand this to NewHandler.
 type stubRepo struct {
-	saved []SavedMoodBoard
-	err   error
+	saved          []SavedMoodBoard
+	err            error
+	savedImages    map[string][]byte
+	saveImageError error
 }
 
 func (s *stubRepo) Save(_ context.Context, b SavedMoodBoard) error {
@@ -45,6 +47,22 @@ func (s *stubRepo) FindRecent(_ context.Context, _ string, _ int) ([]SavedMoodBo
 	return nil, nil
 }
 func (s *stubRepo) DeleteAllByUser(_ context.Context, _ string) (int, error) { return 0, nil }
+func (s *stubRepo) FindByID(_ context.Context, _ string) (*SavedMoodBoard, error) {
+	return nil, nil
+}
+func (s *stubRepo) SaveImage(_ context.Context, boardID string, data []byte, _ string) error {
+	if s.saveImageError != nil {
+		return s.saveImageError
+	}
+	if s.savedImages == nil {
+		s.savedImages = map[string][]byte{}
+	}
+	s.savedImages[boardID] = data
+	return nil
+}
+func (s *stubRepo) GetImage(_ context.Context, _ string) ([]byte, string, error) {
+	return nil, "", nil
+}
 
 type fakeWardrobeRepo struct{}
 
@@ -159,5 +177,116 @@ func TestSave_HookFiresOnlyAfterRepoSucceeds(t *testing.T) {
 	}
 	if called {
 		t.Error("hook was invoked despite save failure — feedback would record a phantom event")
+	}
+}
+
+func TestSave_PersistsBoardImage(t *testing.T) {
+	repo := &stubRepo{}
+	h := NewHandler(log.New(io.Discard, "", 0), repo, fakeWardrobeRepo{}, nil, nil)
+
+	// 1x1 transparent PNG as a minimal valid payload — we only check that the
+	// bytes round-trip into SaveImage; we don't decode them.
+	const pngB64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg=="
+	body := map[string]any{
+		"outfit":     map[string]any{"name": "X", "items": []string{"a"}, "description": "d"},
+		"date":       "2026-04-20",
+		"boardImage": "data:image/png;base64," + pngB64,
+	}
+	rec := httptest.NewRecorder()
+	h.Save(rec, authedPost(t, "u1", body))
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", rec.Code, rec.Body.String())
+	}
+	if len(repo.saved) != 1 {
+		t.Fatalf("saved = %d, want 1", len(repo.saved))
+	}
+	saved := repo.saved[0]
+	if saved.ImageURL == "" {
+		t.Error("expected SavedMoodBoard.ImageURL to be populated when image succeeded")
+	}
+	if got := repo.savedImages[saved.ID]; len(got) == 0 {
+		t.Errorf("expected SaveImage to receive bytes for board %q, got none", saved.ID)
+	}
+}
+
+func TestSave_SkipsImageWhenDecodeFails(t *testing.T) {
+	repo := &stubRepo{}
+	h := NewHandler(log.New(io.Discard, "", 0), repo, fakeWardrobeRepo{}, nil, nil)
+
+	body := map[string]any{
+		"outfit":     map[string]any{"name": "X", "items": []string{"a"}, "description": "d"},
+		"boardImage": "not base64 at all",
+	}
+	rec := httptest.NewRecorder()
+	h.Save(rec, authedPost(t, "u1", body))
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201 (save should succeed even with bad image); body=%s", rec.Code, rec.Body.String())
+	}
+	if len(repo.saved) != 1 {
+		t.Fatalf("saved = %d, want 1", len(repo.saved))
+	}
+	if repo.saved[0].ImageURL != "" {
+		t.Errorf("ImageURL should be empty when decode failed, got %q", repo.saved[0].ImageURL)
+	}
+	if len(repo.savedImages) != 0 {
+		t.Errorf("SaveImage should not have been called on decode failure; got %v", repo.savedImages)
+	}
+}
+
+func TestSave_SkipsImageWhenSaveFails(t *testing.T) {
+	repo := &stubRepo{saveImageError: errors.New("gridfs down")}
+	h := NewHandler(log.New(io.Discard, "", 0), repo, fakeWardrobeRepo{}, nil, nil)
+
+	const pngB64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg=="
+	body := map[string]any{
+		"outfit":     map[string]any{"name": "X", "items": []string{"a"}, "description": "d"},
+		"boardImage": pngB64,
+	}
+	rec := httptest.NewRecorder()
+	h.Save(rec, authedPost(t, "u1", body))
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201 even when image storage errors; body=%s", rec.Code, rec.Body.String())
+	}
+	if repo.saved[0].ImageURL != "" {
+		t.Errorf("ImageURL should be empty when SaveImage errored, got %q", repo.saved[0].ImageURL)
+	}
+}
+
+func TestDecodeBoardImage_Variants(t *testing.T) {
+	const pngB64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg=="
+	cases := []struct {
+		name        string
+		input       string
+		wantContent string
+		wantErr     bool
+	}{
+		{"raw base64", pngB64, "image/png", false},
+		{"data url png", "data:image/png;base64," + pngB64, "image/png", false},
+		{"data url jpeg", "data:image/jpeg;base64," + pngB64, "image/jpeg", false},
+		{"malformed data url", "data:garbage", "", true},
+		{"bogus base64", "not base64 at all", "", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			data, ct, err := decodeBoardImage(tc.input)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("want error, got bytes=%d ct=%q", len(data), ct)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if ct != tc.wantContent {
+				t.Errorf("content-type = %q, want %q", ct, tc.wantContent)
+			}
+			if len(data) == 0 {
+				t.Error("decoded bytes should not be empty")
+			}
+		})
 	}
 }
