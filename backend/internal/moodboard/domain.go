@@ -24,6 +24,10 @@ type Weather struct {
 // Outfit is stored inline (not by reference) so the moodboard remains displayable
 // even if the original wardrobe items are later deleted.
 type Outfit struct {
+	// ID is optional — the client assigns one when a generated batch is shown
+	// so feedback events can distinguish which outfit in the batch was picked.
+	// The server doesn't require it; the moodboard itself uses SavedMoodBoard.ID.
+	ID              string             `bson:"id,omitempty"     json:"id,omitempty"`
 	Name            string             `bson:"name"             json:"name"`
 	Description     string             `bson:"description"      json:"description"`
 	Items           []string           `bson:"items"            json:"items"`                       // wardrobe item IDs
@@ -51,9 +55,21 @@ type SavedMoodBoard struct {
 }
 
 // SaveRequest is the body for POST /v1/moodboards.
+//
+// GeneratedBatch is optional but strongly recommended — it lets the server
+// record the *full set* of outfits the user was shown (saved + rejected) on
+// the feedback event, which is the only way preference pairs can be
+// reconstructed later for ranker / DPO training. Without it we know only
+// what was picked, not what was passed over.
+//
+// JobID ties the save back to the POST /v1/outfits/generate job that
+// produced the batch, so the training pipeline can cross-reference prompt
+// inputs.
 type SaveRequest struct {
-	Outfit Outfit `json:"outfit"`
-	Date   string `json:"date"` // YYYY-MM-DD; if empty, today is used
+	Outfit         Outfit   `json:"outfit"`
+	Date           string   `json:"date"` // YYYY-MM-DD; if empty, today is used
+	GeneratedBatch []Outfit `json:"generatedBatch,omitempty"`
+	JobID          string   `json:"jobId,omitempty"`
 }
 
 // ListResponse is returned from GET /v1/moodboards.

@@ -14,12 +14,22 @@ import (
 	"mootd/backend/internal/wardrobe"
 )
 
+// SaveEventFn is called after a moodboard is successfully saved. Implementations
+// typically append a feedback.Event so later training jobs can reconstruct
+// preference pairs (saved outfit vs the rejected members of GeneratedBatch).
+//
+// It is best-effort: errors are logged but never fail the user's save, and the
+// handler skips the hook entirely when nil. Wiring happens in app.go so the
+// moodboard package stays free of a direct feedback-package import.
+type SaveEventFn func(ctx context.Context, userID string, req SaveRequest, saved SavedMoodBoard)
+
 // Handler handles moodboard HTTP endpoints.
 type Handler struct {
 	logger        *log.Logger
 	repo          Repository
 	wardrobeRepo  wardrobeRepository
 	profileUpdate profileUpdater
+	onSave        SaveEventFn
 }
 
 // wardrobeRepository is the subset of the wardrobe repo needed to snapshot items.
@@ -48,8 +58,10 @@ func (f ProfileUpdaterFunc) UpdateArchetypeProfile(ctx context.Context, userID s
 
 // NewHandler creates a Handler.
 // profileUpdate may be nil if archetype tracking is not configured.
-func NewHandler(logger *log.Logger, repo Repository, wardrobeRepo wardrobeRepository, profileUpdate profileUpdater) *Handler {
-	return &Handler{logger: logger, repo: repo, wardrobeRepo: wardrobeRepo, profileUpdate: profileUpdate}
+// onSave may be nil; when provided it runs after a successful save and is
+// where the feedback event is emitted (see app.go for the wiring).
+func NewHandler(logger *log.Logger, repo Repository, wardrobeRepo wardrobeRepository, profileUpdate profileUpdater, onSave SaveEventFn) *Handler {
+	return &Handler{logger: logger, repo: repo, wardrobeRepo: wardrobeRepo, profileUpdate: profileUpdate, onSave: onSave}
 }
 
 // Save handles POST /v1/moodboards.
@@ -94,6 +106,12 @@ func (h *Handler) Save(w http.ResponseWriter, r *http.Request) {
 	// Update user's archetype profile based on this outfit choice.
 	if h.profileUpdate != nil && len(outfit.ArchetypeScores) > 0 {
 		h.updateUserProfile(r.Context(), userID, outfit.ArchetypeScores)
+	}
+
+	// Emit the feedback event last so a downstream failure never rolls back
+	// the user's save. The hook itself is expected to swallow errors.
+	if h.onSave != nil {
+		h.onSave(r.Context(), userID, req, board)
 	}
 
 	response.WriteJSON(w, http.StatusCreated, board)
