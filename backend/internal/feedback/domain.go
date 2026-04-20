@@ -88,7 +88,13 @@ type Event struct {
 	// events produced by prompts or providers that have since been retired.
 	PromptVersion    string `bson:"promptVersion,omitempty"    json:"promptVersion,omitempty"`
 	GeneratorVersion string `bson:"generatorVersion,omitempty" json:"generatorVersion,omitempty"`
-	SchemaVersion    int    `bson:"schemaVersion"              json:"schemaVersion"`
+	// SwappedFrom and SwappedTo apply to Action == item_swapped events. They
+	// record the wardrobe item IDs involved in the swap, giving training an
+	// explicit (rejected → accepted) pair within the same outfit without
+	// needing to diff sequential GeneratedBatch snapshots.
+	SwappedFrom      string `bson:"swappedFrom,omitempty"      json:"swappedFrom,omitempty"`
+	SwappedTo        string `bson:"swappedTo,omitempty"        json:"swappedTo,omitempty"`
+	SchemaVersion    int       `bson:"schemaVersion"           json:"schemaVersion"`
 	CreatedAt        time.Time `bson:"createdAt"               json:"createdAt"`
 }
 
@@ -103,6 +109,8 @@ type SubmitRequest struct {
 	Context          Context          `json:"context,omitempty"`
 	PromptVersion    string           `json:"promptVersion,omitempty"`
 	GeneratorVersion string           `json:"generatorVersion,omitempty"`
+	SwappedFrom      string           `json:"swappedFrom,omitempty"`
+	SwappedTo        string           `json:"swappedTo,omitempty"`
 }
 
 // SubmitResponse confirms the event was persisted.

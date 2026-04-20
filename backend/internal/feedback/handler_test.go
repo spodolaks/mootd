@@ -168,6 +168,27 @@ func TestSubmit_InsertFailurePropagates500(t *testing.T) {
 	}
 }
 
+func TestSubmit_PersistsSwapMetadata(t *testing.T) {
+	repo := &fakeRepo{}
+	h := NewHandler(log.New(io.Discard, "", 0), repo)
+
+	body := `{"action":"item_swapped","chosenOutfitId":"o1","swappedFrom":"item_a","swappedTo":"item_b"}`
+	req := newAuthedRequest(t, body, "u1")
+	rec := httptest.NewRecorder()
+	h.Submit(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", rec.Code, rec.Body.String())
+	}
+	if len(repo.events) != 1 {
+		t.Fatalf("events = %d, want 1", len(repo.events))
+	}
+	got := repo.events[0]
+	if got.SwappedFrom != "item_a" || got.SwappedTo != "item_b" {
+		t.Errorf("swap metadata = (%q, %q), want (item_a, item_b)", got.SwappedFrom, got.SwappedTo)
+	}
+}
+
 func TestSubmit_IgnoresUserIDInBody(t *testing.T) {
 	// SubmitRequest has no UserID field, but a client might try sending one.
 	// Verify the handler still attributes the event to the JWT user.
