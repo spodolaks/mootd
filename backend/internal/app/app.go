@@ -5,6 +5,7 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -140,13 +141,34 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 	}
 
 	moodboardRepo := moodboard.NewMongoRepository(a.MongoClient, a.MongoDB)
-	moodboard.NewHandler(a.Logger, moodboardRepo, wardrobeRepo, profileUpdater).RegisterRoutes(mux, authMiddleware)
 
-	// Feedback collection is registered alongside moodboard because that's
-	// where save/skip events will originate from in a later PR. The endpoint
-	// itself is callable now; nothing yet emits to it.
+	// Feedback collection is registered alongside moodboard — the save hook
+	// wired below is currently the only server-side emitter.
 	feedbackRepo := feedback.NewMongoRepository(a.MongoClient, a.MongoDB)
 	feedback.NewHandler(a.Logger, feedbackRepo).RegisterRoutes(mux, authMiddleware, feedbackLimit)
+
+	// Emit a "saved" feedback event every time a moodboard is saved. We keep
+	// this wiring here so the moodboard package doesn't import feedback
+	// directly; the hook translates moodboard types to feedback types at the
+	// boundary. Errors are logged and swallowed — feedback is best-effort and
+	// must never block a user save.
+	moodboardOnSave := moodboard.SaveEventFn(func(ctx context.Context, userID string, req moodboard.SaveRequest, saved moodboard.SavedMoodBoard) {
+		event := feedback.Event{
+			ID:             saved.ID + ":saved",
+			UserID:         userID,
+			JobID:          req.JobID,
+			ChosenOutfitID: req.Outfit.ID,
+			Action:         feedback.ActionSaved,
+			GeneratedBatch: toFeedbackSnapshots(req.GeneratedBatch, req.Outfit),
+			Context:        toFeedbackContext(req.Outfit),
+			SchemaVersion:  feedback.CurrentSchemaVersion,
+			CreatedAt:      saved.CreatedAt,
+		}
+		if err := feedbackRepo.Insert(ctx, event); err != nil {
+			a.Logger.Printf("moodboard: emit saved-feedback for user %s board %s: %v", userID, saved.ID, err)
+		}
+	})
+	moodboard.NewHandler(a.Logger, moodboardRepo, wardrobeRepo, profileUpdater, moodboardOnSave).RegisterRoutes(mux, authMiddleware)
 
 	// Wire the user-deletion cascade now that we have all the owning repos.
 	// Order: images + items → moodboards → feedback → user doc. The user doc
@@ -323,4 +345,81 @@ func (a *surfaceAdapter) ResolveURL(id string) string {
 func (a *App) StartWorkers(ctx context.Context, wardrobeRepo wardrobe.Repository) {
 	bgRemover := wardrobe.NewBackgroundRemover(a.BgRemoverBaseURL)
 	wardrobe.StartPNGRetryWorker(ctx, wardrobeRepo, bgRemover, a.Logger)
+}
+
+// toFeedbackSnapshots converts a moodboard batch (+ chosen outfit, which may or
+// may not already be in the batch) into the trimmed shape the feedback log
+// stores. Including the chosen outfit when it's missing from GeneratedBatch
+// means even clients that only send the pick — not the rejects — still leave
+// a usable trail.
+func toFeedbackSnapshots(batch []moodboard.Outfit, chosen moodboard.Outfit) []feedback.OutfitSnapshot {
+	if len(batch) == 0 && chosen.ID == "" && chosen.Name == "" {
+		return nil
+	}
+	seen := make(map[string]bool, len(batch)+1)
+	snapshots := make([]feedback.OutfitSnapshot, 0, len(batch)+1)
+	for _, o := range batch {
+		if o.ID != "" {
+			if seen[o.ID] {
+				continue
+			}
+			seen[o.ID] = true
+		}
+		snapshots = append(snapshots, feedback.OutfitSnapshot{
+			ID:              o.ID,
+			Name:            o.Name,
+			Items:           append([]string(nil), o.Items...),
+			Rationale:       o.Rationale,
+			ArchetypeScores: o.ArchetypeScores,
+		})
+	}
+	if chosen.ID != "" && !seen[chosen.ID] {
+		snapshots = append(snapshots, feedback.OutfitSnapshot{
+			ID:              chosen.ID,
+			Name:            chosen.Name,
+			Items:           append([]string(nil), chosen.Items...),
+			Rationale:       chosen.Rationale,
+			ArchetypeScores: chosen.ArchetypeScores,
+		})
+	}
+	return snapshots
+}
+
+// toFeedbackContext extracts the coarse, non-PII signals we're comfortable
+// shipping to the training pipeline. Weather is condensed to a short token
+// (e.g. "sunny 18C") so downstream schemas don't need to parse a compound.
+func toFeedbackContext(chosen moodboard.Outfit) feedback.Context {
+	ctx := feedback.Context{}
+	if chosen.Weather != nil {
+		parts := make([]string, 0, 3)
+		if chosen.Weather.Condition != "" {
+			parts = append(parts, chosen.Weather.Condition)
+		}
+		if chosen.Weather.Temperature != "" {
+			unit := chosen.Weather.Unit
+			if unit == "" {
+				unit = "C"
+			}
+			parts = append(parts, chosen.Weather.Temperature+unit)
+		}
+		if len(parts) > 0 {
+			ctx.Weather = strings.Join(parts, " ")
+		}
+	}
+	// DayOfWeek / Hour are filled in from createdAt by the hook's caller if
+	// available. Archetype and Occasion come from the outfit when the client
+	// supplies them; keep empty strings rather than guessing.
+	if len(chosen.ArchetypeScores) > 0 {
+		// Record the top archetype name so the ranker can segment by dominant taste.
+		var topName string
+		var topScore float64
+		for name, score := range chosen.ArchetypeScores {
+			if score > topScore {
+				topScore = score
+				topName = name
+			}
+		}
+		ctx.Archetype = topName
+	}
+	return ctx
 }
