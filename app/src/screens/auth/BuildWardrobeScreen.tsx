@@ -53,13 +53,13 @@ export const BuildWardrobeScreen: React.FC<BuildWardrobeScreenProps> = ({
           {/* Title and Description */}
           <View style={styles.textContainer}>
             <Text variant="title2" weight="semiBold" style={styles.title}>
-              Let's build your{'\n'}wardrobe your way
+              Let&apos;s build your{'\n'}wardrobe your way
             </Text>
             <Text
               variant="subheadline"
               style={[styles.description, { color: secondaryTextColor }]}
             >
-              Take a mirror selfie and we'll detect your outfit automatically, or upload from gallery
+              Take a mirror selfie and we&apos;ll detect your outfit automatically, or upload from gallery
             </Text>
           </View>
         </View>
