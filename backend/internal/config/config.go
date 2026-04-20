@@ -2,11 +2,18 @@
 package config
 
 import (
+	"errors"
 	"log"
 	"os"
 	"strings"
 	"time"
 )
+
+// ErrCORSWildcardInProduction is returned when ENVIRONMENT=production is set
+// but CORS_ALLOWED_ORIGINS is left as the wildcard default (or resolves to an
+// empty list after trimming). Refusing to start forces operators to supply an
+// explicit origin allowlist instead of accidentally shipping an open policy.
+var ErrCORSWildcardInProduction = errors.New("CORS_ALLOWED_ORIGINS must be an explicit comma-separated list in production; wildcard '*' is not permitted")
 
 const (
 	defaultHTTPAddr          = ":8080"
@@ -142,6 +149,12 @@ func Load(logger *log.Logger) Config {
 			origins = append(origins, trimmed)
 		}
 	}
+	if err := validateCORSOrigins(origins, env); err != nil {
+		logger.Fatalf("FATAL: %v. Set CORS_ALLOWED_ORIGINS to a comma-separated list of trusted origins (e.g. \"https://app.example.com,https://admin.example.com\").", err)
+	}
+	if containsWildcard(origins) {
+		logger.Printf("WARNING: CORS_ALLOWED_ORIGINS contains '*' — acceptable for development, but must be an explicit origin list in production.")
+	}
 
 	detectionAPIKey := GetEnv("DETECTION_API_KEY", "")
 	if detectionAPIKey == "" {
@@ -195,6 +208,29 @@ func Load(logger *log.Logger) Config {
 	}
 
 	return cfg
+}
+
+// validateCORSOrigins returns an error if the origin list is unsafe for the
+// given environment. In production, a wildcard entry or an empty list is
+// rejected so operators cannot accidentally ship an open CORS policy.
+func validateCORSOrigins(origins []string, env string) error {
+	if env != "production" {
+		return nil
+	}
+	if len(origins) == 0 || containsWildcard(origins) {
+		return ErrCORSWildcardInProduction
+	}
+	return nil
+}
+
+// containsWildcard reports whether the origin list contains the '*' wildcard.
+func containsWildcard(origins []string) bool {
+	for _, o := range origins {
+		if o == "*" {
+			return true
+		}
+	}
+	return false
 }
 
 // GetEnv retrieves an environment variable with a fallback value.
