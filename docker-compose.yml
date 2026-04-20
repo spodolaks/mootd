@@ -76,7 +76,7 @@ services:
       - default
       - bcgrm_default
     ports:
-      - "8081:8080"
+      - "8089:8080"
     depends_on:
       mongo:
         condition: service_healthy
