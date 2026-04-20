@@ -23,12 +23,27 @@ func WriteJSON(w http.ResponseWriter, status int, payload any) {
 	}
 }
 
-// DecodeJSONBody decodes a JSON request body into dst.
-// It disallows unknown fields, rejects empty bodies, and requires exactly one JSON object.
-func DecodeJSONBody(w http.ResponseWriter, r *http.Request, dst any) error {
-	const maxBodyBytes = 1 << 20
+// DefaultMaxBodyBytes is the ceiling applied by DecodeJSONBody. Sized
+// deliberately small — most endpoints accept a handful of fields and don't
+// need more than this to do their job. Endpoints that legitimately carry
+// large payloads (e.g. moodboard save, which ships a base64 PNG render of
+// the collage) must use DecodeJSONBodyWithLimit and declare their own cap.
+const DefaultMaxBodyBytes int64 = 1 << 20
 
-	limitedBody := http.MaxBytesReader(w, r.Body, maxBodyBytes)
+// DecodeJSONBody decodes a JSON request body into dst, enforcing the default
+// 1 MiB cap. It disallows unknown fields, rejects empty bodies, and requires
+// exactly one JSON object.
+func DecodeJSONBody(w http.ResponseWriter, r *http.Request, dst any) error {
+	return DecodeJSONBodyWithLimit(w, r, dst, DefaultMaxBodyBytes)
+}
+
+// DecodeJSONBodyWithLimit is DecodeJSONBody with a caller-supplied byte cap.
+// Use it on endpoints that accept large payloads (image uploads, bulk writes)
+// so the tight default stays in force everywhere else — an oversized body
+// hits the MaxBytesReader before any handler logic runs, which is why a too-
+// small cap surfaces as an opaque 400 with no handler-level logging.
+func DecodeJSONBodyWithLimit(w http.ResponseWriter, r *http.Request, dst any, maxBytes int64) error {
+	limitedBody := http.MaxBytesReader(w, r.Body, maxBytes)
 	defer limitedBody.Close()
 
 	dec := json.NewDecoder(limitedBody)

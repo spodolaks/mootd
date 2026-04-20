@@ -25,6 +25,14 @@ import (
 // GridFS. Decoded bytes, not base64 length.
 const maxBoardImageBytes = 5 * 1024 * 1024
 
+// maxSaveRequestBytes caps the raw POST body. It must comfortably exceed
+// maxBoardImageBytes once base64 overhead (~33%) and the surrounding JSON
+// fields are included, otherwise the JSON decoder's MaxBytesReader trips
+// before handler logic runs — a symptom we hit in #18 when the shared
+// 1 MiB default rejected every web-captured save. 10 MiB gives a ~3 MiB
+// headroom above the decoded-image cap.
+const maxSaveRequestBytes = 10 * 1024 * 1024
+
 // SaveEventFn is called after a moodboard is successfully saved. Implementations
 // typically append a feedback.Event so later training jobs can reconstruct
 // preference pairs (saved outfit vs the rejected members of GeneratedBatch).
@@ -84,7 +92,9 @@ func (h *Handler) Save(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req SaveRequest
-	if err := response.DecodeJSONBody(w, r, &req); err != nil {
+	// Use the larger per-endpoint cap so the rendered collage PNG doesn't
+	// trip the shared 1 MiB default. See maxSaveRequestBytes for rationale.
+	if err := response.DecodeJSONBodyWithLimit(w, r, &req, maxSaveRequestBytes); err != nil {
 		response.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}

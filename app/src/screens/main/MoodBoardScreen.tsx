@@ -24,10 +24,10 @@ import {
 import { Image } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
-import type ViewShot from 'react-native-view-shot';
 
 import { classifyZone } from '@/src/components/moodboard/Collage';
 import { OutfitCard } from '@/src/components/moodboard/OutfitCard';
+import type { CollageCaptureHandle } from '@/src/components/moodboard/OutfitCard';
 import { SavedBoardView } from '@/src/components/moodboard/SavedBoardView';
 import { SCREEN_WIDTH, CONTAINER_PADDING } from '@/src/components/moodboard/constants';
 import { useTabContentBottomPadding } from '@/app/(main)/_layout';
@@ -57,11 +57,12 @@ export const MoodBoardScreen: React.FC = () => {
   // client-assigned outfit.id generated at receive time. Cleared on every
   // fresh generation so the user rates each batch independently.
   const [ratings, setRatings] = useState<Record<string, 'up' | 'down'>>({});
-  // One ViewShot ref per card in the batch, indexed by the outfit's client
-  // ID. Populated by OutfitCard; read at Save time to capture a PNG of the
-  // collage exactly as the user saw it. Missing entries are tolerated — a
-  // failed capture just means the saved row ships without a render.
-  const collageShotRefs = useRef<Record<string, ViewShot | null>>({});
+  // One capture handle per card in the batch, indexed by the outfit's
+  // client ID. Populated by OutfitCard via its imperative handle; read at
+  // Save time. handle.capture() hides the native/web split and returns a
+  // ready-to-send "data:image/png;base64,…" string (or null on failure, in
+  // which case the save still proceeds — just without a render).
+  const collageCaptureRefs = useRef<Record<string, CollageCaptureHandle | null>>({});
   // Ties every feedback event from this batch back to the generation job, so
   // the training pipeline can reconstruct the (batch → series-of-actions)
   // trajectory for this user.
@@ -154,8 +155,8 @@ export const MoodBoardScreen: React.FC = () => {
       setCurrentJobId(jobId);
       setRatings({});
       // Discard stale refs from the previous batch so we don't accidentally
-      // capture an old card's ViewShot on the next Save.
-      collageShotRefs.current = {};
+      // capture an old card's handle on the next Save.
+      collageCaptureRefs.current = {};
       setActiveIndex(0);
       setScreenState('choosing');
     } catch (e) {
@@ -175,17 +176,14 @@ export const MoodBoardScreen: React.FC = () => {
     try {
       // Capture a PNG of the collage exactly as the user sees it — this is
       // what the calendar will render as the "hero" image for the saved
-      // moodboard. Best-effort: on any capture failure we simply omit the
-      // image and the calendar falls back to rendering from snapshots.
+      // moodboard. The handle abstracts the native/web split. Best-effort:
+      // null on failure means we just send the save without boardImage and
+      // the calendar falls back to rendering from snapshots.
       let boardImage: string | undefined;
-      const shot = outfit.id ? collageShotRefs.current[outfit.id] : null;
-      if (shot && typeof shot.capture === 'function') {
-        try {
-          const base64 = await shot.capture();
-          boardImage = base64 ? `data:image/png;base64,${base64}` : undefined;
-        } catch (err) {
-          console.warn('[MoodBoard] collage capture failed', err);
-        }
+      const handle = outfit.id ? collageCaptureRefs.current[outfit.id] : null;
+      if (handle) {
+        const captured = await handle.capture();
+        boardImage = captured ?? undefined;
       }
 
       // Forward the full generatedBatch plus jobId so the server-side
@@ -350,10 +348,10 @@ export const MoodBoardScreen: React.FC = () => {
                     onThumbsUp={() => handleRateOutfit(item, 'up')}
                     onThumbsDown={() => handleRateOutfit(item, 'down')}
                     rating={item.id ? (ratings[item.id] ?? null) : null}
-                    collageShotRef={item.id
-                      ? (ref) => {
+                    collageCaptureRef={item.id
+                      ? (handle) => {
                           if (item.id) {
-                            collageShotRefs.current[item.id] = ref;
+                            collageCaptureRefs.current[item.id] = handle;
                           }
                         }
                       : undefined}
