@@ -77,3 +77,35 @@ func TestDecodeJSONBody_OversizedBody(t *testing.T) {
 		t.Error("expected error for oversized body, got nil")
 	}
 }
+
+func TestDecodeJSONBodyWithLimit_AcceptsUnderCap(t *testing.T) {
+	// Body that would exceed the default 1 MiB cap but fits within a
+	// caller-supplied 4 MiB cap — simulates the moodboard save with a
+	// rendered collage PNG.
+	bigValue := strings.Repeat("x", 2<<20) // 2 MiB string
+	body := `{"payload":"` + bigValue + `"}`
+	var dst struct{ Payload string }
+
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+
+	if err := DecodeJSONBodyWithLimit(rec, req, &dst, 4<<20); err != nil {
+		t.Fatalf("unexpected error under raised cap: %v", err)
+	}
+	if len(dst.Payload) != len(bigValue) {
+		t.Errorf("decoded length = %d, want %d", len(dst.Payload), len(bigValue))
+	}
+}
+
+func TestDecodeJSONBodyWithLimit_RejectsOverCap(t *testing.T) {
+	body := `{"payload":"` + strings.Repeat("x", 4<<20) + `"}` // 4 MiB content
+	var dst struct{ Payload string }
+
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+
+	// Cap at 2 MiB — the 4 MiB body must be rejected.
+	if err := DecodeJSONBodyWithLimit(rec, req, &dst, 2<<20); err == nil {
+		t.Error("expected error for body exceeding custom cap, got nil")
+	}
+}
