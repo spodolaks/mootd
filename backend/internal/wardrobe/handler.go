@@ -23,18 +23,21 @@ const maxImageSize = 10 << 20 // 10 MB
 
 // Handler handles wardrobe HTTP endpoints.
 type Handler struct {
-	logger    *log.Logger
-	detector  *Detector
-	searcher  *Searcher
-	repo      Repository
-	bgRemover *BackgroundRemover
-	workerCtx context.Context // server-scoped context for background goroutines
+	logger       *log.Logger
+	detector     *Detector
+	searcher     *Searcher
+	repo         Repository
+	bgRemover    *BackgroundRemover
+	workerCtx    context.Context // server-scoped context for background goroutines
+	detectJobs   *DetectJobStore // optional — when nil, the async path is unavailable
 }
 
 // NewHandler creates a Handler with the given dependencies.
 // workerCtx should be tied to server lifetime so background goroutines stop on shutdown.
-func NewHandler(logger *log.Logger, detector *Detector, searcher *Searcher, repo Repository, bgRemover *BackgroundRemover, workerCtx context.Context) *Handler {
-	return &Handler{logger: logger, detector: detector, searcher: searcher, repo: repo, bgRemover: bgRemover, workerCtx: workerCtx}
+// detectJobs may be nil (e.g. when Redis is unavailable); the async Detect path
+// returns 503 in that case and clients fall back to the sync endpoint.
+func NewHandler(logger *log.Logger, detector *Detector, searcher *Searcher, repo Repository, bgRemover *BackgroundRemover, workerCtx context.Context, detectJobs *DetectJobStore) *Handler {
+	return &Handler{logger: logger, detector: detector, searcher: searcher, repo: repo, bgRemover: bgRemover, workerCtx: workerCtx, detectJobs: detectJobs}
 }
 
 // Detect handles POST /v1/wardrobe/detect.
@@ -78,20 +81,40 @@ func (h *Handler) Detect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	items := h.processDetected(r.Context(), userID, detected)
+	response.WriteJSON(w, http.StatusOK, DetectResponse{Items: items})
+}
+
+// processDetected is the shared post-detection pipeline: filter out skipped
+// items, then for each remaining item fetch or decode its image, save it to
+// GridFS, fire-and-forget background removal, and persist the ClothingItem.
+//
+// Runs items in parallel because each one hits the detection service for an
+// image download + the background-removal service. The parallel fan-out is
+// bounded only by the goroutine stack; in practice detection returns 1-8
+// items per photo so that's fine.
+//
+// Callable from both the sync Detect handler and the async SubmitDetect
+// worker. The ctx the caller passes controls the lifetime: sync uses the
+// request context (cancelled when the response closes); async uses the
+// server-scoped workerCtx so processing outlives the HTTP exchange.
+func (h *Handler) processDetected(ctx context.Context, userID string, detected []jobItem) []DetectedItem {
 	if len(detected) == 0 {
-		response.WriteJSON(w, http.StatusOK, DetectResponse{Items: []DetectedItem{}})
-		return
+		return []DetectedItem{}
 	}
 
 	now := time.Now().UTC()
 
-	// Filter skipped items first, then process the rest in parallel
-	// (each item requires an image download from the detection service).
+	// Skipped items are noise from the detection service (low confidence,
+	// duplicate class, etc.) — drop them before we fan out work.
 	toProcess := make([]jobItem, 0, len(detected))
 	for _, d := range detected {
 		if !d.Skipped {
 			toProcess = append(toProcess, d)
 		}
+	}
+	if len(toProcess) == 0 {
+		return []DetectedItem{}
 	}
 
 	responseItems := make([]DetectedItem, len(toProcess))
@@ -101,8 +124,8 @@ func (h *Handler) Detect(w http.ResponseWriter, r *http.Request) {
 		go func(idx int, d jobItem) {
 			defer wg.Done()
 			defer func() {
-				if r := recover(); r != nil {
-					h.logger.Printf("wardrobe: panic in detection goroutine for item %d: %v", idx, r)
+				if rec := recover(); rec != nil {
+					h.logger.Printf("wardrobe: panic in detection goroutine for item %d: %v", idx, rec)
 				}
 			}()
 
@@ -129,27 +152,25 @@ func (h *Handler) Detect(w http.ResponseWriter, r *http.Request) {
 				imgData = d.ImageData
 				imgCT = "image/png"
 			} else if d.ImageURL != "" {
-				// Remote API provides a URL to download.
 				var dlErr error
-				imgData, imgCT, dlErr = downloadImage(r.Context(), d.ImageURL)
+				imgData, imgCT, dlErr = downloadImage(ctx, d.ImageURL)
 				if dlErr != nil {
 					h.logger.Printf("wardrobe: download image for item %s: %v", itemID, dlErr)
 				}
 			}
 
 			if len(imgData) > 0 {
-				if saveErr := h.repo.SaveImage(r.Context(), itemID, imgData, imgCT); saveErr != nil {
+				if saveErr := h.repo.SaveImage(ctx, itemID, imgData, imgCT); saveErr != nil {
 					h.logger.Printf("wardrobe: store image for item %s: %v", itemID, saveErr)
 				} else {
 					stableImageURL = "/v1/wardrobe/items/" + itemID + "/image"
 
-					// Remove background and store PNG separately for moodboard compositing.
 					if h.bgRemover != nil {
 						pngData, bgErr := h.bgRemover.RemoveBackground(imgData, itemID+".jpg")
 						if bgErr != nil {
 							h.logger.Printf("wardrobe: bg removal for item %s: %v", itemID, bgErr)
-							TriggerPNGRetry(r.Context(), h.repo, h.bgRemover, h.logger)
-						} else if saveErr := h.repo.SaveImage(r.Context(), itemID+"-png", pngData, "image/png"); saveErr != nil {
+							TriggerPNGRetry(ctx, h.repo, h.bgRemover, h.logger)
+						} else if saveErr := h.repo.SaveImage(ctx, itemID+"-png", pngData, "image/png"); saveErr != nil {
 							h.logger.Printf("wardrobe: store png for item %s: %v", itemID, saveErr)
 						} else {
 							stablePngURL = "/v1/wardrobe/items/" + itemID + "-png/image"
@@ -173,7 +194,7 @@ func (h *Handler) Detect(w http.ResponseWriter, r *http.Request) {
 				Traits:      traits,
 				CreatedAt:   now,
 			}
-			if saveErr := h.repo.Save(r.Context(), item); saveErr != nil {
+			if saveErr := h.repo.Save(ctx, item); saveErr != nil {
 				h.logger.Printf("wardrobe: save item for user %s: %v", userID, saveErr)
 				// Continue — return detected items even if a single save fails.
 			}
@@ -190,7 +211,165 @@ func (h *Handler) Detect(w http.ResponseWriter, r *http.Request) {
 	}
 	wg.Wait()
 
-	response.WriteJSON(w, http.StatusOK, DetectResponse{Items: responseItems})
+	return responseItems
+}
+
+// SubmitDetect handles POST /v1/wardrobe/detect-jobs.
+//
+// Same input as Detect (multipart image), but returns immediately with
+// 202 + { jobId }. The actual detection runs in a background goroutine
+// using workerCtx (server-scoped) so it survives the HTTP exchange. The
+// client polls /v1/wardrobe/detect-jobs/{id} for the result.
+//
+// This exists because Cloudflare's edge enforces a ~100s read timeout on
+// the free plan; synchronous detection can take 30–180s for a full wardrobe
+// photo and routinely trips that cap. The job runs in Redis with a 10-min
+// TTL matching the outfit-generation async flow.
+//
+// Responses:
+//
+//	202 Accepted — { "jobId": "..." }
+//	400 — missing/invalid image
+//	401 — missing auth
+//	503 — Redis unavailable (no async store)
+func (h *Handler) SubmitDetect(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if h.detectJobs == nil {
+		response.WriteJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "async detection unavailable (Redis not configured)"})
+		return
+	}
+
+	userID, ok := middleware.UserIDFromContext(r.Context())
+	if !ok {
+		response.WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+
+	if err := r.ParseMultipartForm(maxImageSize); err != nil {
+		response.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "image too large or invalid form"})
+		return
+	}
+
+	file, header, err := r.FormFile("image")
+	if err != nil {
+		response.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "missing image field"})
+		return
+	}
+	defer file.Close()
+
+	imageData, err := io.ReadAll(io.LimitReader(file, maxImageSize))
+	if err != nil {
+		h.logger.Printf("wardrobe: read image: %v", err)
+		response.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to read image"})
+		return
+	}
+	filename := header.Filename
+
+	jobID := id.Generate()
+	job := &DetectJob{
+		ID:        jobID,
+		UserID:    userID,
+		Status:    DetectJobPending,
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := h.detectJobs.Save(r.Context(), job); err != nil {
+		h.logger.Printf("wardrobe: save detect job %s: %v", jobID, err)
+		response.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to create job"})
+		return
+	}
+
+	go h.runDetectionJob(jobID, userID, imageData, filename)
+
+	response.WriteJSON(w, http.StatusAccepted, map[string]string{"jobId": jobID})
+}
+
+// runDetectionJob performs the full detection pipeline in the background
+// and writes the result back into the job store. Uses workerCtx (server-
+// scoped) with a 3-minute budget — the external detection service's own
+// timeout is 2 minutes, and this gives the subsequent image-download +
+// GridFS-save work time to finish without abandoning the whole job.
+func (h *Handler) runDetectionJob(jobID, userID string, imageData []byte, filename string) {
+	ctx, cancel := context.WithTimeout(h.workerCtx, 3*time.Minute)
+	defer cancel()
+
+	defer func() {
+		if rec := recover(); rec != nil {
+			h.logger.Printf("wardrobe: panic in detect job %s: %v", jobID, rec)
+			failed := &DetectJob{ID: jobID, UserID: userID, Status: DetectJobFailed, Error: "detection failed", CreatedAt: time.Now().UTC()}
+			if err := h.detectJobs.Save(ctx, failed); err != nil {
+				h.logger.Printf("wardrobe: save panic-failed job %s: %v", jobID, err)
+			}
+		}
+	}()
+
+	processing := &DetectJob{ID: jobID, UserID: userID, Status: DetectJobProcessing, CreatedAt: time.Now().UTC()}
+	if err := h.detectJobs.Save(ctx, processing); err != nil {
+		h.logger.Printf("wardrobe: mark job %s processing: %v", jobID, err)
+	}
+
+	detected, err := h.detector.Detect(ctx, imageData, filename)
+	if err != nil {
+		h.logger.Printf("wardrobe: detect for job %s: %v", jobID, err)
+		failed := &DetectJob{ID: jobID, UserID: userID, Status: DetectJobFailed, Error: "clothing detection failed", CreatedAt: time.Now().UTC()}
+		if err := h.detectJobs.Save(ctx, failed); err != nil {
+			h.logger.Printf("wardrobe: save failed job %s: %v", jobID, err)
+		}
+		return
+	}
+
+	items := h.processDetected(ctx, userID, detected)
+
+	completed := &DetectJob{
+		ID:        jobID,
+		UserID:    userID,
+		Status:    DetectJobCompleted,
+		Items:     items,
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := h.detectJobs.Save(ctx, completed); err != nil {
+		h.logger.Printf("wardrobe: save completed job %s: %v", jobID, err)
+	}
+	h.logger.Printf("wardrobe: detect job %s completed — %d items", jobID, len(items))
+}
+
+// PollDetectJob handles GET /v1/wardrobe/detect-jobs/{id}.
+//
+// Ownership check mirrors outfit.PollJob: mismatches return 404 (not 403)
+// so a malicious client can't enumerate other users' job IDs.
+func (h *Handler) PollDetectJob(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if h.detectJobs == nil {
+		response.WriteJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "async detection unavailable (Redis not configured)"})
+		return
+	}
+
+	userID, ok := middleware.UserIDFromContext(r.Context())
+	if !ok {
+		response.WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+
+	jobID := strings.TrimPrefix(r.URL.Path, "/v1/wardrobe/detect-jobs/")
+	if jobID == "" {
+		response.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "missing job ID"})
+		return
+	}
+
+	job, err := h.detectJobs.Get(r.Context(), jobID)
+	if err != nil || job.UserID != userID {
+		response.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "job not found"})
+		return
+	}
+
+	response.WriteJSON(w, http.StatusOK, job)
 }
 
 // itemsResponse is the paginated response for GET /v1/wardrobe/items.

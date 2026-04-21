@@ -6,11 +6,33 @@ import type { ClothingDetectionResult, ClothingSearchProduct, Outfit, WardrobeIt
  */
 export interface IWardrobeRepository {
   /**
-   * Upload an image and receive detected clothing items.
+   * Upload an image and receive detected clothing items (synchronous).
+   * The request blocks until detection finishes — fine for native callers
+   * hitting the origin directly, but on web the ~100s Cloudflare edge
+   * timeout will kill long-running detections. Prefer the async pair
+   * below when running behind a CDN proxy.
    * @param imageUri - local file URI or data URI of the photo
    * @returns Detection result containing the list of identified items
    */
   detectClothing(imageUri: string): Promise<ClothingDetectionResult>;
+
+  /**
+   * Submit an image for asynchronous detection. Returns quickly (<1s)
+   * with a job ID; poll pollDetectionJob until status is completed or
+   * failed. Purpose-built for the CDN-proxied web path.
+   * @param imageUri - local file URI or data URI of the photo
+   * @returns Job ID to pass into pollDetectionJob
+   */
+  submitDetection(imageUri: string): Promise<string>;
+
+  /**
+   * Poll an async detection job. Returns status + items when complete.
+   */
+  pollDetectionJob(jobId: string): Promise<{
+    status: 'pending' | 'processing' | 'completed' | 'failed';
+    items?: ClothingDetectionResult['items'];
+    error?: string;
+  }>;
 
   /**
    * Fetch clothing items stored in the user's wardrobe with cursor pagination.

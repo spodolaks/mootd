@@ -15,32 +15,42 @@ export class MockWardrobeRepository implements IWardrobeRepository {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 
+  private mockItems = [
+    { id: 'det_001', category: 'blazer', label: 'Slim Fit Blazer', confidence: 0.94 },
+    { id: 'det_002', category: 'shirt', label: 'Oxford Shirt', confidence: 0.89 },
+    { id: 'det_003', category: 'pants', label: 'Chinos', confidence: 0.91 },
+  ];
+
   async detectClothing(imageUri: string): Promise<ClothingDetectionResult> {
     await this.delay();
+    return { originalImageUri: imageUri, items: this.mockItems };
+  }
 
-    return {
-      originalImageUri: imageUri,
-      items: [
-        {
-          id: 'det_001',
-          category: 'blazer',
-          label: 'Slim Fit Blazer',
-          confidence: 0.94,
-        },
-        {
-          id: 'det_002',
-          category: 'shirt',
-          label: 'Oxford Shirt',
-          confidence: 0.89,
-        },
-        {
-          id: 'det_003',
-          category: 'pants',
-          label: 'Chinos',
-          confidence: 0.91,
-        },
-      ],
-    };
+  // Async-path mock: the store posts then polls, so the mock hands back
+  // a job ID immediately and returns a completed status on first poll.
+  // That gives the UI the same polling shape as production without
+  // introducing fake wait-states the test harness would have to stub.
+  private mockJobs = new Map<string, 'completed'>();
+
+  async submitDetection(imageUri: string): Promise<string> {
+    await this.delay(200);
+    const jobId = `mock_job_${Date.now()}`;
+    this.mockJobs.set(jobId, 'completed');
+    // Keep imageUri for API-parity logging; mock doesn't actually use it.
+    void imageUri;
+    return jobId;
+  }
+
+  async pollDetectionJob(jobId: string): Promise<{
+    status: 'pending' | 'processing' | 'completed' | 'failed';
+    items?: ClothingDetectionResult['items'];
+    error?: string;
+  }> {
+    await this.delay(100);
+    if (!this.mockJobs.has(jobId)) {
+      return { status: 'failed', error: 'unknown job' };
+    }
+    return { status: 'completed', items: this.mockItems };
   }
 
   async updateItem(_id: string, _traits: Record<string, string>, _label?: string, _imageUrl?: string): Promise<void> {

@@ -131,6 +131,76 @@ export class ApiWardrobeRepository implements IWardrobeRepository {
     return { originalImageUri: imageUri, items };
   }
 
+  async submitDetection(imageUri: string): Promise<string> {
+    // Mirrors detectClothing's multipart handling but targets the async
+    // endpoint. Returns as soon as the backend has queued the job —
+    // typically <500 ms regardless of how long the actual detection takes.
+    console.log('[Wardrobe] Submitting async detection job');
+
+    const formData = new FormData();
+    if (Platform.OS === 'web') {
+      const res = await fetch(imageUri);
+      const blob = await res.blob();
+      formData.append('image', blob, 'photo.jpg');
+    } else {
+      formData.append('image', {
+        uri: imageUri,
+        name: 'photo.jpg',
+        type: 'image/jpeg',
+      } as unknown as Blob);
+    }
+
+    const response = await fetch(`${getApiBaseURL()}/v1/wardrobe/detect-jobs`, {
+      method: 'POST',
+      body: formData,
+      headers: {
+        ...(getAuthToken() ? { Authorization: `Bearer ${getAuthToken()}` } : {}),
+      },
+    });
+
+    const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+    if (!response.ok) {
+      const msg =
+        typeof body.error === 'string' ? body.error : `Detection submit failed (${response.status})`;
+      throw new ApiError(msg, response.status, body);
+    }
+
+    const jobId = body.jobId;
+    if (typeof jobId !== 'string' || !jobId) {
+      throw new ApiError('Detection submit returned no jobId', response.status, body);
+    }
+    console.log('[Wardrobe] ✓ Detection job accepted:', jobId);
+    return jobId;
+  }
+
+  async pollDetectionJob(jobId: string): Promise<{
+    status: 'pending' | 'processing' | 'completed' | 'failed';
+    items?: ClothingDetectionResult['items'];
+    error?: string;
+  }> {
+    // The backend returns the full DetectJob shape; we project it into the
+    // narrower interface the store expects. Items come back with relative
+    // imageUrl/pngImageUrl — hydrate them to absolute here so callers get
+    // the same shape the sync detectClothing path produces.
+    const raw = await apiClient.get<{
+      status: 'pending' | 'processing' | 'completed' | 'failed';
+      items?: DetectAPIResponse['items'];
+      error?: string;
+    }>(`/v1/wardrobe/detect-jobs/${encodeURIComponent(jobId)}`);
+
+    const items: DetectedClothingItem[] | undefined = raw.items?.map(item => ({
+      id: item.id,
+      category: item.category,
+      label: item.label,
+      confidence: item.confidence,
+      imageUrl: toAbsoluteImageURL(item.imageUrl),
+      pngImageUrl: toAbsoluteImageURL(item.pngImageUrl) || undefined,
+      traits: item.traits,
+    }));
+
+    return { status: raw.status, items, error: raw.error };
+  }
+
   async getItems(params?: { limit?: number; cursor?: string }): Promise<{ items: WardrobeItem[]; nextCursor: string | null }> {
     const qs = new URLSearchParams();
     if (params?.limit) qs.set('limit', String(params.limit));

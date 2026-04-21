@@ -114,7 +114,14 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 	detector := wardrobe.NewDetector(a.DetectionAPIBaseURL, a.DetectionAPIKey, a.Logger)
 	searcher := wardrobe.NewSearcher(a.DetectionAPIBaseURL, a.DetectionAPIKey)
 	wardrobeRepo := wardrobe.NewMongoRepository(a.MongoClient, a.MongoDB)
-	wardrobe.NewHandler(a.Logger, detector, searcher, wardrobeRepo, bgRemover, workerCtx).RegisterRoutes(mux, authMiddleware)
+	// Async detection uses Redis for job state. Same fallback pattern as
+	// outfit generation: when Redis is down, the async endpoints return 503
+	// and clients can still use the sync /v1/wardrobe/detect path.
+	var detectJobs *wardrobe.DetectJobStore
+	if redisClient != nil {
+		detectJobs = wardrobe.NewDetectJobStore(redisClient)
+	}
+	wardrobe.NewHandler(a.Logger, detector, searcher, wardrobeRepo, bgRemover, workerCtx, detectJobs).RegisterRoutes(mux, authMiddleware)
 
 	brands.NewHandler(a.Logger, brands.NewMongoRepository(a.MongoClient, a.MongoDB)).RegisterRoutes(mux, authMiddleware)
 
