@@ -1,0 +1,29 @@
+# Production Caddyfile for the MOOTD backend.
+#
+# Caddy terminates TLS (Let's Encrypt, renewed automatically) and reverse-
+# proxies to the backend container bound to loopback. Cloudflare sits in
+# front of Caddy in "Full (strict)" mode — both hops verified by real
+# certificates, so a browser → CF → Caddy → backend chain is end-to-end
+# TLS with no gaps.
+#
+# Install: copy this file to /etc/caddy/Caddyfile on the server and
+# `systemctl reload caddy`. Caddy requests the cert on first request to
+# the hostname and stores it in /var/lib/caddy.
+
+api.spodolaks.id.lv {
+    # Backend compose binds 127.0.0.1:8089; nothing else on the host can
+    # hit it, so this proxy is the only public path into the service.
+    reverse_proxy 127.0.0.1:8089
+
+    # Cloudflare puts the real client address in CF-Connecting-IP. Forward
+    # it as X-Forwarded-For so the backend's logging middleware + per-IP
+    # rate limiter see the user, not Cloudflare's edge node.
+    request_header X-Forwarded-For {http.request.header.CF-Connecting-IP}
+
+    encode gzip
+
+    log {
+        output file /var/log/caddy/access.log
+        format json
+    }
+}

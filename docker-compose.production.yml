@@ -1,0 +1,33 @@
+# Production overlay for docker-compose.yml.
+#
+# Apply with:
+#   docker compose -f docker-compose.yml -f docker-compose.production.yml up -d --build
+#
+# Differences from dev:
+#   - Backend binds to 127.0.0.1 only — reachable through Caddy, nothing else.
+#   - MongoDB + Redis drop their host ports entirely. They stay on the compose
+#     network; nothing outside the compose stack ever touches them.
+#   - Environment is sourced from .env on the server (see deploy/README.md for
+#     the expected variables).
+#
+# The `!override` YAML tag replaces the base list instead of merging; this
+# requires Docker Compose v2.24+ (Jan 2024), which is standard on any recent
+# Docker install.
+
+services:
+  backend:
+    ports: !override
+      - "127.0.0.1:8089:8080"
+    environment:
+      ENVIRONMENT: "${ENVIRONMENT:-production}"
+      JWT_SECRET: "${JWT_SECRET:?JWT_SECRET must be set in .env}"
+      ENABLE_MOCK_LOGIN: "${ENABLE_MOCK_LOGIN:-false}"
+      CORS_ALLOWED_ORIGINS: "${CORS_ALLOWED_ORIGINS:?CORS_ALLOWED_ORIGINS must be set}"
+      # Reuse everything else from docker-compose.yml — detection key, OpenAI,
+      # Redis URL etc. merge by key.
+
+  mongo:
+    ports: !override []
+
+  redis:
+    ports: !override []
