@@ -48,17 +48,20 @@ export const useDetectionJobStore = create<DetectionJobState>((set, get) => ({
 
     set((state) => ({ jobs: [job, ...state.jobs] }));
 
-    // Run detection in background
+    // Run detection in background. Two-phase: submit once (cheap, <1 s),
+    // then poll every 3 s until the server reports completed/failed. Falls
+    // back to the synchronous endpoint if the async one isn't available
+    // (e.g. local backend without Redis, or a mock repo that hasn't
+    // implemented submit yet).
     void (async () => {
-      try {
+      const updateStatus = (text: string) =>
         set((state) => ({
           jobs: state.jobs.map((j) =>
-            j.id === jobId ? { ...j, statusText: 'Detecting clothing items...' } : j
+            j.id === jobId ? { ...j, statusText: text } : j
           ),
         }));
 
-        const result = await wardrobeRepository.detectClothing(imageUri);
-
+      const markCompleted = (result: ClothingDetectionResult) =>
         set((state) => ({
           jobs: state.jobs.map((j) =>
             j.id === jobId
@@ -72,8 +75,8 @@ export const useDetectionJobStore = create<DetectionJobState>((set, get) => ({
               : j
           ),
         }));
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : 'Detection failed';
+
+      const markFailed = (msg: string) =>
         set((state) => ({
           jobs: state.jobs.map((j) =>
             j.id === jobId
@@ -87,6 +90,55 @@ export const useDetectionJobStore = create<DetectionJobState>((set, get) => ({
               : j
           ),
         }));
+
+      try {
+        updateStatus('Uploading photo...');
+
+        let serverJobId: string | null = null;
+        try {
+          serverJobId = await wardrobeRepository.submitDetection(imageUri);
+        } catch (submitErr) {
+          // Async endpoint unavailable (503) or server doesn't know the
+          // route. Fall back to the sync path — works fine on local / direct
+          // origin hits where the 100s CDN cap isn't a concern.
+          console.warn('[detectionJob] async submit failed, falling back to sync:', submitErr);
+          updateStatus('Detecting clothing items...');
+          const result = await wardrobeRepository.detectClothing(imageUri);
+          markCompleted(result);
+          return;
+        }
+
+        updateStatus('Detecting clothing items...');
+
+        // Poll every 3 s for up to 5 min. That's well above the detection
+        // service's own 2-min internal timeout, so a normal completion lands
+        // in ~30–90 s. Failure/timeout surfaces as a failed status.
+        const pollIntervalMs = 3000;
+        const pollDeadline = Date.now() + 5 * 60 * 1000;
+
+        while (Date.now() < pollDeadline) {
+          await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+          const poll = await wardrobeRepository.pollDetectionJob(serverJobId);
+
+          if (poll.status === 'completed') {
+            const result: ClothingDetectionResult = {
+              originalImageUri: imageUri,
+              items: poll.items ?? [],
+            };
+            markCompleted(result);
+            return;
+          }
+          if (poll.status === 'failed') {
+            markFailed(poll.error || 'Detection failed');
+            return;
+          }
+          // processing / pending — loop and wait.
+        }
+
+        markFailed('Detection timed out after 5 minutes');
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'Detection failed';
+        markFailed(msg);
       }
     })();
 
