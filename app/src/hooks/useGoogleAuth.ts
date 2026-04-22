@@ -1,13 +1,21 @@
 import { Platform } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
 import * as Google from 'expo-auth-session/providers/google';
-import * as AuthSession from 'expo-auth-session';
 
 // Complete the auth session when the redirect comes back on web
 WebBrowser.maybeCompleteAuthSession();
 
 const WEB_CLIENT_ID =
   '991290253393-eompo9m0q8up56n7iabg30tn62lkd5h2.apps.googleusercontent.com';
+
+// iOS OAuth client ID. Google validates this at mount on iOS and throws
+// if missing; when the env var isn't populated we fall back to the web
+// ID as a harmless placeholder so the app still boots and mock-login
+// remains reachable. Real iOS sign-in needs EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID
+// set + the matching iOS client configured in Google Cloud Console with
+// the bundle ID that matches app.json's ios.bundleIdentifier.
+const IOS_CLIENT_ID =
+  process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID || WEB_CLIENT_ID;
 
 export interface GoogleUserInfo {
   sub: string; // Google user ID
@@ -26,17 +34,27 @@ export interface GoogleUserInfo {
  *  - Scopes and response type
  */
 export function useGoogleAuth() {
-  // On web, explicitly build the redirect URI so it matches what's in Google Console.
-  // Linking.createURL may add a trailing slash or path — we need an exact match.
+  // Redirect URI handling per platform:
+  //
+  //   web: we fix it to the current origin so it matches what's registered
+  //        in the Google Console. makeRedirectUri() sometimes adds a
+  //        trailing slash or path, and Google compares strings exactly.
+  //
+  //   iOS/Android: we let the Google provider auto-derive the URI from
+  //        iosClientId / androidClientId. Google's iOS OAuth clients
+  //        only accept the reversed-client-ID scheme
+  //        (com.googleusercontent.apps.<id>:/oauth2redirect/google) —
+  //        passing a custom app-scheme URI here triggers 400
+  //        invalid_request because the redirect doesn't match the client
+  //        type. Leaving redirectUri undefined lets the provider pick
+  //        the correct one.
   const redirectUri =
-    Platform.OS === 'web'
-      ? `${window.location.origin}`
-      : AuthSession.makeRedirectUri({ scheme: 'mootdreactnative' });
+    Platform.OS === 'web' ? window.location.origin : undefined;
 
   const [request, response, promptAsync] = Google.useAuthRequest({
     webClientId: WEB_CLIENT_ID,
-    redirectUri,
-    // Add iosClientId / androidClientId here later for native builds
+    iosClientId: IOS_CLIENT_ID,
+    ...(redirectUri ? { redirectUri } : {}),
     scopes: ['openid', 'profile', 'email'],
   });
 

@@ -3,6 +3,13 @@
 .env.*
 !.env.example
 
+# SSH keys (never commit — use ~/.ssh/ instead)
+**/id_rsa
+**/id_ed25519
+**/*.pem
+**/openClawServer
+**/openClawServer.pub
+
 # OS
 .DS_Store
 Thumbs.db

@@ -9,7 +9,17 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "bundleIdentifier": "com.spodolaks.mootd",
+      "supportsTablet": true,
+      "infoPlist": {
+        "CFBundleURLTypes": [
+          {
+            "CFBundleURLSchemes": [
+              "com.googleusercontent.apps.991290253393-g6fppjkkn256svk1chkg3pid1923tcce"
+            ]
+          }
+        ]
+      }
     },
     "android": {
       "adaptiveIcon": {
