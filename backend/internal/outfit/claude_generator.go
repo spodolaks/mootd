@@ -356,7 +356,7 @@ type claudeResponse struct {
 	ID         string                 `json:"id"`
 	StopReason string                 `json:"stop_reason"`
 	Content    []claudeResponseBlock  `json:"content"`
-	Usage      map[string]json.Number `json:"usage,omitempty"`
+	Usage map[string]any `json:"usage,omitempty"`
 }
 
 type claudeResponseBlock struct {

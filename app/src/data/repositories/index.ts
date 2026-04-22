@@ -18,10 +18,8 @@ import { MockFeedbackRepository } from './feedback/FeedbackRepository.mock';
 
 export type DataSource = 'mock' | 'api';
 
-const resolveDataSource = (): DataSource =>
-  process.env.EXPO_PUBLIC_DATA_SOURCE === 'api' ? 'api' : 'mock';
-
-export const activeDataSource: DataSource = resolveDataSource();
+// Hardcoded for production - API mode only, no mock
+export const activeDataSource: DataSource = 'api';
 
 export const authRepository: IAuthRepository =
   activeDataSource === 'api'

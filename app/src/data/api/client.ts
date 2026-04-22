@@ -1,9 +1,8 @@
 import { Platform } from 'react-native';
 
-// On web the browser enforces CORS: localhost and 127.0.0.1 are different origins.
-// Use localhost on web so requests stay same-origin with the Expo dev server.
+// Production API URL - hardcoded for web deployment
 const DEFAULT_API_BASE_URL =
-  Platform.OS === 'web' ? 'http://localhost:8089' : 'http://127.0.0.1:8089';
+  Platform.OS === 'web' ? 'https://api.spodolaks.id.lv' : 'http://127.0.0.1:8089';
 const DEFAULT_TIMEOUT_MS = 10_000; // 10 seconds
 
 export class ApiError extends Error {
