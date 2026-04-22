@@ -454,10 +454,13 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
     paddingHorizontal: CONTAINER_PADDING,
-    // Matching top and bottom insets — the card is framed by a consistent
-    // dark margin on all sides instead of being flush-top and floating on
-    // an uneven bottom gap (pill + safe-area inset).
-    paddingTop: 8,
+    // paddingTop is 0 because SafeAreaView already adds the full device-top
+    // inset (notch / Dynamic Island). Adding more pushed the card visibly
+    // low on iPhones with large top insets without improving the margin.
+    // The card's own 16px internal padding gives the content its breathing
+    // room; the pill at the bottom uses a dedicated padding so the two
+    // sides aren't expected to match visually.
+    paddingTop: 0,
     paddingBottom: 20,
     gap: 16,
   },

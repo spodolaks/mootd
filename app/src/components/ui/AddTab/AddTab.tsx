@@ -23,7 +23,7 @@ export const AddTab: React.FC<AddTabProps> = ({
       pointerEvents="none"
     >
       <Icon name={icon} size={24} color={iconColor} />
-      <Text style={styles.label}>{label}</Text>
+      <Text style={styles.label} numberOfLines={1}>{label}</Text>
     </View>
   );
 };

@@ -12,9 +12,13 @@ export const getStyles = (colorScheme: 'light' | 'dark', selected: boolean = fal
       justifyContent: 'center',
       backgroundColor: selected ? selectedBg : 'transparent',
       borderRadius: 999,
-      paddingHorizontal: 16,
+      // Horizontal padding tightened from 16 → 10 so "Moodboard" (the longest
+      // label) fits on one line inside the tab's share of the pill width;
+      // otherwise the word wraps and the selected-state bg grows taller than
+      // the other tabs, making the active tab look oversized.
+      paddingHorizontal: 10,
       paddingVertical: 10,
-      minWidth: 75,
+      minWidth: 64,
       minHeight: 54,
       gap: 4,
     },
