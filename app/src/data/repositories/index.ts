@@ -18,8 +18,16 @@ import { MockFeedbackRepository } from './feedback/FeedbackRepository.mock';
 
 export type DataSource = 'mock' | 'api';
 
-// Hardcoded for production - API mode only, no mock
-export const activeDataSource: DataSource = 'api';
+// Default to 'api' (production behaviour). Only flip to 'mock' when the
+// developer explicitly opts in via EXPO_PUBLIC_DATA_SOURCE=mock in .env —
+// so a missing/typo'd env var can never silently downgrade production to
+// the in-memory mock backend.
+const resolveDataSource = (): DataSource => {
+  const v = process.env.EXPO_PUBLIC_DATA_SOURCE;
+  return v === 'mock' ? 'mock' : 'api';
+};
+
+export const activeDataSource: DataSource = resolveDataSource();
 
 export const authRepository: IAuthRepository =
   activeDataSource === 'api'
