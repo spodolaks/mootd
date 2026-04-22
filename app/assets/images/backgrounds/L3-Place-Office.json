@@ -1,0 +1,10 @@
+{
+  "name": "Office",
+  "description": "Professional office interior — structured, neutral, productivity-oriented",
+  "moodTags": ["neutral", "structured", "professional", "clean"],
+  "archetypeAffinity": {
+    "ruler": 0.7,
+    "sage": 0.6,
+    "creator": 0.5
+  }
+}

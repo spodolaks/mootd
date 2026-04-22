@@ -1,0 +1,10 @@
+{
+  "name": "Linen",
+  "description": "Soft natural linen weave — tactile, warm-neutral, quietly organic",
+  "moodTags": ["soft", "natural", "warm", "tactile"],
+  "archetypeAffinity": {
+    "caregiver": 0.8,
+    "innocent": 0.6,
+    "lover": 0.5
+  }
+}

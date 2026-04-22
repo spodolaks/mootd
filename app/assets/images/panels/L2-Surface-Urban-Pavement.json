@@ -1,0 +1,10 @@
+{
+  "name": "Urban Pavement",
+  "description": "Weathered sidewalk pavement — gritty, lived-in, street-level authenticity",
+  "moodTags": ["gritty", "urban", "lived-in", "earthy"],
+  "archetypeAffinity": {
+    "explorer": 0.8,
+    "outlaw": 0.6,
+    "everyman": 0.5
+  }
+}

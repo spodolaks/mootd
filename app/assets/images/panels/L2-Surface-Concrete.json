@@ -1,0 +1,10 @@
+{
+  "name": "Concrete",
+  "description": "Raw poured concrete — cool, industrial, matte; reads urban and utilitarian",
+  "moodTags": ["cool", "industrial", "neutral", "raw"],
+  "archetypeAffinity": {
+    "everyman": 0.7,
+    "ruler": 0.6,
+    "outlaw": 0.4
+  }
+}

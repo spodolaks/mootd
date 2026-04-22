@@ -1,0 +1,10 @@
+{
+  "name": "Marble",
+  "description": "Polished marble with soft veining — luxurious, cool, unmistakably premium",
+  "moodTags": ["luxe", "cool", "polished", "elegant"],
+  "archetypeAffinity": {
+    "ruler": 0.9,
+    "lover": 0.6,
+    "sage": 0.4
+  }
+}

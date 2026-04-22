@@ -1,0 +1,10 @@
+{
+  "name": "Cafe",
+  "description": "Cozy cafe interior — warm light, social hum, everyday intimacy",
+  "moodTags": ["warm", "cozy", "social", "intimate"],
+  "archetypeAffinity": {
+    "lover": 0.7,
+    "everyman": 0.7,
+    "caregiver": 0.5
+  }
+}

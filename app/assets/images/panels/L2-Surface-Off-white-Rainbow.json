@@ -1,0 +1,10 @@
+{
+  "name": "Off-white Rainbow",
+  "description": "Off-white surface with a faint iridescent rainbow cast — airy, dreamy, playful",
+  "moodTags": ["airy", "dreamy", "playful", "light"],
+  "archetypeAffinity": {
+    "creator": 0.7,
+    "jester": 0.6,
+    "innocent": 0.5
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "name": "Light Stone Table",
+  "description": "Pale stone tabletop — refined, quiet, softly lit surface that reads editorial",
+  "moodTags": ["light", "refined", "minimal", "calm"],
+  "archetypeAffinity": {
+    "sage": 0.7,
+    "ruler": 0.6,
+    "innocent": 0.4
+  }
+}

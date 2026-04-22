@@ -1,0 +1,10 @@
+{
+  "name": "Morning Room",
+  "description": "Soft-lit interior at morning light — calm, golden, unhurried domestic mood",
+  "moodTags": ["soft", "warm", "calm", "golden"],
+  "archetypeAffinity": {
+    "innocent": 0.7,
+    "caregiver": 0.7,
+    "lover": 0.5
+  }
+}

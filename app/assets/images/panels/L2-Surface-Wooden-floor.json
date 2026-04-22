@@ -1,0 +1,10 @@
+{
+  "name": "Wooden Floor",
+  "description": "Warm oak-tone plank floor — grounded, homey, masculine-neutral",
+  "moodTags": ["warm", "natural", "earthy", "homey"],
+  "archetypeAffinity": {
+    "everyman": 0.7,
+    "caregiver": 0.6,
+    "ruler": 0.5
+  }
+}

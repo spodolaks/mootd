@@ -1,0 +1,10 @@
+{
+  "name": "Studio Floor",
+  "description": "Clean seamless studio floor — neutral, controlled, product-ready",
+  "moodTags": ["neutral", "clean", "minimal", "professional"],
+  "archetypeAffinity": {
+    "creator": 0.8,
+    "sage": 0.5,
+    "ruler": 0.4
+  }
+}

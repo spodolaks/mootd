@@ -1,0 +1,10 @@
+{
+  "name": "Wet Asphalt",
+  "description": "Rain-slicked asphalt catching reflections — cinematic, moody, high-contrast",
+  "moodTags": ["wet", "cinematic", "moody", "reflective"],
+  "archetypeAffinity": {
+    "outlaw": 0.8,
+    "magician": 0.6,
+    "lover": 0.4
+  }
+}

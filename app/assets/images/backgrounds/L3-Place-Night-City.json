@@ -1,0 +1,10 @@
+{
+  "name": "Night City",
+  "description": "City after dark — neon and window light, cinematic and electric",
+  "moodTags": ["dark", "cinematic", "electric", "moody"],
+  "archetypeAffinity": {
+    "outlaw": 0.8,
+    "magician": 0.7,
+    "explorer": 0.5
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "name": "Dark Asphalt",
+  "description": "Deep charcoal asphalt — moody, masculine, street-grade texture",
+  "moodTags": ["dark", "moody", "urban", "masculine"],
+  "archetypeAffinity": {
+    "outlaw": 0.8,
+    "explorer": 0.5,
+    "hero": 0.4
+  }
+}

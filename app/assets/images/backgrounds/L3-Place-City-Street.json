@@ -1,0 +1,10 @@
+{
+  "name": "City Street",
+  "description": "Daytime city street — dynamic, open, urban pulse with motion and architecture",
+  "moodTags": ["urban", "dynamic", "open", "kinetic"],
+  "archetypeAffinity": {
+    "explorer": 0.8,
+    "hero": 0.6,
+    "everyman": 0.5
+  }
+}

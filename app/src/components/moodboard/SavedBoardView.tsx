@@ -61,6 +61,7 @@ export const SavedBoardView: React.FC<SavedBoardViewProps> = ({ board, itemMap, 
         colorScheme={colorScheme}
         panelUrl={board.outfit.panelUrl}
         backgroundUrl={board.outfit.backgroundUrl}
+        archetypeScores={board.outfit.archetypeScores}
         fill
       />
       <View style={styles.savedFooter}>

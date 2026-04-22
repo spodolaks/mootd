@@ -1,0 +1,10 @@
+{
+  "name": "Wet City",
+  "description": "Rain-washed cityscape — reflective streets, atmospheric haze, noir-leaning mood",
+  "moodTags": ["wet", "atmospheric", "moody", "cinematic"],
+  "archetypeAffinity": {
+    "outlaw": 0.7,
+    "magician": 0.7,
+    "lover": 0.5
+  }
+}

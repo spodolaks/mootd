@@ -6,20 +6,94 @@ import React, { useMemo } from 'react';
 import { Platform, Pressable, StyleSheet, View } from 'react-native';
 import { Image } from 'expo-image';
 
-// Panel textures the flat-lay sits on. Metro bundler needs static `require`
-// calls — dynamic paths would fail. Add a new line per image as more land.
-const PANEL_SOURCES = [
-  require('../../../assets/images/panels/1.png'),
-  require('../../../assets/images/panels/2.png'),
+// Local surface library. Each entry pairs a bundled asset with the same
+// archetype-affinity map the backend stores in MongoDB (see
+// app/assets/images/*/<name>.json). The client carries this copy so that
+// when the backend-picked panelUrl / backgroundUrl is missing (offline dev,
+// outfits generated before the surface feature, a failed LLM response) we
+// can still pick a surface that complements the outfit — using the same
+// scoring logic the server would.
+//
+// Metro requires static require() arguments, so every asset must be
+// enumerated. Keep this list in sync with app/assets/images/panels/ and
+// app/assets/images/backgrounds/ — add a line per new surface.
+type ArchetypeAffinity = Readonly<Record<string, number>>;
+type LocalSurface = { source: number; affinity: ArchetypeAffinity };
+
+const LOCAL_PANELS: readonly LocalSurface[] = [
+  { source: require('../../../assets/images/panels/L2-Surface-Concrete.png'),          affinity: { explorer: 0.8, outlaw: 0.7, creator: 0.4 } },
+  { source: require('../../../assets/images/panels/L2-Surface-Dark-Asphalt.png'),      affinity: { outlaw: 0.9, explorer: 0.6 } },
+  { source: require('../../../assets/images/panels/L2-Surface-Light-Stone-Table.png'), affinity: { ruler: 0.7, sage: 0.6, lover: 0.4 } },
+  { source: require('../../../assets/images/panels/L2-Surface-Linen.png'),             affinity: { lover: 0.8, innocent: 0.7, caregiver: 0.5 } },
+  { source: require('../../../assets/images/panels/L2-Surface-Marble.png'),            affinity: { ruler: 0.9, lover: 0.6, sage: 0.4 } },
+  { source: require('../../../assets/images/panels/L2-Surface-Off-white-Rainbow.png'), affinity: { creator: 0.8, jester: 0.6, innocent: 0.5 } },
+  { source: require('../../../assets/images/panels/L2-Surface-Studio-floor.png'),      affinity: { creator: 0.7, sage: 0.6, magician: 0.4 } },
+  { source: require('../../../assets/images/panels/L2-Surface-Urban-Pavement.png'),    affinity: { explorer: 0.8, everyman: 0.6, outlaw: 0.4 } },
+  { source: require('../../../assets/images/panels/L2-Surface-Wet-asphalt.png'),       affinity: { outlaw: 0.8, explorer: 0.6, rebel: 0.5 } },
+  { source: require('../../../assets/images/panels/L2-Surface-Wooden-floor.png'),      affinity: { everyman: 0.7, caregiver: 0.6, sage: 0.4 } },
 ];
 
-// Deterministic pick from PANEL_SOURCES based on a string seed. Using a hash
-// (not Math.random) means the same outfit keeps the same panel across
-// re-renders — no flicker when the card re-mounts or the list scrolls.
-const pickPanel = (seed: string) => {
+const LOCAL_BACKGROUNDS: readonly LocalSurface[] = [
+  { source: require('../../../assets/images/backgrounds/L3-Place-Cafe.png'),         affinity: { everyman: 0.7, lover: 0.5, jester: 0.4 } },
+  { source: require('../../../assets/images/backgrounds/L3-Place-City-Street.png'),  affinity: { explorer: 0.8, rebel: 0.6, outlaw: 0.4 } },
+  { source: require('../../../assets/images/backgrounds/L3-Place-Green-Park.png'),   affinity: { innocent: 0.7, caregiver: 0.6, sage: 0.4 } },
+  { source: require('../../../assets/images/backgrounds/L3-Place-Hotel-Lobby.png'),  affinity: { ruler: 0.8, lover: 0.5 } },
+  { source: require('../../../assets/images/backgrounds/L3-Place-Morning-Room.png'), affinity: { lover: 0.7, innocent: 0.6, caregiver: 0.4 } },
+  { source: require('../../../assets/images/backgrounds/L3-Place-Night-City.png'),   affinity: { outlaw: 0.8, explorer: 0.6, magician: 0.5 } },
+  { source: require('../../../assets/images/backgrounds/L3-Place-Office-Window.png'), affinity: { ruler: 0.7, sage: 0.6, creator: 0.5 } },
+  { source: require('../../../assets/images/backgrounds/L3-Place-Office.png'),       affinity: { ruler: 0.7, sage: 0.6, creator: 0.5 } },
+  { source: require('../../../assets/images/backgrounds/L3-Place-Wet-City.png'),     affinity: { outlaw: 0.7, explorer: 0.6, rebel: 0.4 } },
+];
+
+// Deterministic hash — used both for stable tiebreaks in affinity scoring
+// and as a last-resort seed when the outfit carries no archetype data.
+// Hash (not Math.random) means the same outfit keeps the same surface
+// across re-renders, so there's no flicker when the card re-mounts.
+const hashSeed = (seed: string): number => {
   let h = 0;
   for (let i = 0; i < seed.length; i++) h = ((h << 5) - h + seed.charCodeAt(i)) | 0;
-  return PANEL_SOURCES[Math.abs(h) % PANEL_SOURCES.length];
+  return Math.abs(h);
+};
+
+// pickSurface scores each candidate by the dot product of its archetype
+// affinity against the outfit's archetype scores, then returns the highest
+// scorer. Ties break on the hash of the seed so the choice stays stable
+// across renders and the same outfit always lands on the same surface.
+//
+// When scores is empty (legacy outfit, no archetype data) the scorer
+// becomes a no-op and the hash does all the work — same behaviour as the
+// previous random-but-deterministic pick, so we don't regress on outfits
+// that pre-date the archetype-scoring feature.
+const pickSurface = (
+  surfaces: readonly LocalSurface[],
+  scores: Readonly<Record<string, number>> | undefined,
+  seed: string,
+): number => {
+  if (surfaces.length === 0) {
+    throw new Error('pickSurface: empty surface list');
+  }
+  const hash = hashSeed(seed);
+  let bestIdx = hash % surfaces.length;
+  let bestScore = -Infinity;
+
+  surfaces.forEach((surface, idx) => {
+    let score = 0;
+    if (scores) {
+      for (const [archetype, weight] of Object.entries(surface.affinity)) {
+        score += weight * (scores[archetype] ?? 0);
+      }
+    }
+    // Tiny hash-derived tiebreaker keeps the pick stable + spreads
+    // otherwise-identical scores across different outfits.
+    score += ((hash + idx) % 997) * 1e-6;
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestIdx = idx;
+    }
+  });
+
+  return surfaces[bestIdx].source;
 };
 
 // Shadow that traces each cutout's alpha channel rather than its bounding box.
@@ -273,6 +347,11 @@ export interface CollageProps {
   panelUrl?: string;
   /** Backend-resolved URL for the ambient background. Same fallback rule. */
   backgroundUrl?: string;
+  /** Per-archetype alignment scores for the outfit. Used by the local
+   *  fallback picker to choose a panel + background that actually match
+   *  the outfit's vibe instead of picking at random. Ignored when the
+   *  backend already supplied panelUrl / backgroundUrl. */
+  archetypeScores?: Record<string, number>;
   /** When true, the collage fills its parent's remaining vertical space via
    *  flex instead of its default 3:4 portrait aspect ratio. Use this when
    *  the collage is the only focal content on the screen (saved board view)
@@ -280,7 +359,7 @@ export interface CollageProps {
   fill?: boolean;
 }
 
-export const Collage: React.FC<CollageProps> = ({ itemIds, itemMap, snapshots, layoutRoles, onItemPress, colorScheme, panelUrl, backgroundUrl, fill }) => {
+export const Collage: React.FC<CollageProps> = ({ itemIds, itemMap, snapshots, layoutRoles, onItemPress, colorScheme, panelUrl, backgroundUrl, archetypeScores, fill }) => {
   // Build a snapshot lookup for fallback when items have been deleted.
   const snapshotMap = useMemo(() => {
     const map = new Map<string, OutfitItem>();
@@ -290,10 +369,20 @@ export const Collage: React.FC<CollageProps> = ({ itemIds, itemMap, snapshots, l
     return map;
   }, [snapshots]);
 
-  // Pick a panel per outfit identity. Memoized on the item-id tuple so the
-  // same card keeps the same surface across re-renders, but each different
-  // outfit gets an independently chosen panel.
-  const panelSource = useMemo(() => pickPanel(itemIds.join('|')), [itemIds]);
+  // Pick local fallback panel + background per outfit identity. Memoized on
+  // the item-id tuple + archetype fingerprint so the same card keeps the
+  // same surface across re-renders, but different outfits get different
+  // surfaces matched to their archetype mix. These are only used when the
+  // server didn't supply panelUrl / backgroundUrl.
+  const seed = itemIds.join('|');
+  const panelSource = useMemo(
+    () => pickSurface(LOCAL_PANELS, archetypeScores, seed),
+    [seed, archetypeScores],
+  );
+  const backgroundSource = useMemo(
+    () => pickSurface(LOCAL_BACKGROUNDS, archetypeScores, seed),
+    [seed, archetypeScores],
+  );
 
   const sorted = useMemo(() => {
     // First pass — classify each item's zone so we know the composition.
@@ -337,7 +426,7 @@ export const Collage: React.FC<CollageProps> = ({ itemIds, itemMap, snapshots, l
           LLM-chosen background URL takes priority; falls back to a bundled
           texture for offline dev or cache entries predating the feature. */}
       <Image
-        source={backgroundUrl ? { uri: backgroundUrl } : require('../../../assets/images/backgrounds/default.png')}
+        source={backgroundUrl ? { uri: backgroundUrl } : backgroundSource}
         style={styles.collageBackground}
         contentFit="cover"
         cachePolicy="memory-disk"

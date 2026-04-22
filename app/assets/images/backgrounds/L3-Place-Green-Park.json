@@ -1,0 +1,10 @@
+{
+  "name": "Green Park",
+  "description": "Sunlit park with greenery — fresh, open, naturally restorative",
+  "moodTags": ["fresh", "natural", "calm", "bright"],
+  "archetypeAffinity": {
+    "innocent": 0.7,
+    "explorer": 0.6,
+    "caregiver": 0.5
+  }
+}

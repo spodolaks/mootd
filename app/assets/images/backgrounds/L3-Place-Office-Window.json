@@ -1,0 +1,10 @@
+{
+  "name": "Office Window",
+  "description": "Workspace by a large window — daylight, focus, quiet urban outlook",
+  "moodTags": ["bright", "focused", "urban", "calm"],
+  "archetypeAffinity": {
+    "sage": 0.7,
+    "creator": 0.6,
+    "ruler": 0.5
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "name": "Hotel Lobby",
+  "description": "Upscale hotel lobby — polished materials, measured lighting, quiet prestige",
+  "moodTags": ["luxe", "refined", "polished", "elegant"],
+  "archetypeAffinity": {
+    "ruler": 0.9,
+    "lover": 0.6,
+    "sage": 0.4
+  }
+}
