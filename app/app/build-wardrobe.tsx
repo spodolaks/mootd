@@ -77,7 +77,7 @@ export default function BuildWardrobe() {
 
     const result = await ImagePicker.launchCameraAsync({
       mediaTypes: ['images'],
-      allowsEditing: true,
+      // Skip the iOS square-crop editor so the detector gets the full frame.
       quality: 0.8,
     });
 
@@ -99,7 +99,7 @@ export default function BuildWardrobe() {
 
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
-      allowsEditing: true,
+      // Same reason — keep the original resolution, skip the crop UI.
       quality: 0.8,
     });
 

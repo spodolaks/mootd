@@ -203,7 +203,8 @@ export const WardrobeScreen: React.FC = () => {
     }
     const result = await ImagePicker.launchCameraAsync({
       mediaTypes: ['images'],
-      allowsEditing: true,
+      // Skip the iOS square-crop editor: we want the full-resolution frame
+      // so the clothing detector has as many pixels as possible to work with.
       quality: 0.8,
     });
     if (!result.canceled && result.assets?.[0]?.uri) {
@@ -220,7 +221,7 @@ export const WardrobeScreen: React.FC = () => {
     }
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
-      allowsEditing: true,
+      // Same reason — keep the original photo instead of the cropped square.
       quality: 0.8,
     });
     if (!result.canceled && result.assets?.[0]?.uri) {
