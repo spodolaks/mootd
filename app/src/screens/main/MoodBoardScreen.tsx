@@ -361,11 +361,16 @@ export const MoodBoardScreen: React.FC = () => {
             </View>
             <View style={styles.dotsRow}>
               {outfitOptions.map((_, i) => (
+                // #23 — inactive dot uses fills.tertiary so it follows
+                // the theme in dark mode instead of staying at a fixed
+                // rgba grey that reads too opaque against dark surfaces.
+                // Active dot continues to use textColor for maximum
+                // contrast against the tertiary fill.
                 <View
                   key={i}
                   style={[
                     styles.dot,
-                    { backgroundColor: i === activeIndex ? textColor : 'rgba(142,142,147,0.4)' },
+                    { backgroundColor: i === activeIndex ? textColor : fills.tertiary[colorScheme] },
                   ]}
                 />
               ))}

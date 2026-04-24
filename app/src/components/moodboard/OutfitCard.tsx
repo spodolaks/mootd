@@ -134,6 +134,12 @@ export const OutfitCard: React.FC<OutfitCardProps> = ({
   const thumbBg = fills.tertiary[colorScheme];
   const thumbUpActive = accents.green[colorScheme];
   const thumbDownActive = accents.red[colorScheme];
+  // #23 — intentionally static white. The active thumbs background is
+  // always a vivid accent colour (green / red), so the foreground must
+  // be white in both light and dark modes for contrast. Using a theme
+  // token like button.primary.foreground would flip to black in dark
+  // mode and become unreadable against the green/red fill.
+  const thumbActiveFg = '#FFFFFF';
   const showRating = Boolean(onThumbsUp || onThumbsDown);
   const isRated = rating === 'up' || rating === 'down';
 
@@ -246,7 +252,7 @@ export const OutfitCard: React.FC<OutfitCardProps> = ({
                 <Icon
                   name="thumbs-up"
                   size={20}
-                  color={rating === 'up' ? '#FFFFFF' : textColor}
+                  color={rating === 'up' ? thumbActiveFg : textColor}
                 />
               </Pressable>
               <Pressable
@@ -264,7 +270,7 @@ export const OutfitCard: React.FC<OutfitCardProps> = ({
                 <Icon
                   name="thumbs-down"
                   size={20}
-                  color={rating === 'down' ? '#FFFFFF' : textColor}
+                  color={rating === 'down' ? thumbActiveFg : textColor}
                 />
               </Pressable>
             </>
