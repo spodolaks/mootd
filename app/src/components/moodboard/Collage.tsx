@@ -337,6 +337,45 @@ export const TRIANGULAR_POSITIONS: Record<ItemZone, [ZonePos, ZonePos, ZonePos]>
   ],
 };
 
+// TRIANGULAR_MIRRORED_POSITIONS — P2-K visual-variety sibling of
+// TRIANGULAR_POSITIONS. Mirrors the default: outerwear anchors at the
+// top-LEFT third, tops at mid-right, bottoms center-lower-right, shoes
+// bottom-right, accessories tucked near the top-left outerwear. The eye
+// traces the opposite diagonal (top-left → bottom-right).
+//
+// Why mirror specifically: editorial flat-lays don't always run
+// right-anchored; anchor-left is equally valid and common in Scandinavian
+// / minimalist editorial work. Offering both and seed-selecting between
+// them means two consecutive outfits with the same item set don't look
+// identical — the single biggest "feels static" complaint we've heard.
+export const TRIANGULAR_MIRRORED_POSITIONS: Record<ItemZone, [ZonePos, ZonePos, ZonePos]> = {
+  outerwear: [
+    { l: '7%',  t: '13%', w: '55%', h: '42%' },
+    { l: '9%',  t: '15%', w: '52%', h: '40%' },
+    { l: '11%', t: '17%', w: '48%', h: '38%' },
+  ],
+  tops: [
+    { l: '46%', t: '28%', w: '48%', h: '38%' },
+    { l: '48%', t: '30%', w: '46%', h: '36%' },
+    { l: '50%', t: '32%', w: '42%', h: '34%' },
+  ],
+  bottoms: [
+    { l: '22%', t: '54%', w: '50%', h: '40%' },
+    { l: '24%', t: '56%', w: '46%', h: '38%' },
+    { l: '26%', t: '58%', w: '42%', h: '36%' },
+  ],
+  shoes: [
+    { l: '66%', t: '78%', w: '28%', h: '18%' },
+    { l: '68%', t: '80%', w: '26%', h: '16%' },
+    { l: '70%', t: '82%', w: '24%', h: '14%' },
+  ],
+  accessories: [
+    { l: '6%',  t: '58%', w: '22%', h: '18%' },
+    { l: '6%',  t: '62%', w: '20%', h: '16%' },
+    { l: '6%',  t: '66%', w: '18%', h: '14%' },
+  ],
+};
+
 // Legacy export for any callers still referencing the old name.
 // Now points at the triangular default so legacy consumers see the new
 // composition without code changes.
@@ -344,14 +383,27 @@ export const ZONE_POSITIONS = TRIANGULAR_POSITIONS;
 
 // pickLayout returns the positions table best suited to the set of zones
 // actually present on this card. Triangular is the editorial default when
-// outerwear anchors the look (with or without accessory). When outerwear
-// is missing the diagonal breaks down, so we fall back to the older
-// NO_OUTER layout that rebalances around a center-heavy axis. Minimal
-// (3-zone) stays as the legacy outfit fallback.
-export const pickLayout = (activeZones: Set<ItemZone>): Record<ItemZone, [ZonePos, ZonePos, ZonePos]> => {
+// outerwear anchors the look (with or without accessory). P2-K adds a
+// seed-based 50/50 pick between TRIANGULAR and TRIANGULAR_MIRRORED so
+// consecutive outfits with identical zone sets don't render identically.
+// When outerwear is missing the diagonal breaks down, so we fall back to
+// the older NO_OUTER layout. Minimal (3-zone) stays as the legacy outfit
+// fallback.
+export const pickLayout = (
+  activeZones: Set<ItemZone>,
+  seed?: string,
+): Record<ItemZone, [ZonePos, ZonePos, ZonePos]> => {
   const hasOuter = activeZones.has('outerwear');
   const hasAccessory = activeZones.has('accessories');
-  if (hasOuter) return TRIANGULAR_POSITIONS;
+  if (hasOuter) {
+    // P2-K: flip between the two triangular variants per outfit so two
+    // back-to-back boards with the same zones look distinct. Missing
+    // seed → default variant (stable behaviour for test/story fixtures).
+    if (!seed) return TRIANGULAR_POSITIONS;
+    return (hashSeed(seed) & 1) === 0
+      ? TRIANGULAR_POSITIONS
+      : TRIANGULAR_MIRRORED_POSITIONS;
+  }
   if (hasAccessory) return NO_OUTER_POSITIONS;
   return MINIMAL_POSITIONS;
 };
@@ -557,8 +609,10 @@ export const Collage: React.FC<CollageProps> = ({ itemIds, itemMap, snapshots, l
     // Pick the layout table that matches which zones are actually present.
     // A 4-item look without outerwear reads left-heavy against the default
     // table; NO_OUTER_POSITIONS pulls everything toward center + diagonal.
+    // Seed threads through so P2-K (pickLayout variety) can deterministic-
+    // ally pick between TRIANGULAR and TRIANGULAR_MIRRORED per outfit.
     const activeZones = new Set(classified.map(c => c.zone));
-    const positionsTable = pickLayout(activeZones);
+    const positionsTable = pickLayout(activeZones, seed);
     // Reflow signal: when the outfit is missing a zone (legacy saved
     // board, or a minimal 3-zone composition), remaining items scale up
     // by REFLOW_FACTOR_PER_MISSING so the panel doesn't look half-empty.
