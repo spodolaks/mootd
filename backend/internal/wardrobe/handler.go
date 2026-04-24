@@ -118,11 +118,24 @@ func (h *Handler) processDetected(ctx context.Context, userID string, detected [
 	}
 
 	responseItems := make([]DetectedItem, len(toProcess))
+	// B4: cap concurrent item processing. Each goroutine calls the
+	// external background-removal service (10–30s per call) and writes
+	// to MongoDB twice (original + PNG). A full-wardrobe detection
+	// photo can return 30+ items; without a cap, 30 goroutines saturate
+	// both the bg-removal HTTP pool and MongoDB's connection pool,
+	// giving unpredictable tail latency and a risk of starving other
+	// concurrent users' requests. 4 concurrent item-processors is
+	// enough to hide the bg-removal round-trip latency while staying
+	// well inside the bg-remover's nominal throughput (1–2 req/sec).
+	const itemProcessorParallelism = 4
+	sem := make(chan struct{}, itemProcessorParallelism)
 	var wg sync.WaitGroup
 	for i, d := range toProcess {
 		wg.Add(1)
+		sem <- struct{}{}
 		go func(idx int, d jobItem) {
 			defer wg.Done()
+			defer func() { <-sem }()
 			defer func() {
 				if rec := recover(); rec != nil {
 					h.logger.Printf("wardrobe: panic in detection goroutine for item %d: %v", idx, rec)
