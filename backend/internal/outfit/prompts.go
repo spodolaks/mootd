@@ -12,7 +12,11 @@ import (
 // (new sections, reworded rules, changed few-shot structure). Stamped onto
 // feedback events so the training pipeline can filter out data collected under
 // retired prompts.
-const PromptVersion = "v1"
+//
+// v2 (2026-04): added visualWeights instruction — the LLM now marks ONE
+// "signature piece" per outfit so the Collage can render it with
+// appropriate visual weight (statement bag vs plain belt).
+const PromptVersion = "v2"
 
 // baseSystemPrompt is the shared rule-set for all outfit generators (Claude + Ollama).
 // It establishes the stylist persona, the structural rules, and the response shape.
@@ -45,8 +49,15 @@ WRITING RULES FOR description AND rationale:
 - Never restate the archetype name or weather description verbatim — reference them obliquely via a concrete choice ("the sharper lapel nods to the Ruler side", "the cotton tee reads cooler than the forecast suggests").
 - If you can't write something specific, write less. A 6-word description beats a 14-word platitude.
 
+VISUAL WEIGHTS — mark the signature piece:
+- For each outfit, pick the ONE item that carries the outfit's identity — the piece that makes someone say "I want that specific [thing]". A statement bag, bold shoes, a printed scarf, a sculptural jacket.
+- Set visualWeights[id] = "statement" for that single item. Every outfit needs exactly one "statement" mark.
+- Items that are quietly supporting (plain tee, simple denim, neutral sneakers) should either be omitted from visualWeights or marked "supporting".
+- A tiny piece whose job is purely background (subtle watch when the jacket is the statement) may be marked "minor".
+- The "statement" item is often the hero from layoutRoles, but not always — a hero outerwear can co-exist with a statement bag (statement=bag, hero=jacket).
+
 OUTPUT:
-- Each outfit needs: name (2-4 words), description (per rules above), rationale (per rules above), items (array of IDs), layoutRoles (mapping each item ID to "hero", "support", or "accent"), and optional suggestions for missing items.`
+- Each outfit needs: name (2-4 words), description (per rules above), rationale (per rules above), items (array of IDs), layoutRoles (mapping each item ID to "hero", "support", or "accent"), visualWeights (mapping at least the signature item to "statement"; others to "supporting" or "minor" or omitted), and optional suggestions for missing items.`
 
 // buildSystemPrompt constructs the full system prompt with archetype, weather, and history context.
 // It is shared by Ollama, Claude, and OpenAI generators.
@@ -174,6 +185,13 @@ EXAMPLE OUTPUT (uses placeholder IDs — do NOT reuse them; notice description a
         "item_bottom_a": "support",
         "item_shoes_a": "support",
         "item_acc_a": "accent"
+      },
+      "visualWeights": {
+        "item_outer_a": "statement",
+        "item_top_a": "supporting",
+        "item_bottom_a": "supporting",
+        "item_shoes_a": "supporting",
+        "item_acc_a": "minor"
       },
       "panelId": "panel-marble-slate",
       "backgroundId": "background-studio-neutral",

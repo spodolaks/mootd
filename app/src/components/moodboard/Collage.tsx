@@ -415,6 +415,18 @@ export const ROLE_SCALE: Record<'hero' | 'support' | 'accent', number> = {
 // benefits saved boards predating validation.
 export const REFLOW_FACTOR_PER_MISSING = 1.08;
 
+// P1-H visual-weight multiplier. The LLM marks the ONE signature piece
+// per outfit with "statement"; that item renders ~1.35× its base size
+// (area ratio ~1.8×) so a statement bag reads as the outfit's identity
+// even when its layoutRole is "accent". "minor" tucks an item further
+// back (plain watch in a jacket-led outfit). Most items carry either
+// "supporting" or no mark and render at their role's default size.
+export const VISUAL_WEIGHT_SCALE: Record<'statement' | 'supporting' | 'minor', number> = {
+  statement: 1.35,
+  supporting: 1.0,
+  minor: 0.82,
+};
+
 // Rule-of-thirds centers per zone. When an item has role='hero', its
 // position is computed from these centers instead of the zone table —
 // placing the hero on a third-line intersection for editorial
@@ -436,22 +448,24 @@ export const HERO_THIRDS_CENTER: Record<ItemZone, { cx: number; cy: number }> = 
 };
 
 // scalePos — one-stop shop for deriving the final bounding box from a
-// zone/role/activeZoneCount tuple. For hero items it repositions to a
-// rule-of-thirds intersection; for support/accent it keeps the zone
-// table's default anchor and just scales w/h.
+// zone/role/visualWeight/activeZoneCount tuple. For hero items it
+// repositions to a rule-of-thirds intersection; for support/accent it
+// keeps the zone table's default anchor and just scales w/h.
 export const scalePos = (
   basePos: ZonePos,
   zone: ItemZone,
   role: 'hero' | 'support' | 'accent' | undefined,
+  visualWeight: 'statement' | 'supporting' | 'minor' | undefined,
   activeZoneCount: number,
 ): ZonePos => {
   const parsePct = (v: `${number}%`) => parseFloat(v.slice(0, -1));
   const zoneW = ZONE_WEIGHT[zone];
   const roleW = role ? ROLE_SCALE[role] : 1.0;
+  const weightW = visualWeight ? VISUAL_WEIGHT_SCALE[visualWeight] : 1.0;
   // Reflow kicks in only when fewer than 4 zones are active, matching the
   // threshold where the MINIMAL_POSITIONS table takes over.
   const reflow = activeZoneCount < 4 ? REFLOW_FACTOR_PER_MISSING : 1.0;
-  const factor = zoneW * roleW * reflow;
+  const factor = zoneW * roleW * weightW * reflow;
   const w = parsePct(basePos.w) * factor;
   const h = parsePct(basePos.h) * factor;
 
@@ -481,6 +495,11 @@ export interface CollageProps {
   itemMap: Map<string, WardrobeItem>;
   snapshots?: OutfitItem[];
   layoutRoles?: Record<string, 'hero' | 'support' | 'accent'>;
+  /** Per-item visual weight from the LLM (P1-H). Boosts the signature
+   *  piece above its role's default size so a statement bag reads larger
+   *  than a plain belt even when both carry role='accent'. Missing → all
+   *  items scale purely by layoutRoles + zone weight. */
+  visualWeights?: Record<string, 'statement' | 'supporting' | 'minor'>;
   onItemPress?: (itemId: string) => void;
   colorScheme: 'light' | 'dark';
   /** Backend-resolved URL for the panel texture. Falls back to a bundled
@@ -500,7 +519,7 @@ export interface CollageProps {
   fill?: boolean;
 }
 
-export const Collage: React.FC<CollageProps> = ({ itemIds, itemMap, snapshots, layoutRoles, onItemPress, colorScheme, panelUrl, backgroundUrl, archetypeScores, fill }) => {
+export const Collage: React.FC<CollageProps> = ({ itemIds, itemMap, snapshots, layoutRoles, visualWeights, onItemPress, colorScheme, panelUrl, backgroundUrl, archetypeScores, fill }) => {
   // Build a snapshot lookup for fallback when items have been deleted.
   const snapshotMap = useMemo(() => {
     const map = new Map<string, OutfitItem>();
@@ -551,12 +570,16 @@ export const Collage: React.FC<CollageProps> = ({ itemIds, itemMap, snapshots, l
       zoneCounts.set(zone, idx + 1);
       const positions = positionsTable[zone];
       const basePos = positions[Math.min(idx, positions.length - 1)];
-      // Compose zone weight × role weight × reflow in one pass. For hero
-      // items scalePos re-anchors onto a rule-of-thirds intersection for
-      // editorial/triangular composition; support + accent keep the
-      // zone table's default anchor.
+      // Compose zone weight × role weight × visual weight × reflow in one
+      // pass. For hero items scalePos re-anchors onto a rule-of-thirds
+      // intersection for editorial/triangular composition; support + accent
+      // keep the zone table's default anchor. Visual weight (P1-H) boosts
+      // the LLM-marked signature piece above its role's default size so a
+      // statement bag reads larger than a plain belt even when both are
+      // role='accent'.
       const role = layoutRoles?.[itemId];
-      const pos = scalePos(basePos, zone, role, activeZoneCount);
+      const weight = visualWeights?.[itemId];
+      const pos = scalePos(basePos, zone, role, weight, activeZoneCount);
       return { itemId, item, snapshot, zone, pos };
     });
 
@@ -652,7 +675,7 @@ export const Collage: React.FC<CollageProps> = ({ itemIds, itemMap, snapshots, l
       ...p,
       rotation: rotationByIndex.get(i) ?? 0,
     }));
-  }, [itemIds, itemMap, snapshotMap, layoutRoles, seed]);
+  }, [itemIds, itemMap, snapshotMap, layoutRoles, visualWeights, seed]);
 
   const collageBg = grays.gray6[colorScheme];
   const iconFallbackColor = labels.quaternary[colorScheme];

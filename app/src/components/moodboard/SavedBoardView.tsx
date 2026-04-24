@@ -58,6 +58,7 @@ export const SavedBoardView: React.FC<SavedBoardViewProps> = ({ board, itemMap, 
         itemMap={itemMap}
         snapshots={board.outfit.snapshots}
         layoutRoles={board.outfit.layoutRoles}
+        visualWeights={board.outfit.visualWeights}
         colorScheme={colorScheme}
         panelUrl={board.outfit.panelUrl}
         backgroundUrl={board.outfit.backgroundUrl}

@@ -131,6 +131,18 @@ func (g *ClaudeGenerator) buildOutfitTool(items []GenItem) claudeTool {
 		},
 	}
 
+	// P1-H: mark the single signature piece per outfit so the Collage can
+	// render a statement bag at roughly twice the size of a plain belt,
+	// even when both carry the "accent" layoutRole.
+	visualWeightsSchema := map[string]any{
+		"type":        "object",
+		"description": "Mark the signature piece with \"statement\". Supporting garments may be \"supporting\" or omitted. Quiet background items may be \"minor\".",
+		"additionalProperties": map[string]any{
+			"type": "string",
+			"enum": []string{"statement", "supporting", "minor"},
+		},
+	}
+
 	outfitSchema := map[string]any{
 		"type":     "object",
 		"required": []string{"name", "description", "items", "layoutRoles"},
@@ -147,8 +159,9 @@ func (g *ClaudeGenerator) buildOutfitTool(items []GenItem) claudeTool {
 				"type":        "string",
 				"description": "1-sentence explanation tying the choice to the user's archetype and the weather.",
 			},
-			"items":       itemsSchema,
-			"layoutRoles": layoutSchema,
+			"items":         itemsSchema,
+			"layoutRoles":   layoutSchema,
+			"visualWeights": visualWeightsSchema,
 			"suggestions": map[string]any{
 				"type":        "array",
 				"description": "Optional text hints for missing complementary items.",

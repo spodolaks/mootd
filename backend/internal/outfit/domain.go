@@ -14,6 +14,7 @@ type Outfit struct {
 	Items           []string           `json:"items"`                     // wardrobe item IDs (tops, bottoms, shoes, accessories)
 	Rationale       string             `json:"rationale,omitempty"`       // 1-line stylist explanation tied to archetype/weather
 	LayoutRoles     map[string]string  `json:"layoutRoles,omitempty"`     // itemID → "hero" | "support" | "accent"
+	VisualWeights   map[string]string  `json:"visualWeights,omitempty"`   // itemID → "statement" | "supporting" | "minor"; marks the signature piece per outfit (P1-H)
 	Suggestions     []string           `json:"suggestions,omitempty"`     // text hints for complementary items not in wardrobe
 	ArchetypeScores map[string]float64 `json:"archetypeScores,omitempty"` // per-outfit archetype alignment
 	SmartSuggestion string             `json:"smartSuggestion,omitempty"` // archetype-driven item suggestion (<20 items)

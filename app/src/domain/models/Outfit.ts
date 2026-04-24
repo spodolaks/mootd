@@ -10,6 +10,11 @@ export interface OutfitItem {
 /** Visual role assigned to an item inside an outfit collage. */
 export type OutfitLayoutRole = 'hero' | 'support' | 'accent';
 
+/** Per-item visual weight tag (P1-H). Orthogonal to layoutRole — a hero can
+ *  also be a statement, but an accent can carry "statement" to boost a
+ *  signature bag above a plain belt. */
+export type OutfitVisualWeight = 'statement' | 'supporting' | 'minor';
+
 /** Weather context the outfit was generated for — used to render a chip on the card. */
 export interface OutfitWeather {
   temperature?: string;
@@ -32,6 +37,11 @@ export interface Outfit {
   rationale?: string;
   /** Per-item visual role used by the collage to size and layer items. */
   layoutRoles?: Record<string, OutfitLayoutRole>;
+  /** Per-item visual weight — marks the signature piece for boosted size
+   *  treatment in the collage. The LLM sets exactly one "statement" entry
+   *  per outfit; absence of the field degrades gracefully (all items
+   *  render at the base size derived from layoutRoles + zone weight). */
+  visualWeights?: Record<string, OutfitVisualWeight>;
   /** Item snapshots resolved at save time — used for display when items may have been deleted. */
   snapshots?: OutfitItem[];
   /** Text hints for complementary items not currently in the wardrobe. */

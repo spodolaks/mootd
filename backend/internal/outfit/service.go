@@ -418,6 +418,18 @@ func (s *Service) ValidateOutfits(outfits []Outfit, items []wardrobe.ClothingIte
 			o.LayoutRoles = cleaned
 		}
 
+		// P1-H: mirror the cleanup for visualWeights. Dropped items must
+		// not leak through — the frontend treats the map as authoritative.
+		if len(o.VisualWeights) > 0 {
+			cleaned := make(map[string]string, len(validItems))
+			for _, id := range validItems {
+				if w, ok := o.VisualWeights[id]; ok {
+					cleaned[id] = w
+				}
+			}
+			o.VisualWeights = cleaned
+		}
+
 		if smallWardrobe {
 			outfitTop := archetype.TopN(o.ArchetypeScores, 3)
 			if s := archetype.SuggestMissingCategory(outfitTop, existingCategories); s != "" {
