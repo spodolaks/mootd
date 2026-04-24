@@ -87,10 +87,32 @@ func (g *ClaudeGenerator) Generate(ctx context.Context, req GeneratorRequest) ([
 	tool := g.buildOutfitTool(req.Items)
 	userContent := g.buildUserContent(ctx, req)
 
+	// B2: mark the system prompt block as cacheable (ephemeral, ~5min
+	// TTL on Anthropic's side). The system prompt is 2–4k tokens of
+	// stylist rules + archetype context + surface list + few-shot
+	// examples — all stable across rapid regenerates for the same
+	// user. First call writes the cache (~25% token surcharge on that
+	// call); subsequent calls within the TTL read it back at ~10% of
+	// normal price. For a typical regenerate-heavy session the net
+	// saving is 20–30% input tokens and ~50% latency on the cached
+	// portion. Only applied when the prompt is long enough to clear
+	// Anthropic's 1024-token minimum — shorter prompts skip cache and
+	// ship as a plain string block to avoid wasted cache-write cost.
+	var systemBlocks []claudeSystemBlock
+	if len(systemPrompt) >= 4096 { // ~1024 tokens of English prose
+		systemBlocks = []claudeSystemBlock{{
+			Type:         "text",
+			Text:         systemPrompt,
+			CacheControl: &claudeCacheControl{Type: "ephemeral"},
+		}}
+	} else {
+		systemBlocks = []claudeSystemBlock{{Type: "text", Text: systemPrompt}}
+	}
+
 	payload := claudeRequest{
 		Model:     g.cfg.Model,
 		MaxTokens: 2048,
-		System:    systemPrompt,
+		System:    systemBlocks,
 		Tools:     []claudeTool{tool},
 		ToolChoice: &claudeToolChoice{
 			Type: "tool",
@@ -369,12 +391,31 @@ func parseClaudeToolUse(resp *claudeResponse, expectedTool string) ([]Outfit, er
 // ── Anthropic Messages API wire types ───────────────────────────────────────
 
 type claudeRequest struct {
-	Model      string            `json:"model"`
-	MaxTokens  int               `json:"max_tokens"`
-	System     string            `json:"system,omitempty"`
-	Messages   []claudeMessage   `json:"messages"`
-	Tools      []claudeTool      `json:"tools,omitempty"`
-	ToolChoice *claudeToolChoice `json:"tool_choice,omitempty"`
+	Model      string              `json:"model"`
+	MaxTokens  int                 `json:"max_tokens"`
+	System     []claudeSystemBlock `json:"system,omitempty"`
+	Messages   []claudeMessage     `json:"messages"`
+	Tools      []claudeTool        `json:"tools,omitempty"`
+	ToolChoice *claudeToolChoice   `json:"tool_choice,omitempty"`
+}
+
+// claudeSystemBlock is a system-prompt content block. Switched from a
+// plain string to the block form in B2 so cache_control can mark the
+// block cacheable (ephemeral, ~5min TTL) — Anthropic's prompt-caching
+// feature. The wire format accepts both, but blocks are required for
+// any per-block metadata like caching.
+type claudeSystemBlock struct {
+	Type         string              `json:"type"` // "text"
+	Text         string              `json:"text"`
+	CacheControl *claudeCacheControl `json:"cache_control,omitempty"`
+}
+
+// claudeCacheControl annotates a content block for Anthropic's prompt
+// cache. Type "ephemeral" is currently the only supported option;
+// cache lives ~5min on Anthropic's side, read-cost ~10% of normal,
+// write-cost ~25% surcharge on first use.
+type claudeCacheControl struct {
+	Type string `json:"type"` // "ephemeral"
 }
 
 type claudeMessage struct {
