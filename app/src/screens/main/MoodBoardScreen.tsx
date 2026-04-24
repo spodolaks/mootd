@@ -417,10 +417,18 @@ export const MoodBoardScreen: React.FC = () => {
               swapCandidates.map(candidate => {
                 const imgUrl = candidate.pngImageUrl || candidate.imageUrl;
                 return (
+                  // #22 — the swap candidate tiles are the decision
+                  // point for users picking a replacement garment; they
+                  // need a screen-reader label that names the item, not
+                  // just "button". Use the candidate's label and a hint
+                  // that explains what the tap will do.
                   <Pressable
                     key={candidate.id}
                     style={[styles.swapItem, { backgroundColor: fills.tertiary[colorScheme] }]}
                     onPress={() => handleSwapItem(candidate.id)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Swap with ${candidate.label}`}
+                    accessibilityHint="Replaces the selected garment in this outfit"
                   >
                     {imgUrl ? (
                       <Image

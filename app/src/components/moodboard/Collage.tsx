@@ -724,8 +724,23 @@ export const Collage: React.FC<CollageProps> = ({ itemIds, itemMap, snapshots, l
           height: pos.h,
           ...(rotation !== 0 ? { transform: [{ rotate: `${rotation}deg` }] } : {}),
         };
+        // #22 — screen readers couldn't identify which garment they were
+        // about to interact with; the Pressable had no accessibilityLabel
+        // so VoiceOver / TalkBack announced only "button". Pull the label
+        // from the live item first, falling back to the snapshot (for
+        // saved boards whose wardrobe item was deleted) and finally a
+        // generic "Swap this item" so blind users at least know it's
+        // interactive rather than an ornamental image.
+        const a11yLabel = item?.label ?? snapshot?.label ?? 'Swap this item';
         return onItemPress ? (
-          <Pressable key={itemId} style={[itemStyle, ITEM_SHADOW_STYLE]} onPress={() => onItemPress(itemId)}>
+          <Pressable
+            key={itemId}
+            style={[itemStyle, ITEM_SHADOW_STYLE]}
+            onPress={() => onItemPress(itemId)}
+            accessibilityRole="button"
+            accessibilityLabel={a11yLabel}
+            accessibilityHint="Double tap to swap this garment"
+          >
             {content}
           </Pressable>
         ) : (
