@@ -10,8 +10,15 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"sync"
 	"time"
 )
+
+// visionImageParallelism caps concurrent GridFS reads during vision-mode
+// image loading. Six is a balance: high enough to hide MongoDB round-
+// trip latency (typical 5–10ms per read), low enough that simultaneous
+// outfit generations don't saturate the default 100-connection pool.
+const visionImageParallelism = 6
 
 // ClaudeConfig holds the Anthropic API configuration.
 type ClaudeConfig struct {
@@ -214,21 +221,54 @@ func (g *ClaudeGenerator) buildUserContent(ctx context.Context, req GeneratorReq
 	}
 
 	visionItems := req.Items[:limit]
-	for _, item := range visionItems {
-		data, mediaType, err := g.loadImage(ctx, item.ID)
-		if err != nil {
-			g.logger.Printf("claude: skipping image for %s: %v", item.ID, err)
+
+	// B1: load images in parallel with a bounded semaphore. Serial
+	// loading cost (visionItems × ~10ms GridFS round-trip) was blocking
+	// the outfit hot path for 150–500ms on typical wardrobes. Bounded
+	// concurrency keeps MongoDB connection use predictable — each
+	// generation never uses more than visionImageParallelism pool
+	// slots at once, so N simultaneous users can't starve each other.
+	//
+	// Results are collected into an indexed slice so the final content
+	// blocks stay in the same order as the original items array —
+	// Claude is insensitive to order today, but preserving it keeps
+	// the image captions aligned with any eventual deterministic
+	// replay/debugging.
+	type loaded struct {
+		item      GenItem
+		data      []byte
+		mediaType string
+		err       error
+	}
+	results := make([]loaded, len(visionItems))
+	sem := make(chan struct{}, visionImageParallelism)
+	var wg sync.WaitGroup
+	for i, item := range visionItems {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(idx int, it GenItem) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			data, mt, err := g.loadImage(ctx, it.ID)
+			results[idx] = loaded{item: it, data: data, mediaType: mt, err: err}
+		}(i, item)
+	}
+	wg.Wait()
+
+	for _, r := range results {
+		if r.err != nil {
+			g.logger.Printf("claude: skipping image for %s: %v", r.item.ID, r.err)
 			continue
 		}
-		caption := fmt.Sprintf("Image for ID=%s (%s — %s)", item.ID, item.Category, item.Label)
+		caption := fmt.Sprintf("Image for ID=%s (%s — %s)", r.item.ID, r.item.Category, r.item.Label)
 		content = append(content,
 			claudeContent{Type: "text", Text: caption},
 			claudeContent{
 				Type: "image",
 				Source: &claudeImageSource{
 					Type:      "base64",
-					MediaType: mediaType,
-					Data:      base64.StdEncoding.EncodeToString(data),
+					MediaType: r.mediaType,
+					Data:      base64.StdEncoding.EncodeToString(r.data),
 				},
 			},
 		)
