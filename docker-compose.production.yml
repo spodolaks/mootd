@@ -21,6 +21,7 @@ services:
     environment:
       ENVIRONMENT: "${ENVIRONMENT:-production}"
       JWT_SECRET: "${JWT_SECRET:?JWT_SECRET must be set in .env}"
+      ADMIN_JWT_SECRET: "${ADMIN_JWT_SECRET:?ADMIN_JWT_SECRET must be set in .env, distinct from JWT_SECRET}"
       ENABLE_MOCK_LOGIN: "${ENABLE_MOCK_LOGIN:-false}"
       CORS_ALLOWED_ORIGINS: "${CORS_ALLOWED_ORIGINS:?CORS_ALLOWED_ORIGINS must be set}"
       # Reuse everything else from docker-compose.yml — detection key, OpenAI,

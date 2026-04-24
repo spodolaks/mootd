@@ -11,6 +11,7 @@ backend/
 │   ├── app/app.go           # Wires all dependencies, builds middleware stack, registers routes
 │   ├── config/config.go     # Env var loading with defaults
 │   ├── db/mongo.go          # MongoDB connection (ConnectMongo)
+│   ├── admin/               # Admin panel auth (separate from user auth); P0-03
 │   ├── auth/                # Google OAuth + JWT issuance + refresh token flow
 │   ├── user/                # User profile management
 │   ├── wardrobe/            # Clothing detection + item CRUD
@@ -180,6 +181,7 @@ Use `response.WriteJSON(w, status, payload)` for all JSON responses. For decodin
 | Variable | Purpose |
 |----------|---------|
 | `JWT_SECRET` | HMAC signing key — **must change in production** |
+| `ADMIN_JWT_SECRET` | HMAC signing key for admin-panel JWTs. **Must be set in production AND must differ from `JWT_SECRET`** — the backend refuses to start if they match (prevents user-token replay as admin token). |
 | `DETECTION_API_KEY` | External clothing detection service API key |
 | `CORS_ALLOWED_ORIGINS` | Comma-separated allowed origins (default: `*`). **Must be set to an explicit origin list in production** — the server refuses to start when `ENVIRONMENT=production` and the list is `*` or empty. |
 | `MONGO_URI` | MongoDB connection string |

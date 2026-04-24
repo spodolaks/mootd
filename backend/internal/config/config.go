@@ -30,6 +30,21 @@ const (
 	DefaultJWTExpiry = 15 * time.Minute
 	// defaultJWTSecret is used only in development when JWT_SECRET is not set.
 	defaultJWTSecret = "dev-secret-change-in-production-min-32-chars!!"
+
+	// DefaultAdminJWTExpiry is how long a mootd-admin JWT remains valid. Shorter
+	// than the user-facing DefaultJWTExpiry because admin sessions have a
+	// bigger blast radius (they can read user data + trigger re-runs) so we
+	// want forced re-authentication more often.
+	DefaultAdminJWTExpiry = 1 * time.Hour
+	// DefaultAdminRefreshExpiry caps the admin refresh lifetime — 7 days, much
+	// tighter than the 30-day user refresh. Admin refresh tokens are single-
+	// use (rotated on every /admin/v1/auth/refresh call).
+	DefaultAdminRefreshExpiry = 7 * 24 * time.Hour
+	// defaultAdminJWTSecret is used only in development when ADMIN_JWT_SECRET
+	// is not set. Distinct from the user-side default so a bug that mixes up
+	// the secrets can't silently sign admin tokens with the user secret or
+	// vice versa — the resulting token fails validation on both sides.
+	defaultAdminJWTSecret = "admin-dev-secret-change-in-production-min-32-chars!!"
 	// defaultCORSOrigins allows all origins in development.
 	defaultCORSOrigins = "*"
 	// defaultDetectionBaseURL is the local clothing-detection service.
@@ -82,6 +97,7 @@ type Config struct {
 	ConnectTimeout      time.Duration
 	ShutdownTimeout     time.Duration
 	JWTSecret           string
+	AdminJWTSecret      string
 	CORSAllowedOrigins  []string
 	DetectionAPIBaseURL string
 	DetectionAPIKey     string
@@ -142,6 +158,21 @@ func Load(logger *log.Logger) Config {
 		jwtSecret = defaultJWTSecret
 	}
 
+	adminJWTSecret := GetEnv("ADMIN_JWT_SECRET", "")
+	if adminJWTSecret == "" {
+		if env == "production" {
+			logger.Fatalf("FATAL: ADMIN_JWT_SECRET must be set in production. Refusing to start with the default admin secret.")
+		}
+		logger.Printf("WARNING: ADMIN_JWT_SECRET not set — using insecure development secret. Set ADMIN_JWT_SECRET in production.")
+		adminJWTSecret = defaultAdminJWTSecret
+	}
+	// Defensive: even if an operator set both secrets to the same value, refuse
+	// to start. Sharing the secret defeats the issuer-separation guarantee
+	// (a stolen user token would validate against admin middleware).
+	if adminJWTSecret == jwtSecret {
+		logger.Fatalf("FATAL: ADMIN_JWT_SECRET must differ from JWT_SECRET. Sharing the secret defeats the issuer separation — any user token could be replayed as an admin token.")
+	}
+
 	rawOrigins := GetEnv("CORS_ALLOWED_ORIGINS", defaultCORSOrigins)
 	var origins []string
 	for _, o := range strings.Split(rawOrigins, ",") {
@@ -189,6 +220,7 @@ func Load(logger *log.Logger) Config {
 		ConnectTimeout:      ParseDurationEnv("MONGO_CONNECT_TIMEOUT", defaultConnectTimeout, logger),
 		ShutdownTimeout:     ParseDurationEnv("SHUTDOWN_TIMEOUT", defaultShutdownTimeout, logger),
 		JWTSecret:           jwtSecret,
+		AdminJWTSecret:      adminJWTSecret,
 		CORSAllowedOrigins:  origins,
 		DetectionAPIBaseURL: GetEnv("DETECTION_API_BASE_URL", defaultDetectionBaseURL),
 		DetectionAPIKey:     detectionAPIKey,

@@ -11,6 +11,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 
+	"mootd/backend/internal/admin"
 	"mootd/backend/internal/auth"
 	"mootd/backend/internal/brands"
 	"mootd/backend/internal/feedback"
@@ -30,6 +31,7 @@ type App struct {
 	MongoClient         *mongo.Client
 	MongoDB             string
 	JWTSecret           string
+	AdminJWTSecret      string
 	CORSAllowedOrigins  []string
 	DetectionAPIBaseURL string
 	DetectionAPIKey     string
@@ -106,6 +108,15 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 	enableMockLogin := a.EnableMockLogin && a.Environment != "production"
 	authRepo := auth.NewMongoRepository(a.MongoClient, a.MongoDB)
 	auth.NewHandler(a.Logger, authRepo, a.JWTSecret).RegisterRoutes(mux, enableMockLogin, authLimit)
+
+	// Admin auth (P0-03). Separate JWT issuer, separate signing secret,
+	// separate persistence. Fails loudly in production if the secret is
+	// unset or matches JWTSecret — see config.Load.
+	adminRepo, err := admin.NewMongoRepository(context.Background(), a.MongoClient, a.MongoDB)
+	if err != nil {
+		a.Logger.Fatalf("admin repo init: %v", err)
+	}
+	admin.NewHandler(a.Logger, adminRepo, a.AdminJWTSecret).RegisterRoutes(mux, authLimit)
 
 	userRepo := user.NewMongoRepository(a.MongoClient, a.MongoDB)
 	health.NewHandler(a.Logger, a.MongoClient, a.MongoDB).RegisterRoutes(mux)

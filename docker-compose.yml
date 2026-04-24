@@ -48,6 +48,10 @@ services:
       # Set JWT_SECRET to a strong random value in production.
       # Leaving it unset uses the insecure dev default and logs a warning.
       # JWT_SECRET: "replace-with-a-strong-secret-min-32-chars"
+      # ADMIN_JWT_SECRET signs admin-panel tokens. MUST be different from
+      # JWT_SECRET — the backend refuses to start with matching secrets.
+      # See mootd-admin P0-03 for the separation rationale.
+      # ADMIN_JWT_SECRET: "replace-with-a-strong-admin-secret-min-32-chars"
       # CORS_ALLOWED_ORIGINS: "https://app.mootd.com"
       DETECTION_API_KEY: "${DETECTION_API_KEY}"
       BG_REMOVER_BASE_URL: "http://bcgrm-api-1:8000"

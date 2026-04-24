@@ -50,6 +50,7 @@ func main() {
 		MongoClient:         mongoClient,
 		MongoDB:             cfg.MongoDB,
 		JWTSecret:           cfg.JWTSecret,
+		AdminJWTSecret:      cfg.AdminJWTSecret,
 		CORSAllowedOrigins:  cfg.CORSAllowedOrigins,
 		DetectionAPIBaseURL: cfg.DetectionAPIBaseURL,
 		DetectionAPIKey:     cfg.DetectionAPIKey,
