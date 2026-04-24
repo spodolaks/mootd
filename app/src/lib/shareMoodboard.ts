@@ -67,9 +67,14 @@ const openInstagramWebShare = async (imageUrl: string): Promise<void> => {
   }
 };
 
-/** Shareable result codes callers can use to drive toasts / analytics. */
+/** Shareable result codes callers can use to drive toasts / analytics.
+ *  Both 'shared' and 'downloaded' carry an optional message — callers
+ *  that want consistent user feedback across platforms (e.g. web share
+ *  buttons that always open a new tab) can surface the message via a
+ *  toast. Native 'shared' leaves the message empty because the system
+ *  share sheet already confirms the action. */
 export type ShareResult =
-  | { kind: 'shared' }
+  | { kind: 'shared'; message?: string }
   | { kind: 'downloaded'; message: string }
   | { kind: 'dismissed' }
   | { kind: 'error'; error: unknown };
@@ -89,7 +94,13 @@ export const shareMoodboard = async (
     try {
       if (platform === 'facebook') {
         openFacebookWebShare(target.imageUrl);
-        return { kind: 'shared' };
+        // #24 — symmetric feedback with Instagram. Without a message the
+        // Facebook button silently opened a tab and felt "broken" compared
+        // to Instagram's toast. Both now return a user-visible message.
+        return {
+          kind: 'shared',
+          message: 'Opening Facebook share dialog in a new tab.',
+        };
       }
       await openInstagramWebShare(target.imageUrl);
       return {

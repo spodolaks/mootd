@@ -31,6 +31,10 @@ export const CalendarScreen: React.FC = () => {
   const [boards, setBoards] = useState<SavedMoodBoard[]>([]);
   const [itemMap, setItemMap] = useState<Map<string, WardrobeItem>>(new Map());
   const [isLoading, setIsLoading] = useState(true);
+  // #24 — track which platform a share is currently in-flight for so we
+  // can disable both buttons + show a spinner, preventing double-tap
+  // double-downloads on Instagram web.
+  const [sharingTo, setSharingTo] = useState<SharePlatform | null>(null);
 
   const backgroundColor = backgrounds.primary[colorScheme];
   const textColor = labels.primary[colorScheme];
@@ -84,22 +88,33 @@ export const CalendarScreen: React.FC = () => {
   const handleShare = useCallback(
     async (platform: SharePlatform) => {
       if (!selectedBoard?.imageUrl) return;
-      const result = await shareMoodboard(platform, {
-        imageUrl: toAbsoluteUrl(selectedBoard.imageUrl),
-        caption: selectedBoard.outfit.name,
-      });
-      switch (result.kind) {
-        case 'downloaded':
-          showToast(result.message, 'info');
-          break;
-        case 'error':
-          showToast('Couldn\'t open share sheet — try again.', 'error');
-          break;
-        // 'shared' and 'dismissed' don't need a toast — the share sheet /
-        // downloaded tab is its own feedback.
+      if (sharingTo !== null) return; // #24 — already in-flight; ignore tap
+      setSharingTo(platform);
+      try {
+        const result = await shareMoodboard(platform, {
+          imageUrl: toAbsoluteUrl(selectedBoard.imageUrl),
+          caption: selectedBoard.outfit.name,
+        });
+        switch (result.kind) {
+          case 'downloaded':
+            showToast(result.message, 'info');
+            break;
+          case 'shared':
+            // #24 — web returns a message so Facebook feels symmetric
+            // with Instagram. Native's share sheet is self-evident, so
+            // it leaves the message empty and we stay silent.
+            if (result.message) showToast(result.message, 'info');
+            break;
+          case 'error':
+            showToast('Couldn\'t open share sheet — try again.', 'error');
+            break;
+          // 'dismissed' leaves no feedback — the user cancelled intentionally.
+        }
+      } finally {
+        setSharingTo(null);
       }
     },
-    [selectedBoard, showToast],
+    [selectedBoard, showToast, sharingTo],
   );
 
   // Build marked dates: dots for dates with outfits, highlight for selected
@@ -196,23 +211,44 @@ export const CalendarScreen: React.FC = () => {
                   <Text variant="footnote" style={{ color: tertiaryText }}>
                     Share
                   </Text>
+                  {/* #24 — while a share is in-flight (sharingTo set),
+                      disable BOTH buttons so a double-tap on Instagram
+                      web doesn't trigger two downloads. Active button
+                      shows a spinner in place of the icon so the user
+                      has unambiguous feedback. */}
                   <Pressable
                     onPress={() => { void handleShare('instagram'); }}
-                    style={[styles.shareBtn, { backgroundColor: fills.tertiary[colorScheme] }]}
+                    disabled={sharingTo !== null}
+                    style={[
+                      styles.shareBtn,
+                      { backgroundColor: fills.tertiary[colorScheme] },
+                      sharingTo !== null && { opacity: 0.5 },
+                    ]}
                     hitSlop={8}
                     accessibilityRole="button"
                     accessibilityLabel="Share to Instagram"
+                    accessibilityState={{ disabled: sharingTo !== null, busy: sharingTo === 'instagram' }}
                   >
-                    <Icon name="instagram" size={20} color={textColor} />
+                    {sharingTo === 'instagram'
+                      ? <ActivityIndicator size="small" color={textColor} />
+                      : <Icon name="instagram" size={20} color={textColor} />}
                   </Pressable>
                   <Pressable
                     onPress={() => { void handleShare('facebook'); }}
-                    style={[styles.shareBtn, { backgroundColor: fills.tertiary[colorScheme] }]}
+                    disabled={sharingTo !== null}
+                    style={[
+                      styles.shareBtn,
+                      { backgroundColor: fills.tertiary[colorScheme] },
+                      sharingTo !== null && { opacity: 0.5 },
+                    ]}
                     hitSlop={8}
                     accessibilityRole="button"
                     accessibilityLabel="Share to Facebook"
+                    accessibilityState={{ disabled: sharingTo !== null, busy: sharingTo === 'facebook' }}
                   >
-                    <Icon name="facebook" size={20} color={textColor} />
+                    {sharingTo === 'facebook'
+                      ? <ActivityIndicator size="small" color={textColor} />
+                      : <Icon name="facebook" size={20} color={textColor} />}
                   </Pressable>
                 </View>
               </>
