@@ -40,6 +40,12 @@ const buildItemMap = (items: WardrobeItem[]): Map<string, WardrobeItem> => {
   return map;
 };
 
+// Stable FlatList keyExtractor. Prefer the client-assigned outfit.id
+// (unique per batch, stable across re-renders); fall back to a
+// name+items fingerprint for any legacy path without an id.
+const outfitKey = (o: Outfit): string =>
+  o.id ?? `${o.name}|${o.items.join(',')}`;
+
 export const MoodBoardScreen: React.FC = () => {
   const colorScheme = useColorScheme() ?? 'light';
   const [screenState, setScreenState] = useState<ScreenState>('loading');
@@ -171,7 +177,7 @@ export const MoodBoardScreen: React.FC = () => {
     }
   };
 
-  const handleSelectOutfit = async (outfit: Outfit) => {
+  const handleSelectOutfit = useCallback(async (outfit: Outfit) => {
     setIsSaving(true);
     try {
       // Capture a PNG of the collage exactly as the user sees it — this is
@@ -210,7 +216,7 @@ export const MoodBoardScreen: React.FC = () => {
     } finally {
       setIsSaving(false);
     }
-  };
+  }, [outfitOptions, today, currentJobId]);
 
   // Items available to swap into the current outfit (same category, not already in outfit).
   const swapCandidates = useMemo(() => {
@@ -259,7 +265,7 @@ export const MoodBoardScreen: React.FC = () => {
       });
   };
 
-  const handleRateOutfit = (outfit: Outfit, direction: 'up' | 'down') => {
+  const handleRateOutfit = useCallback((outfit: Outfit, direction: 'up' | 'down') => {
     if (!outfit.id) return;
     if (ratings[outfit.id]) return; // already rated — immutable per card
     setRatings((prev) => ({ ...prev, [outfit.id!]: direction }));
@@ -279,7 +285,51 @@ export const MoodBoardScreen: React.FC = () => {
       .catch((err) => {
         console.warn('[MoodBoard] feedback: rated failed', err);
       });
-  };
+  }, [ratings, currentJobId, outfitOptions]);
+
+  // F2: stabilise renderItem so FlatList doesn't tear down + recreate
+  // the card tree on every parent render. Combined with OutfitCard's
+  // React.memo + propsAreEqual, unrelated state updates (isSaving,
+  // swapTarget, rating flicker, cardHeight) stop forcing all 3–5
+  // cards to re-render their Collage subtree. The setSwapTarget,
+  // collageCaptureRefs.current = {...}, and weather props are all
+  // stable via useRef / useCallback / constant references.
+  const weatherDetail = useMemo(() =>
+    weather
+      ? {
+          location: weather.location,
+          highTemperature: weather.highTemperature,
+          lowTemperature: weather.lowTemperature,
+          unit: weather.unit,
+        }
+      : undefined,
+    [weather],
+  );
+
+  const renderOutfitCard = useCallback(({ item, index }: { item: Outfit; index: number }) => (
+    <OutfitCard
+      outfit={item}
+      index={index}
+      total={outfitOptions.length}
+      itemMap={itemMap}
+      onSelect={() => { void handleSelectOutfit(item); }}
+      onItemPress={(itemId) => setSwapTarget({ outfitIndex: index, itemId })}
+      isSaving={isSaving}
+      colorScheme={colorScheme}
+      cardHeight={cardHeight}
+      weatherDetail={weatherDetail}
+      onThumbsUp={() => handleRateOutfit(item, 'up')}
+      onThumbsDown={() => handleRateOutfit(item, 'down')}
+      rating={item.id ? (ratings[item.id] ?? null) : null}
+      collageCaptureRef={item.id
+        ? (handle) => {
+            if (item.id) {
+              collageCaptureRefs.current[item.id] = handle;
+            }
+          }
+        : undefined}
+    />
+  ), [outfitOptions.length, itemMap, handleSelectOutfit, isSaving, colorScheme, cardHeight, weatherDetail, handleRateOutfit, ratings]);
 
   const renderContent = () => {
     switch (screenState) {
@@ -320,43 +370,14 @@ export const MoodBoardScreen: React.FC = () => {
                 horizontal
                 pagingEnabled
                 showsHorizontalScrollIndicator={false}
-                keyExtractor={(item) => item.name + '|' + item.items.join(',')}
+                // Use the client-assigned outfit ID when present — stable
+                // across re-renders, unique per batch. Fall back to a
+                // name+items fingerprint for legacy/pre-id paths.
+                keyExtractor={outfitKey}
                 onViewableItemsChanged={onViewableItemsChanged}
                 viewabilityConfig={viewabilityConfig}
                 style={styles.flatList}
-                renderItem={({ item, index }) => (
-                  <OutfitCard
-                    outfit={item}
-                    index={index}
-                    total={outfitOptions.length}
-                    itemMap={itemMap}
-                    onSelect={() => { void handleSelectOutfit(item); }}
-                    onItemPress={(itemId) => setSwapTarget({ outfitIndex: index, itemId })}
-                    isSaving={isSaving}
-                    colorScheme={colorScheme}
-                    cardHeight={cardHeight}
-                    weatherDetail={
-                      weather
-                        ? {
-                            location: weather.location,
-                            highTemperature: weather.highTemperature,
-                            lowTemperature: weather.lowTemperature,
-                            unit: weather.unit,
-                          }
-                        : undefined
-                    }
-                    onThumbsUp={() => handleRateOutfit(item, 'up')}
-                    onThumbsDown={() => handleRateOutfit(item, 'down')}
-                    rating={item.id ? (ratings[item.id] ?? null) : null}
-                    collageCaptureRef={item.id
-                      ? (handle) => {
-                          if (item.id) {
-                            collageCaptureRefs.current[item.id] = handle;
-                          }
-                        }
-                      : undefined}
-                  />
-                )}
+                renderItem={renderOutfitCard}
               />
             </View>
             <View style={styles.dotsRow}>

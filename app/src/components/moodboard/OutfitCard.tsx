@@ -90,7 +90,15 @@ export interface OutfitCardProps {
   collageCaptureRef?: React.Ref<CollageCaptureHandle>;
 }
 
-export const OutfitCard: React.FC<OutfitCardProps> = ({
+// F2 + F1 + F3: memoised base so OutfitCard only re-renders when its
+// data-bearing props change. The FlatList parent recreates inline
+// callbacks (onSelect / onItemPress / onThumbsUp / onThumbsDown /
+// collageCaptureRef) every render, so default shallow memo would miss
+// every time. propsAreEqual below explicitly ignores callback identity
+// and relies on their semantic stability — handlers like
+// setSwapTarget, handleRateOutfit, etc. always do the same thing for
+// the same outfit/index pair, so fresh references are safe to ignore.
+const OutfitCardBase: React.FC<OutfitCardProps> = ({
   outfit, index, total, itemMap, onSelect, onItemPress, isSaving, colorScheme, cardHeight, weatherDetail,
   onThumbsUp, onThumbsDown, rating, collageCaptureRef,
 }) => {
@@ -295,6 +303,25 @@ export const OutfitCard: React.FC<OutfitCardProps> = ({
     </View>
   );
 };
+
+// Custom comparator for the memo wrapper. Only re-render when the data
+// that actually affects what's drawn changes — not when callback
+// references churn. Callbacks captured by the parent's inline
+// renderItem get new references on every parent re-render; treating
+// them as "same" because they semantically are (same handler, same
+// closure target) is the whole point of the optimisation.
+const outfitCardPropsAreEqual = (prev: OutfitCardProps, next: OutfitCardProps): boolean =>
+  prev.outfit === next.outfit &&
+  prev.index === next.index &&
+  prev.total === next.total &&
+  prev.itemMap === next.itemMap &&
+  prev.isSaving === next.isSaving &&
+  prev.colorScheme === next.colorScheme &&
+  prev.cardHeight === next.cardHeight &&
+  prev.rating === next.rating &&
+  prev.weatherDetail === next.weatherDetail;
+
+export const OutfitCard = React.memo(OutfitCardBase, outfitCardPropsAreEqual);
 
 const styles = StyleSheet.create({
   card: {
