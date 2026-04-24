@@ -559,6 +559,56 @@ export const Collage: React.FC<CollageProps> = ({ itemIds, itemMap, snapshots, l
       const pos = scalePos(basePos, zone, role, activeZoneCount);
       return { itemId, item, snapshot, zone, pos };
     });
+
+    // P1-G: cluster accessories adjacent to the hero.
+    //
+    // The zone table places accessories at a fixed top-right-ish anchor,
+    // which reads well when outerwear is the hero (the common case) but
+    // leaves the accessory orphaned when tops or bottoms carries the
+    // hero role. Stylists explicitly cluster accessories next to the
+    // outfit's center of gravity — never scattered to a corner.
+    //
+    // Strategy: find the hero's final bounding box, then override each
+    // accessory's position to sit at the hero's lower-right quadrant,
+    // offset by ITEM_GUTTER. Multiple accessories stack downward with
+    // slight overlap so they read as a cluster, not a column.
+    const heroPlaced = placed.find(p => layoutRoles?.[p.itemId] === 'hero');
+    if (heroPlaced) {
+      const pct = (v: `${number}%`) => parseFloat(v.slice(0, -1));
+      const heroL = pct(heroPlaced.pos.l);
+      const heroT = pct(heroPlaced.pos.t);
+      const heroW = pct(heroPlaced.pos.w);
+      const heroH = pct(heroPlaced.pos.h);
+      const gutterPct = ITEM_GUTTER * 100;
+      // Cluster anchor — slightly inside the hero's right edge so the
+      // accessory visually "leans on" the hero rather than floating.
+      const anchorX = heroL + heroW - heroW * 0.15;
+      const anchorY = heroT + heroH * 0.55;
+
+      let accessoryIdx = 0;
+      placed.forEach(p => {
+        if (p.zone !== 'accessories') return;
+        const accW = pct(p.pos.w);
+        const accH = pct(p.pos.h);
+        // Stack subsequent accessories with 30% overlap so they read as
+        // a tight cluster, not a vertical column.
+        const verticalOffset = accessoryIdx * (accH * 0.7 + gutterPct);
+        const targetL = anchorX;
+        const targetT = anchorY + verticalOffset;
+        // Clamp inside the panel's 3.5–96.5% safe band so the cluster
+        // doesn't overflow onto the background strip.
+        const l = Math.max(3.5, Math.min(96.5 - accW, targetL));
+        const t = Math.max(3.5, Math.min(96.5 - accH, targetT));
+        p.pos = {
+          l: `${l}%`,
+          t: `${t}%`,
+          w: p.pos.w,
+          h: p.pos.h,
+        };
+        accessoryIdx += 1;
+      });
+    }
+
     const ordered = [...placed].sort(
       (a, b) => RENDER_ORDER.indexOf(a.zone) - RENDER_ORDER.indexOf(b.zone),
     );
