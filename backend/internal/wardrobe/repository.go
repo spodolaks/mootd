@@ -3,6 +3,7 @@ package wardrobe
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -121,24 +122,39 @@ func (r *MongoRepository) SaveImage(ctx context.Context, itemID string, data []b
 
 // GetImage retrieves the image bytes and content-type for an item from GridFS.
 // Returns mongo.ErrFileNotFound if no image exists for the item.
+//
+// Implementation note (B5 perf fix): a single FindOne on the files
+// collection returns both the GridFS _id (used to stream the bytes) and
+// the stored content-type metadata. The previous implementation called
+// DownloadToStreamByName (which internally does its own FindOne + stream
+// download) plus a *separate* FindOne for metadata — three MongoDB
+// round-trips per image. The vision-mode outfit flow loads up to 24
+// images per generation, so the old pattern cost 48–72 extra round-
+// trips per outfit — 50–120 ms wasted on every vision generation.
 func (r *MongoRepository) GetImage(ctx context.Context, itemID string) ([]byte, string, error) {
 	bucket := r.gridFSBucket()
 
-	var buf bytes.Buffer
-	if _, err := bucket.DownloadToStreamByName(ctx, itemID, &buf); err != nil {
-		return nil, "", err
-	}
-
-	// Retrieve the stored content-type from the file's metadata.
 	var fileDoc struct {
+		ID       any `bson:"_id"`
 		Metadata struct {
 			ContentType string `bson:"contentType"`
 		} `bson:"metadata"`
 	}
-	err := bucket.GetFilesCollection().FindOne(ctx, bson.M{"filename": itemID}).Decode(&fileDoc)
-	if err != nil {
-		return buf.Bytes(), "image/jpeg", nil // default if metadata unavailable
+	if err := bucket.GetFilesCollection().FindOne(ctx, bson.M{"filename": itemID}).Decode(&fileDoc); err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			// Preserve the public contract — callers (wardrobe handler,
+			// pngworker, claude loader) check for mongo.ErrFileNotFound
+			// to distinguish missing image from other failures.
+			return nil, "", mongo.ErrFileNotFound
+		}
+		return nil, "", err
 	}
+
+	var buf bytes.Buffer
+	if _, err := bucket.DownloadToStream(ctx, fileDoc.ID, &buf); err != nil {
+		return nil, "", err
+	}
+
 	ct := fileDoc.Metadata.ContentType
 	if ct == "" {
 		ct = "image/jpeg"
