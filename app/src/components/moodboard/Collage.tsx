@@ -292,18 +292,67 @@ export const MINIMAL_POSITIONS: Record<ItemZone, [ZonePos, ZonePos, ZonePos]> = 
   ],
 };
 
+// TRIANGULAR_POSITIONS — P1-E editorial diagonal layout (default when
+// outerwear is present). Items flow along a top-right → bottom-left
+// diagonal with the outerwear anchor at the upper-right third, the top
+// at mid-left, bottoms center-lower, shoes baseline-left, and accessories
+// tucked adjacent to the outerwear anchor. This mirrors the composition
+// stylists use in editorial flat-lays (Who What Wear, The Zoe Report,
+// top Pinterest outfit pins) — a deliberate zigzag that the eye traces
+// naturally, instead of the retail-style vertical stack.
+//
+// Each zone's index-0 position is tuned so its center aligns with (or
+// sits adjacent to) the matching HERO_THIRDS_CENTER intersection — so
+// when the item IS the hero, the P0 thirds-repositioning produces a
+// subtle shift rather than a jarring jump.
+export const TRIANGULAR_POSITIONS: Record<ItemZone, [ZonePos, ZonePos, ZonePos]> = {
+  outerwear: [
+    { l: '38%', t: '13%', w: '55%', h: '42%' },
+    { l: '34%', t: '15%', w: '52%', h: '40%' },
+    { l: '30%', t: '17%', w: '48%', h: '38%' },
+  ],
+  tops: [
+    { l: '6%',  t: '28%', w: '48%', h: '38%' },
+    { l: '4%',  t: '30%', w: '46%', h: '36%' },
+    { l: '2%',  t: '32%', w: '42%', h: '34%' },
+  ],
+  bottoms: [
+    { l: '28%', t: '54%', w: '50%', h: '40%' },
+    { l: '26%', t: '56%', w: '46%', h: '38%' },
+    { l: '24%', t: '58%', w: '42%', h: '36%' },
+  ],
+  shoes: [
+    { l: '6%',  t: '78%', w: '28%', h: '18%' },
+    { l: '6%',  t: '80%', w: '26%', h: '16%' },
+    { l: '6%',  t: '82%', w: '24%', h: '14%' },
+  ],
+  // P1-G: accessories clustered adjacent to the typical outerwear anchor
+  // (top-right third) rather than isolated in a corner. When the outfit's
+  // hero is elsewhere, the accessory still reads as a counter-balance
+  // rather than an orphaned element.
+  accessories: [
+    { l: '72%', t: '58%', w: '22%', h: '18%' },
+    { l: '74%', t: '62%', w: '20%', h: '16%' },
+    { l: '76%', t: '66%', w: '18%', h: '14%' },
+  ],
+};
+
 // Legacy export for any callers still referencing the old name.
-export const ZONE_POSITIONS = FIVE_ZONE_POSITIONS;
+// Now points at the triangular default so legacy consumers see the new
+// composition without code changes.
+export const ZONE_POSITIONS = TRIANGULAR_POSITIONS;
 
 // pickLayout returns the positions table best suited to the set of zones
-// actually present on this card. Composition logic lives here so the
-// render path stays a simple `positions[zone][index]` lookup.
+// actually present on this card. Triangular is the editorial default when
+// outerwear anchors the look (with or without accessory). When outerwear
+// is missing the diagonal breaks down, so we fall back to the older
+// NO_OUTER layout that rebalances around a center-heavy axis. Minimal
+// (3-zone) stays as the legacy outfit fallback.
 export const pickLayout = (activeZones: Set<ItemZone>): Record<ItemZone, [ZonePos, ZonePos, ZonePos]> => {
   const hasOuter = activeZones.has('outerwear');
   const hasAccessory = activeZones.has('accessories');
-  if (hasOuter && hasAccessory) return FIVE_ZONE_POSITIONS;
-  if (hasOuter && !hasAccessory) return NO_ACCESSORY_POSITIONS;
-  if (!hasOuter && hasAccessory) return NO_OUTER_POSITIONS;
+  if (hasOuter) return TRIANGULAR_POSITIONS;
+  if (hasAccessory) return NO_OUTER_POSITIONS;
   return MINIMAL_POSITIONS;
 };
 
