@@ -310,24 +310,116 @@ export const pickLayout = (activeZones: Set<ItemZone>): Record<ItemZone, [ZonePo
 // Render order: back → front. Outerwear behind top; bottom behind shoes; accessories on top.
 export const RENDER_ORDER: ItemZone[] = ['outerwear', 'bottoms', 'tops', 'shoes', 'accessories'];
 
-// ---------- Role scaling ----------
+// ---------- Editorial sizing (P0-A, P0-B, P0-C, P0-D) ----------
+//
+// The composition engine derives each item's final bounding box from three
+// factors: a per-zone weight (anchor vs tucked), a per-role weight (hero vs
+// support vs accent), and a reflow boost when fewer than 4 zones are active.
+// Hero items additionally reposition onto a rule-of-thirds intersection for
+// triangular/diagonal editorial composition.
+//
+// Design principles synthesized from pro flat-lay research (Who What Wear,
+// The Zoe Report, FIT/Parsons styling coursework, top Pinterest outfit
+// pins): hero 2–3× the area of accent, outerwear as anchor, shoes rendered
+// 60–75% of proportional (the #1 amateur flat-lay tell), accessories
+// supporting not competing, consistent 8–10% safe margin and 2–3% gutter.
 
-// Multipliers applied to a zone's base width/height based on the generator's
-// per-item layoutRole. The hero piece is amplified, accents are tucked smaller,
-// supports stay at the existing size.
-export const ROLE_SCALE: Record<'hero' | 'support' | 'accent', number> = {
-  hero: 1.12,
-  support: 1.0,
-  accent: 0.82,
+// Safe margin inside the canvas — no item's bounding box should extend into
+// the outer SAFE_MARGIN band. Currently enforced by the panel inset (3.5%)
+// plus per-zone l/t defaults; this constant is the reference for future
+// layout work and for the hero-thirds clamp below.
+export const SAFE_MARGIN = 0.09;
+
+// Consistent gutter between adjacent items. Stylist-taught target 2–3% of
+// canvas width. Codified for future layout work (triangular P1-E).
+export const ITEM_GUTTER = 0.025;
+
+// Per-zone base weight applied on top of role scaling. Outerwear gets a
+// small anchor boost (editorial convention). Shoes are explicitly reduced —
+// rendering footwear at realistic proportion is the #1 amateur flat-lay
+// mistake; pros render shoes 60–75% of what proportional math gives you.
+// Accessories are slightly tucked (the cluster should read as supporting,
+// not competing).
+export const ZONE_WEIGHT: Record<ItemZone, number> = {
+  outerwear:   1.05,
+  tops:        1.00,
+  bottoms:     1.00,
+  shoes:       0.85,
+  accessories: 0.92,
 };
 
-export const scalePos = (pos: ZonePos, factor: number): ZonePos => {
+// Replaces the old flat ROLE_SCALE. Hero is stronger (1.15 vs 1.12) and
+// accent is more tucked (0.76 vs 0.82) for clearer visual hierarchy.
+// Combined with ZONE_WEIGHT, a hero outerwear is ~2.3× the area of an
+// accent accessory — in the 2–3× "editorial" range stylists recommend.
+export const ROLE_SCALE: Record<'hero' | 'support' | 'accent', number> = {
+  hero: 1.15,
+  support: 1.0,
+  accent: 0.76,
+};
+
+// When fewer than 4 zones are active on the canvas (legacy outfit missing
+// an item, 3-zone minimal layout), remaining items absorb ~8% of the
+// would-be missing zone's space so the panel doesn't read as "half
+// empty". New outfits always have 4+ zones (backend validation enforces
+// top + bottom + shoes minimum at `service.go:374`), so this mainly
+// benefits saved boards predating validation.
+export const REFLOW_FACTOR_PER_MISSING = 1.08;
+
+// Rule-of-thirds centers per zone. When an item has role='hero', its
+// position is computed from these centers instead of the zone table —
+// placing the hero on a third-line intersection for editorial
+// (triangular/diagonal) composition rather than a dead-center retail
+// stack. Support and accent items use the zone table unchanged so the
+// overall layout stays recognizable.
+//
+// Each zone targets a different intersection so boards with different
+// hero zones feel visually distinct. Outerwear → top-right third; tops
+// → top-left; bottoms → center-bottom; shoes + accessories keep zone-
+// sensible positions (they're rarely hero; when they are, the outfit
+// is built around them and the position feels intentional).
+export const HERO_THIRDS_CENTER: Record<ItemZone, { cx: number; cy: number }> = {
+  outerwear:   { cx: 65, cy: 34 },
+  tops:        { cx: 35, cy: 32 },
+  bottoms:     { cx: 50, cy: 65 },
+  shoes:       { cx: 33, cy: 82 },
+  accessories: { cx: 78, cy: 30 },
+};
+
+// scalePos — one-stop shop for deriving the final bounding box from a
+// zone/role/activeZoneCount tuple. For hero items it repositions to a
+// rule-of-thirds intersection; for support/accent it keeps the zone
+// table's default anchor and just scales w/h.
+export const scalePos = (
+  basePos: ZonePos,
+  zone: ItemZone,
+  role: 'hero' | 'support' | 'accent' | undefined,
+  activeZoneCount: number,
+): ZonePos => {
   const parsePct = (v: `${number}%`) => parseFloat(v.slice(0, -1));
-  const w = parsePct(pos.w) * factor;
-  const h = parsePct(pos.h) * factor;
+  const zoneW = ZONE_WEIGHT[zone];
+  const roleW = role ? ROLE_SCALE[role] : 1.0;
+  // Reflow kicks in only when fewer than 4 zones are active, matching the
+  // threshold where the MINIMAL_POSITIONS table takes over.
+  const reflow = activeZoneCount < 4 ? REFLOW_FACTOR_PER_MISSING : 1.0;
+  const factor = zoneW * roleW * reflow;
+  const w = parsePct(basePos.w) * factor;
+  const h = parsePct(basePos.h) * factor;
+
+  if (role === 'hero') {
+    // Re-center on the zone's thirds intersection. Clamp within the
+    // panel bounds (3.5% – 96.5%) so the item doesn't overflow the
+    // textured surface onto the visible background strip.
+    const { cx, cy } = HERO_THIRDS_CENTER[zone];
+    const l = Math.max(3.5, Math.min(96.5 - w, cx - w / 2));
+    const t = Math.max(3.5, Math.min(96.5 - h, cy - h / 2));
+    return { l: `${l}%`, t: `${t}%`, w: `${w}%`, h: `${h}%` };
+  }
+
+  // Support + accent: keep the zone's default anchor, just scale w/h.
   return {
-    l: pos.l,
-    t: pos.t,
+    l: basePos.l,
+    t: basePos.t,
     w: `${w}%`,
     h: `${h}%`,
   };
@@ -399,6 +491,10 @@ export const Collage: React.FC<CollageProps> = ({ itemIds, itemMap, snapshots, l
     // table; NO_OUTER_POSITIONS pulls everything toward center + diagonal.
     const activeZones = new Set(classified.map(c => c.zone));
     const positionsTable = pickLayout(activeZones);
+    // Reflow signal: when the outfit is missing a zone (legacy saved
+    // board, or a minimal 3-zone composition), remaining items scale up
+    // by REFLOW_FACTOR_PER_MISSING so the panel doesn't look half-empty.
+    const activeZoneCount = activeZones.size;
 
     const zoneCounts = new Map<ItemZone, number>();
     const placed = classified.map(({ itemId, item, snapshot, zone }) => {
@@ -406,9 +502,12 @@ export const Collage: React.FC<CollageProps> = ({ itemIds, itemMap, snapshots, l
       zoneCounts.set(zone, idx + 1);
       const positions = positionsTable[zone];
       const basePos = positions[Math.min(idx, positions.length - 1)];
-      // Apply the generator's layoutRole hint when present.
+      // Compose zone weight × role weight × reflow in one pass. For hero
+      // items scalePos re-anchors onto a rule-of-thirds intersection for
+      // editorial/triangular composition; support + accent keep the
+      // zone table's default anchor.
       const role = layoutRoles?.[itemId];
-      const pos = role ? scalePos(basePos, ROLE_SCALE[role]) : basePos;
+      const pos = scalePos(basePos, zone, role, activeZoneCount);
       return { itemId, item, snapshot, zone, pos };
     });
     return [...placed].sort(
