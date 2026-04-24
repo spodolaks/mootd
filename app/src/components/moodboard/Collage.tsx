@@ -18,31 +18,38 @@ import { Image } from 'expo-image';
 // enumerated. Keep this list in sync with app/assets/images/panels/ and
 // app/assets/images/backgrounds/ — add a line per new surface.
 type ArchetypeAffinity = Readonly<Record<string, number>>;
-type LocalSurface = { source: number; affinity: ArchetypeAffinity };
+// P2-I: avgSaturation is the 0–1 HSL-saturation of the surface's dominant
+// tones. Used as a cap so a minimal outfit doesn't get a dramatic surface —
+// stylist rule: surface 1–2 tonal steps quieter than the quietest garment.
+// Values estimated from visual inspection of the bundled assets; replace
+// with auto-computed values when the seeder's avgSaturation feature ships
+// (currently only local fallback uses these; LLM-picked surfaces come from
+// the backend and are constrained separately in the prompt).
+type LocalSurface = { source: number; affinity: ArchetypeAffinity; avgSaturation: number };
 
 const LOCAL_PANELS: readonly LocalSurface[] = [
-  { source: require('../../../assets/images/panels/L2-Surface-Concrete.png'),          affinity: { explorer: 0.8, outlaw: 0.7, creator: 0.4 } },
-  { source: require('../../../assets/images/panels/L2-Surface-Dark-Asphalt.png'),      affinity: { outlaw: 0.9, explorer: 0.6 } },
-  { source: require('../../../assets/images/panels/L2-Surface-Light-Stone-Table.png'), affinity: { ruler: 0.7, sage: 0.6, lover: 0.4 } },
-  { source: require('../../../assets/images/panels/L2-Surface-Linen.png'),             affinity: { lover: 0.8, innocent: 0.7, caregiver: 0.5 } },
-  { source: require('../../../assets/images/panels/L2-Surface-Marble.png'),            affinity: { ruler: 0.9, lover: 0.6, sage: 0.4 } },
-  { source: require('../../../assets/images/panels/L2-Surface-Off-white-Rainbow.png'), affinity: { creator: 0.8, jester: 0.6, innocent: 0.5 } },
-  { source: require('../../../assets/images/panels/L2-Surface-Studio-floor.png'),      affinity: { creator: 0.7, sage: 0.6, magician: 0.4 } },
-  { source: require('../../../assets/images/panels/L2-Surface-Urban-Pavement.png'),    affinity: { explorer: 0.8, everyman: 0.6, outlaw: 0.4 } },
-  { source: require('../../../assets/images/panels/L2-Surface-Wet-asphalt.png'),       affinity: { outlaw: 0.8, explorer: 0.6, rebel: 0.5 } },
-  { source: require('../../../assets/images/panels/L2-Surface-Wooden-floor.png'),      affinity: { everyman: 0.7, caregiver: 0.6, sage: 0.4 } },
+  { source: require('../../../assets/images/panels/L2-Surface-Concrete.png'),          affinity: { explorer: 0.8, outlaw: 0.7, creator: 0.4 }, avgSaturation: 0.08 },
+  { source: require('../../../assets/images/panels/L2-Surface-Dark-Asphalt.png'),      affinity: { outlaw: 0.9, explorer: 0.6 },               avgSaturation: 0.06 },
+  { source: require('../../../assets/images/panels/L2-Surface-Light-Stone-Table.png'), affinity: { ruler: 0.7, sage: 0.6, lover: 0.4 },        avgSaturation: 0.12 },
+  { source: require('../../../assets/images/panels/L2-Surface-Linen.png'),             affinity: { lover: 0.8, innocent: 0.7, caregiver: 0.5 }, avgSaturation: 0.14 },
+  { source: require('../../../assets/images/panels/L2-Surface-Marble.png'),            affinity: { ruler: 0.9, lover: 0.6, sage: 0.4 },        avgSaturation: 0.10 },
+  { source: require('../../../assets/images/panels/L2-Surface-Off-white-Rainbow.png'), affinity: { creator: 0.8, jester: 0.6, innocent: 0.5 }, avgSaturation: 0.32 },
+  { source: require('../../../assets/images/panels/L2-Surface-Studio-floor.png'),      affinity: { creator: 0.7, sage: 0.6, magician: 0.4 },   avgSaturation: 0.08 },
+  { source: require('../../../assets/images/panels/L2-Surface-Urban-Pavement.png'),    affinity: { explorer: 0.8, everyman: 0.6, outlaw: 0.4 }, avgSaturation: 0.10 },
+  { source: require('../../../assets/images/panels/L2-Surface-Wet-asphalt.png'),       affinity: { outlaw: 0.8, explorer: 0.6, rebel: 0.5 },   avgSaturation: 0.09 },
+  { source: require('../../../assets/images/panels/L2-Surface-Wooden-floor.png'),      affinity: { everyman: 0.7, caregiver: 0.6, sage: 0.4 }, avgSaturation: 0.24 },
 ];
 
 const LOCAL_BACKGROUNDS: readonly LocalSurface[] = [
-  { source: require('../../../assets/images/backgrounds/L3-Place-Cafe.png'),         affinity: { everyman: 0.7, lover: 0.5, jester: 0.4 } },
-  { source: require('../../../assets/images/backgrounds/L3-Place-City-Street.png'),  affinity: { explorer: 0.8, rebel: 0.6, outlaw: 0.4 } },
-  { source: require('../../../assets/images/backgrounds/L3-Place-Green-Park.png'),   affinity: { innocent: 0.7, caregiver: 0.6, sage: 0.4 } },
-  { source: require('../../../assets/images/backgrounds/L3-Place-Hotel-Lobby.png'),  affinity: { ruler: 0.8, lover: 0.5 } },
-  { source: require('../../../assets/images/backgrounds/L3-Place-Morning-Room.png'), affinity: { lover: 0.7, innocent: 0.6, caregiver: 0.4 } },
-  { source: require('../../../assets/images/backgrounds/L3-Place-Night-City.png'),   affinity: { outlaw: 0.8, explorer: 0.6, magician: 0.5 } },
-  { source: require('../../../assets/images/backgrounds/L3-Place-Office-Window.png'), affinity: { ruler: 0.7, sage: 0.6, creator: 0.5 } },
-  { source: require('../../../assets/images/backgrounds/L3-Place-Office.png'),       affinity: { ruler: 0.7, sage: 0.6, creator: 0.5 } },
-  { source: require('../../../assets/images/backgrounds/L3-Place-Wet-City.png'),     affinity: { outlaw: 0.7, explorer: 0.6, rebel: 0.4 } },
+  { source: require('../../../assets/images/backgrounds/L3-Place-Cafe.png'),          affinity: { everyman: 0.7, lover: 0.5, jester: 0.4 },    avgSaturation: 0.34 },
+  { source: require('../../../assets/images/backgrounds/L3-Place-City-Street.png'),   affinity: { explorer: 0.8, rebel: 0.6, outlaw: 0.4 },    avgSaturation: 0.22 },
+  { source: require('../../../assets/images/backgrounds/L3-Place-Green-Park.png'),    affinity: { innocent: 0.7, caregiver: 0.6, sage: 0.4 },  avgSaturation: 0.46 },
+  { source: require('../../../assets/images/backgrounds/L3-Place-Hotel-Lobby.png'),   affinity: { ruler: 0.8, lover: 0.5 },                    avgSaturation: 0.30 },
+  { source: require('../../../assets/images/backgrounds/L3-Place-Morning-Room.png'),  affinity: { lover: 0.7, innocent: 0.6, caregiver: 0.4 }, avgSaturation: 0.28 },
+  { source: require('../../../assets/images/backgrounds/L3-Place-Night-City.png'),    affinity: { outlaw: 0.8, explorer: 0.6, magician: 0.5 }, avgSaturation: 0.18 },
+  { source: require('../../../assets/images/backgrounds/L3-Place-Office-Window.png'), affinity: { ruler: 0.7, sage: 0.6, creator: 0.5 },       avgSaturation: 0.24 },
+  { source: require('../../../assets/images/backgrounds/L3-Place-Office.png'),        affinity: { ruler: 0.7, sage: 0.6, creator: 0.5 },       avgSaturation: 0.18 },
+  { source: require('../../../assets/images/backgrounds/L3-Place-Wet-City.png'),      affinity: { outlaw: 0.7, explorer: 0.6, rebel: 0.4 },    avgSaturation: 0.22 },
 ];
 
 // Deterministic hash — used both for stable tiebreaks in affinity scoring
@@ -55,6 +62,33 @@ const hashSeed = (seed: string): number => {
   return Math.abs(h);
 };
 
+// hexToSaturation returns the HSL saturation (0–1) of a #RRGGBB hex string.
+// Used by P2-I to cap surface saturation against the outfit's quietest
+// garment — stylist rule: surface should be ≤ 80% of min(garment.saturation)
+// so the texture doesn't out-shout the clothes.
+//
+// Accepts 3- and 6-digit hex with or without a leading #. Returns 0 for
+// malformed input (treated as greyscale; caller can distinguish via the
+// caller's own palette availability check).
+export const hexToSaturation = (hex: string): number => {
+  const h = hex.replace(/^#/, '');
+  const full = h.length === 3 ? h.split('').map(c => c + c).join('') : h;
+  if (!/^[0-9a-fA-F]{6}$/.test(full)) return 0;
+  const r = parseInt(full.slice(0, 2), 16) / 255;
+  const g = parseInt(full.slice(2, 4), 16) / 255;
+  const b = parseInt(full.slice(4, 6), 16) / 255;
+  const maxC = Math.max(r, g, b);
+  const minC = Math.min(r, g, b);
+  if (maxC === minC) return 0;
+  const l = (maxC + minC) / 2;
+  const d = maxC - minC;
+  return l > 0.5 ? d / (2 - maxC - minC) : d / (maxC + minC);
+};
+
+// P2-I: surface saturation must be ≤ 80% of the outfit's quietest garment.
+// Tighter than stylist rule of "1–2 tonal steps" but measurable.
+const SURFACE_SATURATION_CAP_RATIO = 0.8;
+
 // pickSurface scores each candidate by the dot product of its archetype
 // affinity against the outfit's archetype scores, then returns the highest
 // scorer. Ties break on the hash of the seed so the choice stays stable
@@ -64,19 +98,47 @@ const hashSeed = (seed: string): number => {
 // becomes a no-op and the hash does all the work — same behaviour as the
 // previous random-but-deterministic pick, so we don't regress on outfits
 // that pre-date the archetype-scoring feature.
+//
+// P2-I: palette constrains the candidate pool before affinity scoring. A
+// minimal-saturation outfit filters out dramatic surfaces so we never
+// pair a black-and-white outfit with a rainbow panel. When no candidate
+// passes the cap the filter falls back to the full list (better to show
+// a slightly-too-dramatic surface than none at all).
 const pickSurface = (
   surfaces: readonly LocalSurface[],
   scores: Readonly<Record<string, number>> | undefined,
   seed: string,
+  palette: readonly string[] | undefined,
 ): number => {
   if (surfaces.length === 0) {
     throw new Error('pickSurface: empty surface list');
   }
+
+  // P2-I: filter by saturation cap before scoring.
+  let pool: readonly LocalSurface[] = surfaces;
+  if (palette && palette.length > 0) {
+    let minSat = Infinity;
+    for (const hex of palette) {
+      const s = hexToSaturation(hex);
+      if (s < minSat) minSat = s;
+    }
+    if (minSat !== Infinity) {
+      const cap = minSat * SURFACE_SATURATION_CAP_RATIO;
+      // Grant a small floor (0.15) so even greyscale outfits have at
+      // least a handful of candidates — otherwise a pure-black-and-white
+      // look would only allow surfaces with near-zero saturation, killing
+      // variety.
+      const effectiveCap = Math.max(cap, 0.15);
+      const filtered = surfaces.filter(s => s.avgSaturation <= effectiveCap);
+      if (filtered.length > 0) pool = filtered;
+    }
+  }
+
   const hash = hashSeed(seed);
-  let bestIdx = hash % surfaces.length;
+  let bestIdx = hash % pool.length;
   let bestScore = -Infinity;
 
-  surfaces.forEach((surface, idx) => {
+  pool.forEach((surface, idx) => {
     let score = 0;
     if (scores) {
       for (const [archetype, weight] of Object.entries(surface.affinity)) {
@@ -93,7 +155,7 @@ const pickSurface = (
     }
   });
 
-  return surfaces[bestIdx].source;
+  return pool[bestIdx].source;
 };
 
 // Shadow that traces each cutout's alpha channel rather than its bounding box.
@@ -577,6 +639,11 @@ export interface CollageProps {
    *  the outfit's vibe instead of picking at random. Ignored when the
    *  backend already supplied panelUrl / backgroundUrl. */
   archetypeScores?: Record<string, number>;
+  /** Dominant-color hex palette of the outfit (P2-I). Used by the local
+   *  fallback surface picker to cap surface saturation at 80% of the
+   *  quietest garment — so a minimal outfit never renders on a rainbow
+   *  panel. Ignored when the backend supplied panelUrl / backgroundUrl. */
+  palette?: string[];
   /** When true, the collage fills its parent's remaining vertical space via
    *  flex instead of its default 3:4 portrait aspect ratio. Use this when
    *  the collage is the only focal content on the screen (saved board view)
@@ -584,7 +651,7 @@ export interface CollageProps {
   fill?: boolean;
 }
 
-export const Collage: React.FC<CollageProps> = ({ itemIds, itemMap, snapshots, layoutRoles, visualWeights, onItemPress, colorScheme, panelUrl, backgroundUrl, archetypeScores, fill }) => {
+export const Collage: React.FC<CollageProps> = ({ itemIds, itemMap, snapshots, layoutRoles, visualWeights, onItemPress, colorScheme, panelUrl, backgroundUrl, archetypeScores, palette, fill }) => {
   // Build a snapshot lookup for fallback when items have been deleted.
   const snapshotMap = useMemo(() => {
     const map = new Map<string, OutfitItem>();
@@ -600,13 +667,18 @@ export const Collage: React.FC<CollageProps> = ({ itemIds, itemMap, snapshots, l
   // surfaces matched to their archetype mix. These are only used when the
   // server didn't supply panelUrl / backgroundUrl.
   const seed = itemIds.join('|');
+  // Palette fingerprint for memoization — prevents pickSurface re-running
+  // on every render when palette is a new reference but same contents.
+  const paletteKey = palette?.join('|') ?? '';
   const panelSource = useMemo(
-    () => pickSurface(LOCAL_PANELS, archetypeScores, seed),
-    [seed, archetypeScores],
+    () => pickSurface(LOCAL_PANELS, archetypeScores, seed, palette),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- paletteKey is the stable dep for palette
+    [seed, archetypeScores, paletteKey],
   );
   const backgroundSource = useMemo(
-    () => pickSurface(LOCAL_BACKGROUNDS, archetypeScores, seed),
-    [seed, archetypeScores],
+    () => pickSurface(LOCAL_BACKGROUNDS, archetypeScores, seed, palette),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- paletteKey is the stable dep for palette
+    [seed, archetypeScores, paletteKey],
   );
 
   const sorted = useMemo(() => {

@@ -196,6 +196,7 @@ export const OutfitCard: React.FC<OutfitCardProps> = ({
               panelUrl={outfit.panelUrl}
               backgroundUrl={outfit.backgroundUrl}
               archetypeScores={outfit.archetypeScores}
+              palette={outfit.palette}
               fill
             />
           </View>
@@ -215,6 +216,7 @@ export const OutfitCard: React.FC<OutfitCardProps> = ({
               panelUrl={outfit.panelUrl}
               backgroundUrl={outfit.backgroundUrl}
               archetypeScores={outfit.archetypeScores}
+              palette={outfit.palette}
               fill
             />
           </ViewShot>
