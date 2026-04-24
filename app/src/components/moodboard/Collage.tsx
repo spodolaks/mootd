@@ -3,7 +3,7 @@ import { labels } from '@/src/theme/colors';
 import { grays } from '@/src/theme/colors';
 import type { OutfitItem, WardrobeItem } from '@/src/domain';
 import React, { useMemo } from 'react';
-import { Platform, Pressable, StyleSheet, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Image } from 'expo-image';
 
 // Local surface library. Each entry pairs a bundled asset with the same
@@ -155,6 +155,19 @@ export const classifyZone = (category: string): ItemZone => {
     if (re.test(category)) return zone;
   }
   return 'tops';
+};
+
+// Human-readable short name per zone, used in missing-item affordances
+// ("Add top", "Add shoes"). Avoid the backend's category slugs here —
+// "footwear_pair" is fine as a DB value but reads like debug output in
+// a UI tile. Shown on an interactive placeholder when the outfit
+// references a wardrobe item that was deleted.
+export const ZONE_LABEL: Record<ItemZone, string> = {
+  outerwear: 'jacket',
+  tops: 'top',
+  bottoms: 'bottoms',
+  shoes: 'shoes',
+  accessories: 'accessory',
 };
 
 // ---------- Zone positions ----------
@@ -759,11 +772,29 @@ export const Collage: React.FC<CollageProps> = ({ itemIds, itemMap, snapshots, l
           cachePolicy="memory-disk"
         />
       </View>
-      {sorted.map(({ itemId, item, snapshot, pos, rotation }) => {
+      {sorted.map(({ itemId, item, snapshot, zone, pos, rotation }) => {
         const imgUrl = item?.pngImageUrl || item?.imageUrl
           || snapshot?.pngImageUrl || snapshot?.imageUrl;
+        const isMissing = !imgUrl;
+        // #30 — when the outfit references an item whose wardrobe entry
+        // has been deleted (no item, no snapshot with imageUrl), the old
+        // behaviour was a generic closet icon. That read as a visual
+        // gap — user couldn't tell if it was a rendering glitch or an
+        // actionable placeholder. Now we render an explicit "+ Add
+        // {zone}" tile when the Collage is interactive (onItemPress
+        // defined); tapping it reuses the existing swap flow, which
+        // already opens a category-filtered picker. Non-interactive
+        // contexts (read-only saved board previews) still get the quiet
+        // closet icon.
         const content = imgUrl ? (
           <Image source={{ uri: imgUrl }} style={styles.collageItem} contentFit="contain" cachePolicy="memory-disk" />
+        ) : onItemPress ? (
+          <View style={styles.missingAffordance}>
+            <Icon name="plus" size={24} color={iconFallbackColor} />
+            <Text style={[styles.missingLabel, { color: iconFallbackColor }]} numberOfLines={1}>
+              Add {ZONE_LABEL[zone]}
+            </Text>
+          </View>
         ) : (
           <Icon name="closet" size={32} color={iconFallbackColor} />
         );
@@ -784,8 +815,15 @@ export const Collage: React.FC<CollageProps> = ({ itemIds, itemMap, snapshots, l
         // from the live item first, falling back to the snapshot (for
         // saved boards whose wardrobe item was deleted) and finally a
         // generic "Swap this item" so blind users at least know it's
-        // interactive rather than an ornamental image.
-        const a11yLabel = item?.label ?? snapshot?.label ?? 'Swap this item';
+        // interactive rather than an ornamental image. When the item is
+        // missing entirely (deleted wardrobe entry) the affordance reads
+        // as "Add {zone}" to match the visible label.
+        const a11yLabel = isMissing
+          ? `Add ${ZONE_LABEL[zone]}`
+          : item?.label ?? snapshot?.label ?? 'Swap this item';
+        const a11yHint = isMissing
+          ? 'Double tap to pick a replacement garment'
+          : 'Double tap to swap this garment';
         return onItemPress ? (
           <Pressable
             key={itemId}
@@ -793,7 +831,7 @@ export const Collage: React.FC<CollageProps> = ({ itemIds, itemMap, snapshots, l
             onPress={() => onItemPress(itemId)}
             accessibilityRole="button"
             accessibilityLabel={a11yLabel}
-            accessibilityHint="Double tap to swap this garment"
+            accessibilityHint={a11yHint}
           >
             {content}
           </Pressable>
@@ -835,6 +873,27 @@ const styles = StyleSheet.create({
   collageItem: {
     width: '100%',
     height: '100%',
+  },
+  // #30 — "+ Add {zone}" affordance shown when the wardrobe item an
+  // outfit references has been deleted (no item, no snapshot). Column
+  // layout so the plus icon + label stack cleanly even in narrow accent
+  // zones; semi-transparent border hints "this slot is empty" without
+  // drawing too much attention away from the real garments.
+  missingAffordance: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(142, 142, 147, 0.5)',
+    borderStyle: 'dashed',
+    borderRadius: 8,
+    padding: 4,
+  },
+  missingLabel: {
+    fontSize: 11,
+    fontWeight: '500',
+    textAlign: 'center',
   },
   // Background layer — the "environment" the panel sits in. Fills the
   // entire collage bounds so it can peek out around the inset panel.
