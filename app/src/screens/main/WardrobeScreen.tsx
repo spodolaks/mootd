@@ -31,6 +31,12 @@ import { useTabContentBottomPadding, PILL_GUTTER } from '@/app/(main)/_layout';
 
 const DARK_GREY = '#3A3A3C';
 
+// F4: stable keyExtractor defined at module scope. The previous inline
+// `(item) => item.id` closure allocated fresh on every render, defeating
+// FlatList's internal prop-equality check and nudging it toward extra
+// reconciliation work.
+const wardrobeKey = (item: WardrobeItem): string => item.id;
+
 interface ClothingCardImageProps {
   imageUrl: string;
   pngImageUrl?: string;
@@ -271,7 +277,11 @@ export const WardrobeScreen: React.FC = () => {
     );
   };
 
-  const renderClothingItem = (item: WardrobeItem) => {
+  // F4: wrap in useCallback so FlatList sees a stable renderItem across
+  // re-renders, avoiding its internal recycler tearing down visible
+  // rows when the parent re-renders for unrelated reasons (scroll
+  // position change, tab focus, loading-more flip).
+  const renderClothingItem = useCallback(({ item }: { item: WardrobeItem }) => {
     return (
       <Pressable
         key={item.id}
@@ -289,7 +299,7 @@ export const WardrobeScreen: React.FC = () => {
         <Text style={[styles.itemName, { color: secondaryTextColor }]}>{item.label}</Text>
       </Pressable>
     );
-  };
+  }, [cardBgColor, placeholderColor, secondaryTextColor, handleItemPress]);
 
   const renderListEmpty = useCallback(() => {
     if (isLoadingItems && wardrobeItems.length === 0) {
@@ -341,12 +351,12 @@ export const WardrobeScreen: React.FC = () => {
         {categories.map(renderCategoryChip)}
       </ScrollView>
 
-      {/* Clothing Grid */}
+      {/* Clothing Grid — F4 virtualisation tuning for large wardrobes. */}
       <FlatList
         data={filteredItems}
-        keyExtractor={(item) => item.id}
+        keyExtractor={wardrobeKey}
         numColumns={2}
-        renderItem={({ item }) => renderClothingItem(item)}
+        renderItem={renderClothingItem}
         ListEmptyComponent={renderListEmpty}
         ListFooterComponent={
           isLoadingMore ? (
@@ -361,6 +371,19 @@ export const WardrobeScreen: React.FC = () => {
         contentContainerStyle={[styles.gridContent, { paddingBottom: tabBottomPadding }]}
         columnWrapperStyle={styles.gridRow}
         showsVerticalScrollIndicator={false}
+        // F4 virtualisation: default windowSize=21 is ~10 viewports above
+        // and below — huge waste for a grid of image-heavy cards. Tighten
+        // to 5 (current + 2 on each side) so offscreen cards unmount and
+        // free their image memory. maxToRenderPerBatch=10 caps per-frame
+        // render work so a long list can't starve the UI thread during
+        // initial layout. initialNumToRender=10 shows a full first
+        // viewport without over-rendering. removeClippedSubviews is
+        // forced true (Android default false) so the same offscreen-
+        // mount-detach rule applies cross-platform.
+        windowSize={5}
+        maxToRenderPerBatch={10}
+        initialNumToRender={10}
+        removeClippedSubviews
       />
 
       {/* FAB Button — lifted above the floating pill so it doesn't overlap. */}
