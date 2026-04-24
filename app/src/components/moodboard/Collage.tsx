@@ -559,10 +559,50 @@ export const Collage: React.FC<CollageProps> = ({ itemIds, itemMap, snapshots, l
       const pos = scalePos(basePos, zone, role, activeZoneCount);
       return { itemId, item, snapshot, zone, pos };
     });
-    return [...placed].sort(
+    const ordered = [...placed].sort(
       (a, b) => RENDER_ORDER.indexOf(a.zone) - RENDER_ORDER.indexOf(b.zone),
     );
-  }, [itemIds, itemMap, snapshotMap, layoutRoles]);
+
+    // P1-F: seeded rotation on 1–2 non-hero items.
+    //
+    // Editorial flat-lays never render everything axis-aligned — the
+    // slight tilt on a supporting garment is the single biggest "this
+    // looks like a Pinterest pin, not a catalog page" signal. Pick 1 or
+    // 2 non-hero items and tilt them 5–15°, seeded by the outfit's item
+    // tuple so the same outfit always tilts the same items the same way
+    // (no flicker across re-mounts, but every outfit looks different).
+    //
+    // Hero is explicitly excluded — the anchor must stay orthogonal so
+    // the rest of the composition reads as "tilted around the hero".
+    // Shoes are also excluded (rotated footwear looks like a mistake,
+    // not a style choice).
+    const hash = hashSeed(seed);
+    const rotatable: number[] = [];
+    ordered.forEach((p, i) => {
+      const isHero = layoutRoles?.[p.itemId] === 'hero';
+      const isShoes = p.zone === 'shoes';
+      if (!isHero && !isShoes) rotatable.push(i);
+    });
+    const rotationByIndex = new Map<number, number>();
+    if (rotatable.length > 0) {
+      const count = Math.min(1 + (hash % 2), rotatable.length);
+      for (let i = 0; i < count; i++) {
+        // Stride by 13 to spread picks across the rotatable list even
+        // when count === 2 (avoids rotating two adjacent items).
+        const pickPos = (hash + i * 13) % rotatable.length;
+        const targetIdx = rotatable[pickPos];
+        if (rotationByIndex.has(targetIdx)) continue;
+        const magnitude = 5 + ((hash + i * 7) % 11); // 5–15°
+        const sign = ((hash + i) % 2 === 0) ? 1 : -1;
+        rotationByIndex.set(targetIdx, magnitude * sign);
+      }
+    }
+
+    return ordered.map((p, i) => ({
+      ...p,
+      rotation: rotationByIndex.get(i) ?? 0,
+    }));
+  }, [itemIds, itemMap, snapshotMap, layoutRoles, seed]);
 
   const collageBg = grays.gray6[colorScheme];
   const iconFallbackColor = labels.quaternary[colorScheme];
@@ -592,7 +632,7 @@ export const Collage: React.FC<CollageProps> = ({ itemIds, itemMap, snapshots, l
           cachePolicy="memory-disk"
         />
       </View>
-      {sorted.map(({ itemId, item, snapshot, pos }) => {
+      {sorted.map(({ itemId, item, snapshot, pos, rotation }) => {
         const imgUrl = item?.pngImageUrl || item?.imageUrl
           || snapshot?.pngImageUrl || snapshot?.imageUrl;
         const content = imgUrl ? (
@@ -600,12 +640,16 @@ export const Collage: React.FC<CollageProps> = ({ itemIds, itemMap, snapshots, l
         ) : (
           <Icon name="closet" size={32} color={iconFallbackColor} />
         );
+        // P1-F rotation: transform only when non-zero so the common
+        // axis-aligned path stays allocation-free and the shadow bbox
+        // isn't computed unnecessarily on iOS.
         const itemStyle = {
           position: 'absolute' as const,
           left: pos.l,
           top: pos.t,
           width: pos.w,
           height: pos.h,
+          ...(rotation !== 0 ? { transform: [{ rotate: `${rotation}deg` }] } : {}),
         };
         return onItemPress ? (
           <Pressable key={itemId} style={[itemStyle, ITEM_SHADOW_STYLE]} onPress={() => onItemPress(itemId)}>
