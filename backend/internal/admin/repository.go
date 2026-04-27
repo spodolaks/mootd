@@ -11,8 +11,8 @@ import (
 )
 
 // Repository is the persistence contract for admin records + refresh
-// tokens. Implemented by MongoRepository for production; a minimal
-// in-memory stub for tests can satisfy it without a live Mongo.
+// tokens + audit log. Implemented by MongoRepository for production; a
+// minimal in-memory stub for tests can satisfy it without a live Mongo.
 type Repository interface {
 	// Admins
 	FindByEmail(ctx context.Context, email string) (*Admin, error)
@@ -25,6 +25,11 @@ type Repository interface {
 	SaveRefreshToken(ctx context.Context, t RefreshToken) error
 	FindRefreshToken(ctx context.Context, tokenHash string) (*RefreshToken, error)
 	RevokeRefreshToken(ctx context.Context, tokenHash string, at time.Time) error
+
+	// Audit log (P0-04). Kept on the same Repository so handlers don't
+	// need to thread a separate dependency; the storage is just one
+	// extra collection in the same Mongo.
+	AppendAudit(ctx context.Context, entry AuditEntry) error
 }
 
 // MongoRepository backs Repository with the production MongoDB cluster.
@@ -90,7 +95,10 @@ func (r *MongoRepository) ensureIndexes(ctx context.Context) error {
 		Keys:    bson.D{{Key: "expiresAt", Value: 1}},
 		Options: options.Index().SetName("admin_refresh_tokens_ttl").SetExpireAfterSeconds(0),
 	})
-	return err
+	if err != nil {
+		return err
+	}
+	return r.ensureAuditIndexes(ctx)
 }
 
 // FindByEmail looks up an admin by lower-cased email. Returns (nil, nil)

@@ -109,14 +109,18 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 	authRepo := auth.NewMongoRepository(a.MongoClient, a.MongoDB)
 	auth.NewHandler(a.Logger, authRepo, a.JWTSecret).RegisterRoutes(mux, enableMockLogin, authLimit)
 
-	// Admin auth (P0-03). Separate JWT issuer, separate signing secret,
-	// separate persistence. Fails loudly in production if the secret is
-	// unset or matches JWTSecret — see config.Load.
+	// Admin auth (P0-03) + first protected endpoints (P0-04 audit log
+	// foundation, P1-05 users list). Separate JWT issuer, separate
+	// signing secret, separate persistence. Fails loudly in production
+	// if the admin secret is unset or matches JWTSecret — see config.Load.
 	adminRepo, err := admin.NewMongoRepository(context.Background(), a.MongoClient, a.MongoDB)
 	if err != nil {
 		a.Logger.Fatalf("admin repo init: %v", err)
 	}
-	admin.NewHandler(a.Logger, adminRepo, a.AdminJWTSecret).RegisterRoutes(mux, authLimit)
+	adminUsersRepo := admin.NewUsersMongoRepository(a.MongoClient, a.MongoDB)
+	requireAdmin := middleware.RequireAdminAuth(a.AdminJWTSecret)
+	admin.NewHandler(a.Logger, adminRepo, adminUsersRepo, a.AdminJWTSecret).
+		RegisterRoutes(mux, authLimit, requireAdmin)
 
 	userRepo := user.NewMongoRepository(a.MongoClient, a.MongoDB)
 	health.NewHandler(a.Logger, a.MongoClient, a.MongoDB).RegisterRoutes(mux)

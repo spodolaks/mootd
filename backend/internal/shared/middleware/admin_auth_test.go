@@ -16,7 +16,7 @@ const userTestSecret = "user-test-secret-at-least-32-chars-long!!"
 
 func okHandler(seen *string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if id, ok := AdminIDFromContext(r.Context()); ok {
+		if id, ok := admin.AdminIDFromContext(r.Context()); ok {
 			*seen = id
 		}
 		w.WriteHeader(http.StatusOK)
@@ -128,9 +128,9 @@ func TestAdminContextAccessors(t *testing.T) {
 	var seenRoles []string
 	var seenMFA bool
 	h := RequireAdminAuth(adminTestSecret)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		seenID, _ = AdminIDFromContext(r.Context())
-		seenRoles, _ = AdminRolesFromContext(r.Context())
-		seenMFA = AdminMFAVerifiedFromContext(r.Context())
+		seenID, _ = admin.AdminIDFromContext(r.Context())
+		seenRoles, _ = admin.AdminRolesFromContext(r.Context())
+		seenMFA = admin.AdminMFAVerifiedFromContext(r.Context())
 		w.WriteHeader(http.StatusOK)
 	}))
 	req := httptest.NewRequest(http.MethodGet, "/admin/v1/ping", nil)

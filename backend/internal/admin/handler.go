@@ -12,19 +12,29 @@ import (
 	"mootd/backend/internal/shared/response"
 )
 
-// Handler serves admin authentication endpoints: /admin/v1/auth/login
-// and /admin/v1/auth/refresh. Everything else under /admin/v1/* is
-// handled by other packages and wrapped in the RequireAdminAuth
-// middleware.
+// Handler serves admin authentication endpoints (/admin/v1/auth/*) and
+// the small set of always-available endpoints that just describe the
+// current admin (/admin/v1/me). Domain endpoints under /admin/v1/users,
+// /admin/v1/traces, etc. live in their own handlers within this package.
 type Handler struct {
-	logger *log.Logger
-	repo   Repository
-	secret string
+	logger    *log.Logger
+	repo      Repository
+	usersRepo UsersRepository
+	secret    string
 }
 
 // NewHandler constructs a Handler.
-func NewHandler(logger *log.Logger, repo Repository, jwtSecret string) *Handler {
-	return &Handler{logger: logger, repo: repo, secret: jwtSecret}
+//
+// usersRepo is required for the users-list endpoint. Pass nil only in
+// auth-only test setups; production wiring (app/app.go) always supplies
+// it.
+func NewHandler(logger *log.Logger, repo Repository, usersRepo UsersRepository, jwtSecret string) *Handler {
+	return &Handler{
+		logger:    logger,
+		repo:      repo,
+		usersRepo: usersRepo,
+		secret:    jwtSecret,
+	}
 }
 
 // Login handles POST /admin/v1/auth/login.

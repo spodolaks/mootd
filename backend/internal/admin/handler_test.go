@@ -111,12 +111,20 @@ func (m *memoryRepo) RevokeRefreshToken(ctx context.Context, hash string, at tim
 	return nil
 }
 
+func (m *memoryRepo) AppendAudit(ctx context.Context, e AuditEntry) error {
+	// In-memory tests don't read audit; just no-op so the auth handler
+	// surface stays compilable when audit calls are added later.
+	return nil
+}
+
 // ── helpers ─────────────────────────────────────────────────────────────
 
 func newTestHandler(t *testing.T) (*Handler, *memoryRepo) {
 	t.Helper()
 	repo := newMemoryRepo()
-	h := NewHandler(log.New(io.Discard, "", 0), repo, testSecret)
+	// usersRepo is nil — these tests only cover auth; ListUsers tests
+	// would mock UsersRepository separately.
+	h := NewHandler(log.New(io.Discard, "", 0), repo, nil, testSecret)
 	hash, err := HashPassword("hunter2hunter2")
 	if err != nil {
 		t.Fatalf("hash: %v", err)
