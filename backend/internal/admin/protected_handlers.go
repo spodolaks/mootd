@@ -152,6 +152,57 @@ func (h *Handler) Overview(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// ListTraces handles GET /admin/v1/traces.
+//
+// Cursor pagination, filters by userId / model / feature / status /
+// minCost / date range. The endpoint is the foundation for the
+// admin's /traces page (full firehose) and the user-detail drawer
+// (which calls it with userId pre-filled).
+//
+// Per [DATA_MODEL.md](docs/DATA_MODEL.md), llm_calls indexes cover
+// the per-filter sort patterns — the per-page query is one indexed
+// scan, not a collection scan, regardless of how the filters
+// combine.
+func (h *Handler) ListTraces(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if h.tracesRepo == nil {
+		response.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "traces repository not configured"})
+		return
+	}
+
+	v := r.URL.Query()
+	q := TracesQuery{
+		UserID:     v.Get("userId"),
+		Model:      v.Get("model"),
+		Feature:    v.Get("feature"),
+		Status:     v.Get("status"),
+		MinCostUSD: parseFloat0(v.Get("minCost")),
+		From:       parseTimePtr(v.Get("from")),
+		To:         parseTimePtr(v.Get("to")),
+		Cursor:     v.Get("cursor"),
+	}
+	if l := v.Get("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil {
+			q.Limit = n
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	page, err := h.tracesRepo.List(ctx, q)
+	if err != nil {
+		h.logger.Printf("admin /traces: list failed: %v", err)
+		response.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+
+	response.WriteJSON(w, http.StatusOK, page)
+}
+
 // parseUsersQuery hoists URL query parsing out of the handler so it
 // stays trivially testable + the handler reads as a sequence of
 // repository calls.

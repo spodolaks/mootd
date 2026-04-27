@@ -120,8 +120,9 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 	}
 	adminUsersRepo := admin.NewUsersMongoRepository(a.MongoClient, a.MongoDB)
 	adminOverviewRepo := admin.NewOverviewMongoRepository(a.MongoClient, a.MongoDB)
+	adminTracesRepo := admin.NewTracesMongoRepository(a.MongoClient, a.MongoDB)
 	requireAdmin := middleware.RequireAdminAuth(a.AdminJWTSecret)
-	admin.NewHandler(a.Logger, adminRepo, adminUsersRepo, adminOverviewRepo, a.AdminJWTSecret).
+	admin.NewHandler(a.Logger, adminRepo, adminUsersRepo, adminOverviewRepo, adminTracesRepo, a.AdminJWTSecret).
 		RegisterRoutes(mux, authLimit, requireAdmin)
 
 	userRepo := user.NewMongoRepository(a.MongoClient, a.MongoDB)

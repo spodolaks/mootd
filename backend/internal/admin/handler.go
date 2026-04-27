@@ -21,20 +21,29 @@ type Handler struct {
 	repo         Repository
 	usersRepo    UsersRepository
 	overviewRepo OverviewRepository
+	tracesRepo   TracesRepository
 	secret       string
 }
 
 // NewHandler constructs a Handler.
 //
-// usersRepo + overviewRepo are required for the dashboard's protected
-// endpoints. Pass nil only in auth-only test setups; production wiring
-// (app/app.go) always supplies both.
-func NewHandler(logger *log.Logger, repo Repository, usersRepo UsersRepository, overviewRepo OverviewRepository, jwtSecret string) *Handler {
+// usersRepo + overviewRepo + tracesRepo are required for the
+// dashboard's protected endpoints. Pass nil only in auth-only test
+// setups; production wiring (app/app.go) always supplies all three.
+func NewHandler(
+	logger *log.Logger,
+	repo Repository,
+	usersRepo UsersRepository,
+	overviewRepo OverviewRepository,
+	tracesRepo TracesRepository,
+	jwtSecret string,
+) *Handler {
 	return &Handler{
 		logger:       logger,
 		repo:         repo,
 		usersRepo:    usersRepo,
 		overviewRepo: overviewRepo,
+		tracesRepo:   tracesRepo,
 		secret:       jwtSecret,
 	}
 }
