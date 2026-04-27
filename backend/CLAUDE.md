@@ -11,7 +11,8 @@ backend/
 │   ├── app/app.go           # Wires all dependencies, builds middleware stack, registers routes
 │   ├── config/config.go     # Env var loading with defaults
 │   ├── db/mongo.go          # MongoDB connection (ConnectMongo)
-│   ├── admin/               # Admin panel auth (separate from user auth); P0-03
+│   ├── admin/               # Admin panel auth + handlers (P0-03 / P0-04 / P1-05+)
+│   │   └── gen/             # Generated wire-shape types (DO NOT EDIT — `make gen-admin`)
 │   ├── auth/                # Google OAuth + JWT issuance + refresh token flow
 │   ├── user/                # User profile management
 │   ├── wardrobe/            # Clothing detection + item CRUD
@@ -216,6 +217,29 @@ JOB=$(curl -sS -X POST http://127.0.0.1:8081/v1/outfits/generate \
 curl -sS http://127.0.0.1:8081/v1/outfits/jobs/$JOB \
   -H "Authorization: Bearer $TOKEN"
 ```
+
+## Spec-driven types (admin API only, today)
+
+The admin API has a canonical OpenAPI spec at
+[mootd-contracts/openapi/admin-api.yaml](https://github.com/spodolaks/mootd-contracts/blob/main/openapi/admin-api.yaml),
+vendored into `backend/contracts/admin-api.yaml`. Run `make gen-admin`
+to regenerate `internal/admin/gen/types.go` from it.
+
+Hand-written types in `internal/admin/{domain,users,overview,traces}.go`
+remain the structs handlers return — the generated package is
+**reference + drift detection** only. CI runs `make gen-check`; if
+the spec or the gen output drift, the build fails.
+
+When changing an admin endpoint shape:
+1. Edit `mootd-contracts/openapi/admin-api.yaml`, push.
+2. Update the vendored copy: `cp ../mootd-contracts/openapi/admin-api.yaml backend/contracts/admin-api.yaml`
+3. Run `make gen-admin`, commit the new `internal/admin/gen/types.go`.
+4. Update the matching hand-written struct in the admin package.
+5. Update the corresponding handler.
+
+The user-facing API (`/v1/*`) is not yet spec-driven — see issue
+[#1](https://github.com/spodolaks/mootd-admin/issues/1) for the
+backfill plan.
 
 ## Build & Deploy
 

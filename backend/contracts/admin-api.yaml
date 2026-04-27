@@ -1,0 +1,465 @@
+openapi: 3.1.0
+
+info:
+  title: Mootd Admin API
+  version: 0.2.0
+  description: |
+    Internal admin API consumed by [mootd-admin](https://github.com/spodolaks/mootd-admin).
+
+    All endpoints under /admin/v1/* require admin authentication
+    (separate JWT issuer: `mootd-admin`). Non-read actions write to
+    the `admin_audit` collection via middleware.
+
+    This file is the **source of truth** for admin types. Both the Go
+    backend (`mootd/backend/internal/admin/gen/`) and the TS frontend
+    (`mootd-admin/apps/admin/lib/api/generated/`) are generated from
+    it. Hand-edit the spec, run `make gen` in each repo, commit the
+    output.
+
+servers:
+  - url: http://127.0.0.1:8089
+    description: Local development backend
+  - url: https://api.spodolaks.id.lv
+    description: Production
+
+# Default security: every endpoint requires the admin bearer unless
+# overridden (login + refresh do override — they issue the bearer).
+security:
+  - adminBearerAuth: []
+
+components:
+  securitySchemes:
+    adminBearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        Admin access token. Issuer claim `iss: "mootd-admin"`, signed
+        with `ADMIN_JWT_SECRET` (distinct from user-side `JWT_SECRET`
+        — backend refuses to start if they match). 1-hour TTL.
+
+  responses:
+    Unauthorized:
+      description: Missing / invalid / expired admin token.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+    BadRequest:
+      description: Malformed request body or query.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+    InternalError:
+      description: Unexpected server error.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+
+    Admin:
+      type: object
+      required: [id, email, roles]
+      properties:
+        id:
+          type: string
+          example: adm_a1b2c3d4
+        email:
+          type: string
+          format: email
+        roles:
+          type: array
+          items:
+            type: string
+            enum: [admin, engineer, support, readonly]
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 12
+        totp:
+          type: string
+          description: |
+            6-digit TOTP. Field is accepted from Phase 0 onwards but
+            only validated when the admin's MFAEnforced flag is true
+            (P5-02). A supplied TOTP today is silently ignored.
+          pattern: "^[0-9]{6}$"
+
+    LoginResponse:
+      type: object
+      required: [accessToken, refreshToken, expiresAt, admin]
+      properties:
+        accessToken:
+          type: string
+          description: 1-hour admin JWT.
+        refreshToken:
+          type: string
+          description: 7-day refresh token, single-use (rotated on every refresh).
+        expiresAt:
+          type: string
+          format: date-time
+        admin:
+          $ref: "#/components/schemas/Admin"
+
+    RefreshRequest:
+      type: object
+      required: [refreshToken]
+      properties:
+        refreshToken:
+          type: string
+
+    UserSummary:
+      type: object
+      required:
+        [
+          id,
+          email,
+          signupDate,
+          wardrobeCount,
+          outfitCount,
+          moodboardCount,
+          last7dUploads,
+          last7dOutfits,
+          last7dSpendUsd,
+          isOverBudget,
+        ]
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+          description: |
+            Redacted (`u***@gmail.com`) unless caller has the `users:pii`
+            permission AND `mfa_verified: true`. Phase 0 ships
+            unredacted because every admin role currently has full
+            PII; redaction lands with P5-04.
+        name:
+          type: string
+        signupDate:
+          type: string
+          format: date-time
+        lastActiveAt:
+          type: string
+          format: date-time
+        wardrobeCount:
+          type: integer
+          format: int64
+        outfitCount:
+          type: integer
+          format: int64
+        moodboardCount:
+          type: integer
+          format: int64
+        last7dUploads:
+          type: integer
+          format: int64
+        last7dOutfits:
+          type: integer
+          format: int64
+        last7dSpendUsd:
+          type: number
+          format: double
+          description: |
+            Zero-valued today; lights up when P1-01 (LLM call logging)
+            + the user_daily_rollup worker land. Field shape is stable.
+        isOverBudget:
+          type: boolean
+          description: Always false until P4-01 (budgets) lands.
+        tier:
+          type: string
+          enum: [free, paid, founder, beta]
+
+    UsersListResponse:
+      type: object
+      required: [users]
+      properties:
+        users:
+          type: array
+          items:
+            $ref: "#/components/schemas/UserSummary"
+        nextCursor:
+          type: string
+
+    LLMCallSnapshot:
+      type: object
+      required:
+        [id, userId, provider, model, feature, costUsd, durationMs, status, createdAt]
+      properties:
+        id:
+          type: string
+        userId:
+          type: string
+        provider:
+          type: string
+          enum: [anthropic, openai, ollama]
+        model:
+          type: string
+        feature:
+          type: string
+          description: e.g. "outfit_generate", "detection_submit"
+        costUsd:
+          type: number
+          format: double
+        durationMs:
+          type: integer
+          format: int64
+        status:
+          type: string
+          enum: [success, error, timeout]
+        createdAt:
+          type: string
+          format: date-time
+
+    OverviewMetrics:
+      type: object
+      required: [spendUsdToday, callCountToday, dauApprox, generatedAt]
+      properties:
+        spendUsdToday:
+          type: number
+          format: double
+        callCountToday:
+          type: integer
+          format: int64
+        dauApprox:
+          type: integer
+          format: int64
+          description: |
+            Count of distinct users updatedAt'd in the last 24h.
+            Heuristic until P2-02 (events) introduces real activity
+            tracking.
+        lastCalls:
+          type: array
+          items:
+            $ref: "#/components/schemas/LLMCallSnapshot"
+        generatedAt:
+          type: string
+          format: date-time
+
+    TracesPage:
+      type: object
+      required: [calls]
+      properties:
+        calls:
+          type: array
+          items:
+            $ref: "#/components/schemas/LLMCallSnapshot"
+        nextCursor:
+          type: string
+
+paths:
+  /admin/v1/auth/login:
+    post:
+      operationId: adminLogin
+      summary: Sign in with email + password (+ optional TOTP).
+      security: [] # unauthenticated entry point
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Login successful — access + refresh tokens issued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          description: |
+            Invalid credentials. Same message for missing email and wrong
+            password — never reveals whether an account exists.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /admin/v1/auth/refresh:
+    post:
+      operationId: adminRefresh
+      summary: Rotate the access + refresh token pair (refresh is single-use).
+      security: [] # the refresh token IS the credential here
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefreshRequest"
+      responses:
+        "200":
+          description: New token pair issued; old refresh token revoked.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          description: Refresh token is unknown, expired, or already revoked.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
+  /admin/v1/me:
+    get:
+      operationId: adminMe
+      summary: Verify the current session and return the admin's identity.
+      tags: [auth]
+      responses:
+        "200":
+          description: The authenticated admin.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Admin"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /admin/v1/overview:
+    get:
+      operationId: adminOverview
+      summary: Top-line dashboard metrics + recent-activity feed.
+      tags: [overview]
+      responses:
+        "200":
+          description: Overview metrics.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OverviewMetrics"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /admin/v1/users:
+    get:
+      operationId: adminListUsers
+      summary: Paginated list of users with per-user activity summary.
+      tags: [users]
+      parameters:
+        - name: q
+          in: query
+          schema: { type: string }
+          description: Case-insensitive contains-match on email.
+        - name: tier
+          in: query
+          schema:
+            type: string
+            enum: [free, paid, founder, beta]
+        - name: active
+          in: query
+          schema: { type: boolean }
+          description: When true, restrict to users active in the last 30 days.
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [-signup, -last_active, -uploads, -outfits, -spend_7d]
+        - name: cursor
+          in: query
+          schema: { type: string }
+          description: Opaque pagination cursor from a prior response's `nextCursor`.
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        "200":
+          description: One page of users.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UsersListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /admin/v1/traces:
+    get:
+      operationId: adminListTraces
+      summary: |
+        Paginated firehose of llm_calls rows with filters by user / model
+        / feature / status / minimum cost / date range.
+      tags: [traces]
+      parameters:
+        - name: userId
+          in: query
+          schema: { type: string }
+        - name: model
+          in: query
+          schema: { type: string }
+        - name: feature
+          in: query
+          schema: { type: string }
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [success, error, timeout]
+        - name: minCost
+          in: query
+          schema:
+            type: number
+            format: double
+            minimum: 0
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+          description: Inclusive lower bound on createdAt (RFC-3339).
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
+          description: Exclusive upper bound on createdAt (RFC-3339).
+        - name: cursor
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 25
+      responses:
+        "200":
+          description: One page of LLM call snapshots.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TracesPage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+tags:
+  - name: auth
+    description: Login + refresh.
+  - name: overview
+    description: Dashboard top-line metrics.
+  - name: users
+    description: User list + drill-through.
+  - name: traces
+    description: LLM calls + (eventually) detection runs.
