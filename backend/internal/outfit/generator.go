@@ -42,12 +42,38 @@ type Weather struct {
 }
 
 // Generator is the provider-agnostic interface for producing outfit suggestions
-// from a wardrobe. Implementations include OllamaGenerator (local Qwen) and
-// ClaudeGenerator (Anthropic Messages API with tool use + vision).
+// from a wardrobe. Implementations include OllamaGenerator (local Qwen),
+// OpenAIGenerator, and ClaudeGenerator (Anthropic Messages API with tool use
+// + vision).
 type Generator interface {
 	// Name identifies the provider for logging/metrics.
 	Name() string
-	// Generate returns 3-4 outfit suggestions. Returned outfits may have
-	// hallucinated item IDs — the caller is expected to validate.
-	Generate(ctx context.Context, req GeneratorRequest) ([]Outfit, error)
+	// Generate returns 3-4 outfit suggestions plus the token usage of the
+	// underlying LLM call. The Usage is non-nil when the call reached a
+	// real provider (success or failure-with-response); on transport-level
+	// errors before any response, both outfits and Usage may be nil. The
+	// observability wrapper records whichever is available so we never
+	// drop a billable call from the ledger.
+	//
+	// Returned outfits may have hallucinated item IDs — the caller is
+	// expected to validate.
+	Generate(ctx context.Context, req GeneratorRequest) ([]Outfit, *Usage, error)
+}
+
+// Usage captures the per-call billable inputs to the LLM. Populated by each
+// Generator from its provider's response shape so the observability wrapper
+// can compute cost and write a single llm_calls row per call.
+//
+// Zero-valued tokens are legitimate (Ollama is free, transport failures with
+// no response, etc.); the wrapper still writes a row with whatever metadata
+// is available so admins can see "this call happened, it failed before
+// charging anything."
+type Usage struct {
+	Provider         string // "anthropic" | "openai" | "ollama"
+	Model            string // exact model id, e.g. "claude-sonnet-4-20250514"
+	InputTokens      int
+	OutputTokens     int
+	CacheReadTokens  int // Anthropic only — 0 for OpenAI/Ollama
+	CacheWriteTokens int // Anthropic only — 0 for OpenAI/Ollama
+	PromptVersion    string // PromptVersion at call time, stamped for filtering
 }

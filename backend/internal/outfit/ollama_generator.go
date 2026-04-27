@@ -21,19 +21,30 @@ func (g *OllamaGenerator) Name() string { return "ollama" }
 
 // Generate calls the local Ollama chat API with a JSON-mode system prompt and
 // parses whatever shape the model returns into []Outfit.
-func (g *OllamaGenerator) Generate(ctx context.Context, req GeneratorRequest) ([]Outfit, error) {
+//
+// Ollama runs locally and is free, so token counts always land at zero. The
+// observability ledger still gets a row per call (with cost_usd=0) so the
+// admin panel can see "this user is using local generation, not the paid
+// providers" without inferring it from the absence of rows.
+func (g *OllamaGenerator) Generate(ctx context.Context, req GeneratorRequest) ([]Outfit, *Usage, error) {
+	usage := &Usage{
+		Provider:      "ollama",
+		Model:         g.client.cfg.Model,
+		PromptVersion: PromptVersion,
+	}
+
 	sysPrompt := buildSystemPrompt(req.Weather, req.RecentBoards, req.TopArchetypes, req.Panels, req.Backgrounds)
 	userMessage := BuildUserMessage(req.Items)
 
 	llmContent, err := g.client.chat(ctx, sysPrompt, userMessage)
 	if err != nil {
-		return nil, fmt.Errorf("ollama chat: %w", err)
+		return nil, usage, fmt.Errorf("ollama chat: %w", err)
 	}
 
 	parsed, err := parseLLMResponse(llmContent)
 	if err != nil {
-		return nil, fmt.Errorf("parse ollama response: %w (raw: %s)", err, llmContent)
+		return nil, usage, fmt.Errorf("parse ollama response: %w (raw: %s)", err, llmContent)
 	}
-	return parsed, nil
+	return parsed, usage, nil
 }
 

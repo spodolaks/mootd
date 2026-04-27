@@ -41,9 +41,9 @@ func NewOpenAIGenerator(cfg OpenAIConfig, logger *log.Logger) *OpenAIGenerator {
 
 func (g *OpenAIGenerator) Name() string { return "openai" }
 
-func (g *OpenAIGenerator) Generate(ctx context.Context, req GeneratorRequest) ([]Outfit, error) {
+func (g *OpenAIGenerator) Generate(ctx context.Context, req GeneratorRequest) ([]Outfit, *Usage, error) {
 	if g.cfg.APIKey == "" {
-		return nil, errors.New("openai generator: OPENAI_API_KEY is not set")
+		return nil, nil, errors.New("openai generator: OPENAI_API_KEY is not set")
 	}
 
 	systemPrompt := buildSystemPrompt(req.Weather, req.RecentBoards, req.TopArchetypes, req.Panels, req.Backgrounds)
@@ -60,40 +60,68 @@ func (g *OpenAIGenerator) Generate(ctx context.Context, req GeneratorRequest) ([
 		MaxTokens:      2048,
 	}
 
+	// Pre-populate a zero Usage so transport-level failures still get
+	// a row in the observability ledger (provider + model are known
+	// before we call out).
+	usage := &Usage{
+		Provider:      "openai",
+		Model:         g.cfg.Model,
+		PromptVersion: PromptVersion,
+	}
+
 	body, err := json.Marshal(payload)
 	if err != nil {
-		return nil, fmt.Errorf("marshal openai request: %w", err)
+		return nil, usage, fmt.Errorf("marshal openai request: %w", err)
 	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, g.cfg.BaseURL+"/v1/chat/completions", bytes.NewReader(body))
 	if err != nil {
-		return nil, fmt.Errorf("build openai request: %w", err)
+		return nil, usage, fmt.Errorf("build openai request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+g.cfg.APIKey)
 
 	resp, err := g.client.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("openai request: %w", err)
+		return nil, usage, fmt.Errorf("openai request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("read openai response: %w", err)
+		return nil, usage, fmt.Errorf("read openai response: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("openai returned %d: %s", resp.StatusCode, string(respBody))
+		return nil, usage, fmt.Errorf("openai returned %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	var result openaiChatResponse
 	if err := json.Unmarshal(respBody, &result); err != nil {
-		return nil, fmt.Errorf("decode openai response: %w", err)
+		return nil, usage, fmt.Errorf("decode openai response: %w", err)
+	}
+
+	// Stamp tokens before we attempt to parse the model output — even
+	// a malformed response is billable. OpenAI's prompt_tokens INCLUDES
+	// cached tokens; ComputeCost expects InputTokens to be the
+	// uncached portion only, so subtract here. (Anthropic returns
+	// input_tokens already-uncached, so the Claude generator's
+	// extractClaudeUsage doesn't need this dance.)
+	if result.Usage != nil {
+		usage.OutputTokens = result.Usage.CompletionTokens
+		cached := 0
+		if result.Usage.PromptTokensDetails != nil {
+			cached = result.Usage.PromptTokensDetails.CachedTokens
+		}
+		usage.CacheReadTokens = cached
+		usage.InputTokens = result.Usage.PromptTokens - cached
+		if usage.InputTokens < 0 {
+			usage.InputTokens = 0
+		}
 	}
 
 	if len(result.Choices) == 0 {
-		return nil, fmt.Errorf("openai returned no choices")
+		return nil, usage, fmt.Errorf("openai returned no choices")
 	}
 
 	content := result.Choices[0].Message.Content
@@ -101,9 +129,9 @@ func (g *OpenAIGenerator) Generate(ctx context.Context, req GeneratorRequest) ([
 
 	parsed, err := parseLLMResponse(content)
 	if err != nil {
-		return nil, fmt.Errorf("parse openai response: %w (raw: %s)", err, content)
+		return nil, usage, fmt.Errorf("parse openai response: %w (raw: %s)", err, content)
 	}
-	return parsed, nil
+	return parsed, usage, nil
 }
 
 // ── OpenAI Chat Completions wire types ─────────────────────────────────────
@@ -131,4 +159,19 @@ type openaiChatResponse struct {
 			Content string `json:"content"`
 		} `json:"message"`
 	} `json:"choices"`
+	// Usage is the per-call billing breakdown. OpenAI returns this on
+	// every successful response; absent on streaming or partial errors.
+	// We stamp 0s in those cases — better to record a zero-token row
+	// than drop the call from the ledger.
+	Usage *struct {
+		PromptTokens     int `json:"prompt_tokens"`
+		CompletionTokens int `json:"completion_tokens"`
+		TotalTokens      int `json:"total_tokens"`
+		// Prompt caching arrived in late 2025 — when present, splits
+		// prompt_tokens into cached vs non-cached. Optional; absent
+		// for older models / non-cached calls.
+		PromptTokensDetails *struct {
+			CachedTokens int `json:"cached_tokens"`
+		} `json:"prompt_tokens_details,omitempty"`
+	} `json:"usage,omitempty"`
 }

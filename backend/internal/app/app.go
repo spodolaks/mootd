@@ -18,6 +18,7 @@ import (
 	"mootd/backend/internal/generic"
 	"mootd/backend/internal/health"
 	"mootd/backend/internal/moodboard"
+	"mootd/backend/internal/observability"
 	"mootd/backend/internal/outfit"
 	"mootd/backend/internal/shared/middleware"
 	"mootd/backend/internal/surface"
@@ -306,6 +307,31 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 		jobStore = outfit.NewJobStore(redisClient)
 	}
 
+	// Observability ledger (P1-01). Every LLM call writes one row to
+	// llm_calls with model + tokens + cost (computed from the price
+	// table at write time so historical rows stay accurate). The
+	// recorder is best-effort — Mongo blips never fail the user's
+	// outfit generation.
+	llmCallRepo, err := observability.NewMongoLLMCallRepository(context.Background(), a.MongoClient, a.MongoDB)
+	if err != nil {
+		a.Logger.Fatalf("observability: llm_calls repo init: %v", err)
+	}
+	priceRepo, err := observability.NewMongoPriceRepository(context.Background(), a.MongoClient, a.MongoDB)
+	if err != nil {
+		a.Logger.Fatalf("observability: model_prices repo init: %v", err)
+	}
+	if err := observability.SeedDefaults(context.Background(), priceRepo, a.Logger); err != nil {
+		a.Logger.Fatalf("observability: seed model prices: %v", err)
+	}
+	priceTable, err := observability.NewPriceTable(context.Background(), priceRepo, a.Logger)
+	if err != nil {
+		a.Logger.Fatalf("observability: price table init: %v", err)
+	}
+	priceTable.StartAutoRefresh(workerCtx, 5*time.Minute)
+	llmRecorder := observability.NewOutfitRecorderAdapter(
+		observability.NewLLMRecorder(llmCallRepo, priceTable, a.Logger),
+	)
+
 	outfitService := outfit.NewService(a.Logger, outfit.ServiceConfig{
 		Generator:   generator,
 		Wardrobe:    wardrobeRepo,
@@ -314,6 +340,7 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 		Surfaces:    newSurfaceAdapter(surfaceRepo),
 		UseVision:   useVision,
 		Cache:       outfitCache,
+		LLMRecorder: llmRecorder,
 	})
 
 	outfit.NewHandler(a.Logger, outfit.HandlerConfig{

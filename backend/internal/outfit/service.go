@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"mootd/backend/internal/archetype"
 	"mootd/backend/internal/wardrobe"
@@ -95,7 +96,40 @@ type Service struct {
 	surfaces    surfaceProvider
 	useVision   bool
 	cache       Cache
+	llmRecorder llmRecorder // optional — nil disables LLM call logging
 	logger      *log.Logger
+}
+
+// llmRecorder is the narrow interface the outfit service needs from
+// observability.LLMRecorder. Defining it here keeps the dependency
+// direction one-way (outfit doesn't import observability), so future
+// reuse of the recorder in detection / search doesn't ripple imports.
+type llmRecorder interface {
+	Record(ctx context.Context, cc LLMRecorderContext, obs LLMRecorderObservation)
+}
+
+// LLMRecorderContext mirrors observability.CallContext — defined in this
+// package so the outfit service can build it without importing the
+// observability package directly.
+type LLMRecorderContext struct {
+	UserID     string
+	Feature    string
+	TraceID    string
+	PromptText string
+}
+
+// LLMRecorderObservation mirrors observability.CallObservation.
+type LLMRecorderObservation struct {
+	Provider         string
+	Model            string
+	InputTokens      int
+	OutputTokens     int
+	CacheReadTokens  int
+	CacheWriteTokens int
+	PromptVersion    string
+	StartedAt        time.Time
+	EndedAt          time.Time
+	Err              error
 }
 
 // ServiceConfig holds the dependencies needed to construct a Service.
@@ -107,6 +141,7 @@ type ServiceConfig struct {
 	Surfaces    surfaceProvider // optional — when nil, outfits ship without panel/background URLs
 	UseVision   bool
 	Cache       Cache
+	LLMRecorder llmRecorder // optional — nil disables LLM call logging
 }
 
 // NewService creates an outfit Service.
@@ -119,6 +154,7 @@ func NewService(logger *log.Logger, cfg ServiceConfig) *Service {
 		surfaces:    cfg.Surfaces,
 		useVision:   cfg.UseVision,
 		cache:       cfg.Cache,
+		llmRecorder: cfg.LLMRecorder,
 		logger:      logger,
 	}
 }
@@ -239,10 +275,40 @@ func (s *Service) GenerateOutfits(ctx context.Context, userID string, weather We
 		s.generator.Name(), userID, len(items), weather.Temperature, weather.Condition, len(recentBoards),
 		formatTopArchetypes(topArchetypes))
 
-	parsedOutfits, err := s.generator.Generate(ctx, req)
+	startedAt := time.Now().UTC()
+	parsedOutfits, usage, err := s.generator.Generate(ctx, req)
+	endedAt := time.Now().UTC()
 	if err != nil {
 		s.logger.Printf("outfit: %s generator failed for user %s: %v", s.generator.Name(), userID, err)
 		// Fall through to deterministic fallback below.
+	}
+
+	// Record the LLM call to the observability ledger. Best-effort —
+	// failures here are logged inside Record, never bubbled. Skipped
+	// when no recorder is wired (test setups, dev opt-out) or no
+	// usage came back (transport error before we hit the provider).
+	if s.llmRecorder != nil && usage != nil {
+		s.llmRecorder.Record(ctx, LLMRecorderContext{
+			UserID:  userID,
+			Feature: "outfit_generate",
+			// PromptText left empty for now — adding the rendered
+			// prompt is P1-11 (prompt snapshot archival). Keeping
+			// the hash off avoids an early-stage performance
+			// surprise (sha256 over a 5KB string is fine, but we
+			// also need to control its growth in the response
+			// shape).
+		}, LLMRecorderObservation{
+			Provider:         usage.Provider,
+			Model:            usage.Model,
+			InputTokens:      usage.InputTokens,
+			OutputTokens:     usage.OutputTokens,
+			CacheReadTokens:  usage.CacheReadTokens,
+			CacheWriteTokens: usage.CacheWriteTokens,
+			PromptVersion:    usage.PromptVersion,
+			StartedAt:        startedAt,
+			EndedAt:          endedAt,
+			Err:              err,
+		})
 	}
 
 	s.logger.Printf("outfit: parsed %d outfits from %s", len(parsedOutfits), s.generator.Name())

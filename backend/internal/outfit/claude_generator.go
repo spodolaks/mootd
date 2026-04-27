@@ -78,9 +78,9 @@ func (g *ClaudeGenerator) Name() string {
 // The tool's input_schema embeds the wardrobe item IDs as an enum, which makes
 // hallucinated IDs structurally impossible. Image input is added to the user
 // message when Vision is enabled.
-func (g *ClaudeGenerator) Generate(ctx context.Context, req GeneratorRequest) ([]Outfit, error) {
+func (g *ClaudeGenerator) Generate(ctx context.Context, req GeneratorRequest) ([]Outfit, *Usage, error) {
 	if g.cfg.APIKey == "" {
-		return nil, errors.New("claude generator: ANTHROPIC_API_KEY is not set")
+		return nil, nil, errors.New("claude generator: ANTHROPIC_API_KEY is not set")
 	}
 
 	systemPrompt := buildSystemPrompt(req.Weather, req.RecentBoards, req.TopArchetypes, req.Panels, req.Backgrounds)
@@ -124,11 +124,53 @@ func (g *ClaudeGenerator) Generate(ctx context.Context, req GeneratorRequest) ([
 	}
 
 	resp, err := g.callAPI(ctx, payload)
+	// Usage is best-effort: any response we got back gets its tokens
+	// extracted even when the parse below fails, so the observability
+	// ledger captures partial-failure costs (Anthropic still bills for
+	// tokens consumed before a 400/422 response).
+	usage := extractClaudeUsage(resp, g.cfg.Model)
 	if err != nil {
-		return nil, err
+		return nil, usage, err
 	}
 
-	return parseClaudeToolUse(resp, tool.Name)
+	outfits, parseErr := parseClaudeToolUse(resp, tool.Name)
+	return outfits, usage, parseErr
+}
+
+// extractClaudeUsage pulls token counts from a Claude response's
+// `usage` block. The shape is documented at
+// https://docs.anthropic.com/en/api/messages — input_tokens,
+// output_tokens, and (when prompt caching is engaged) the
+// cache_creation_input_tokens / cache_read_input_tokens pair.
+//
+// Returns a zero-valued Usage when resp is nil or the usage block
+// is absent, never nil. The caller can rely on a real pointer to
+// stamp the row even on transport failures.
+func extractClaudeUsage(resp *claudeResponse, model string) *Usage {
+	u := &Usage{
+		Provider:      "anthropic",
+		Model:         model,
+		PromptVersion: PromptVersion,
+	}
+	if resp == nil || resp.Usage == nil {
+		return u
+	}
+	asInt := func(v any) int {
+		switch n := v.(type) {
+		case float64:
+			return int(n)
+		case int:
+			return n
+		case int64:
+			return int(n)
+		}
+		return 0
+	}
+	u.InputTokens = asInt(resp.Usage["input_tokens"])
+	u.OutputTokens = asInt(resp.Usage["output_tokens"])
+	u.CacheWriteTokens = asInt(resp.Usage["cache_creation_input_tokens"])
+	u.CacheReadTokens = asInt(resp.Usage["cache_read_input_tokens"])
+	return u
 }
 
 // buildOutfitTool constructs the propose_outfits tool definition. The items[]
