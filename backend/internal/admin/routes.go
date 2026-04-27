@@ -30,4 +30,5 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, authLimit Middleware, requi
 	// catch in code review, hence the explicit wrap on each line.
 	mux.Handle("/admin/v1/me", requireAdmin(http.HandlerFunc(h.Me)))
 	mux.Handle("/admin/v1/users", requireAdmin(http.HandlerFunc(h.ListUsers)))
+	mux.Handle("/admin/v1/overview", requireAdmin(http.HandlerFunc(h.Overview)))
 }

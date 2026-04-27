@@ -122,9 +122,9 @@ func (m *memoryRepo) AppendAudit(ctx context.Context, e AuditEntry) error {
 func newTestHandler(t *testing.T) (*Handler, *memoryRepo) {
 	t.Helper()
 	repo := newMemoryRepo()
-	// usersRepo is nil — these tests only cover auth; ListUsers tests
-	// would mock UsersRepository separately.
-	h := NewHandler(log.New(io.Discard, "", 0), repo, nil, testSecret)
+	// usersRepo + overviewRepo are nil — these tests only cover auth;
+	// ListUsers / Overview tests would mock those repos separately.
+	h := NewHandler(log.New(io.Discard, "", 0), repo, nil, nil, testSecret)
 	hash, err := HashPassword("hunter2hunter2")
 	if err != nil {
 		t.Fatalf("hash: %v", err)

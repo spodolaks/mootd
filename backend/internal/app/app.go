@@ -119,8 +119,9 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 		a.Logger.Fatalf("admin repo init: %v", err)
 	}
 	adminUsersRepo := admin.NewUsersMongoRepository(a.MongoClient, a.MongoDB)
+	adminOverviewRepo := admin.NewOverviewMongoRepository(a.MongoClient, a.MongoDB)
 	requireAdmin := middleware.RequireAdminAuth(a.AdminJWTSecret)
-	admin.NewHandler(a.Logger, adminRepo, adminUsersRepo, a.AdminJWTSecret).
+	admin.NewHandler(a.Logger, adminRepo, adminUsersRepo, adminOverviewRepo, a.AdminJWTSecret).
 		RegisterRoutes(mux, authLimit, requireAdmin)
 
 	userRepo := user.NewMongoRepository(a.MongoClient, a.MongoDB)

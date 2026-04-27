@@ -17,23 +17,25 @@ import (
 // current admin (/admin/v1/me). Domain endpoints under /admin/v1/users,
 // /admin/v1/traces, etc. live in their own handlers within this package.
 type Handler struct {
-	logger    *log.Logger
-	repo      Repository
-	usersRepo UsersRepository
-	secret    string
+	logger       *log.Logger
+	repo         Repository
+	usersRepo    UsersRepository
+	overviewRepo OverviewRepository
+	secret       string
 }
 
 // NewHandler constructs a Handler.
 //
-// usersRepo is required for the users-list endpoint. Pass nil only in
-// auth-only test setups; production wiring (app/app.go) always supplies
-// it.
-func NewHandler(logger *log.Logger, repo Repository, usersRepo UsersRepository, jwtSecret string) *Handler {
+// usersRepo + overviewRepo are required for the dashboard's protected
+// endpoints. Pass nil only in auth-only test setups; production wiring
+// (app/app.go) always supplies both.
+func NewHandler(logger *log.Logger, repo Repository, usersRepo UsersRepository, overviewRepo OverviewRepository, jwtSecret string) *Handler {
 	return &Handler{
-		logger:    logger,
-		repo:      repo,
-		usersRepo: usersRepo,
-		secret:    jwtSecret,
+		logger:       logger,
+		repo:         repo,
+		usersRepo:    usersRepo,
+		overviewRepo: overviewRepo,
+		secret:       jwtSecret,
 	}
 }
 

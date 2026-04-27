@@ -102,6 +102,56 @@ func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// Overview handles GET /admin/v1/overview.
+//
+// Dashboard data: today's spend + LLM call count + approx DAU + the
+// last 10 LLM calls for the recent-activity feed. Lightweight enough
+// to call on every dashboard mount without rate-limiting; the
+// frontend's TanStack Query cache (30s stale) handles re-mount churn.
+func (h *Handler) Overview(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if h.overviewRepo == nil {
+		response.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "overview repository not configured"})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	now := time.Now().UTC()
+	spend, count, err := h.overviewRepo.TodayMetrics(ctx, now)
+	if err != nil {
+		h.logger.Printf("admin /overview: today metrics: %v", err)
+		response.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+
+	dau, err := h.overviewRepo.ApproxDAU(ctx, now.Add(-24*time.Hour))
+	if err != nil {
+		// DAU is a heuristic anyway — log + serve the rest of the page.
+		h.logger.Printf("admin /overview: dau: %v", err)
+		dau = 0
+	}
+
+	calls, err := h.overviewRepo.RecentLLMCalls(ctx, 10)
+	if err != nil {
+		h.logger.Printf("admin /overview: recent calls: %v", err)
+		// Same logic — never fail the whole page on a partial read.
+		calls = nil
+	}
+
+	response.WriteJSON(w, http.StatusOK, OverviewMetrics{
+		SpendUsdToday:  spend,
+		CallCountToday: count,
+		DauApprox:      dau,
+		LastCalls:      calls,
+		GeneratedAt:    now,
+	})
+}
+
 // parseUsersQuery hoists URL query parsing out of the handler so it
 // stays trivially testable + the handler reads as a sequence of
 // repository calls.
