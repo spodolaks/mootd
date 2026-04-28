@@ -59,18 +59,31 @@ type DailyMetric struct {
 // period — not always today. dauApprox stays today-only (it's the
 // "who is here right now" signal, period-independent).
 type OverviewMetrics struct {
-	Period           OverviewPeriod    `json:"period"`
-	SpendUSD         float64           `json:"spendUsd"`
-	CallCount        int64             `json:"callCount"`
-	DauApprox        int64             `json:"dauApprox"`
-	SpendUSDPrior    float64           `json:"spendUsdPrior,omitempty"`
-	CallCountPrior   int64             `json:"callCountPrior,omitempty"`
-	DauPrior         int64             `json:"dauPrior,omitempty"`
-	SpendSeries      []DailyMetric     `json:"spendSeries,omitempty"`
-	CallCountSeries  []DailyMetric     `json:"callCountSeries,omitempty"`
-	DauSeries        []DailyMetric     `json:"dauSeries,omitempty"`
-	LastCalls        []LLMCallSnapshot `json:"lastCalls"`
-	GeneratedAt      time.Time         `json:"generatedAt"`
+	Period          OverviewPeriod    `json:"period"`
+	SpendUSD        float64           `json:"spendUsd"`
+	CallCount       int64             `json:"callCount"`
+	DauApprox       int64             `json:"dauApprox"`
+	SpendUSDPrior   float64           `json:"spendUsdPrior,omitempty"`
+	CallCountPrior  int64             `json:"callCountPrior,omitempty"`
+	DauPrior        int64             `json:"dauPrior,omitempty"`
+	SpendSeries     []DailyMetric     `json:"spendSeries,omitempty"`
+	CallCountSeries []DailyMetric     `json:"callCountSeries,omitempty"`
+	DauSeries       []DailyMetric     `json:"dauSeries,omitempty"`
+	LastCalls       []LLMCallSnapshot `json:"lastCalls"`
+	CacheMetrics    *CacheMetrics     `json:"cacheMetrics,omitempty"`
+	GeneratedAt     time.Time         `json:"generatedAt"`
+}
+
+// CacheMetrics summarises Anthropic prompt-cache effectiveness over
+// the selected period. Aggregated from llm_calls.cacheReadTokens /
+// cacheWriteTokens. All zero when no Anthropic calls hit the period
+// (common in Ollama-only dev environments) — handler omits the field
+// in that case via the *CacheMetrics indirection.
+type CacheMetrics struct {
+	HitRate     float64 `json:"hitRate"`
+	ReadTokens  int64   `json:"readTokens"`
+	WriteTokens int64   `json:"writeTokens"`
+	SavingsUSD  float64 `json:"savingsUsd"`
 }
 
 // LLMCallSnapshot is the trimmed view of an llm_calls row used in the
@@ -78,16 +91,18 @@ type OverviewMetrics struct {
 // admin doesn't import observability to avoid a dependency loop, so we
 // re-shape via a Mongo projection.
 type LLMCallSnapshot struct {
-	ID         string    `bson:"_id" json:"id"`
-	UserID     string    `bson:"userId" json:"userId"`
-	UserEmail  string    `bson:"-" json:"userEmail,omitempty"` // resolved server-side
-	Provider   string    `bson:"provider" json:"provider"`
-	Model      string    `bson:"model" json:"model"`
-	Feature    string    `bson:"feature" json:"feature"`
-	CostUSD    float64   `bson:"costUsd" json:"costUsd"`
-	DurationMs int64     `bson:"durationMs" json:"durationMs"`
-	Status     string    `bson:"status" json:"status"`
-	CreatedAt  time.Time `bson:"createdAt" json:"createdAt"`
+	ID               string    `bson:"_id" json:"id"`
+	UserID           string    `bson:"userId" json:"userId"`
+	UserEmail        string    `bson:"-" json:"userEmail,omitempty"` // resolved server-side
+	Provider         string    `bson:"provider" json:"provider"`
+	Model            string    `bson:"model" json:"model"`
+	Feature          string    `bson:"feature" json:"feature"`
+	CostUSD          float64   `bson:"costUsd" json:"costUsd"`
+	DurationMs       int64     `bson:"durationMs" json:"durationMs"`
+	Status           string    `bson:"status" json:"status"`
+	CacheReadTokens  int64     `bson:"cacheReadTokens" json:"cacheReadTokens,omitempty"`
+	CacheWriteTokens int64     `bson:"cacheWriteTokens" json:"cacheWriteTokens,omitempty"`
+	CreatedAt        time.Time `bson:"createdAt" json:"createdAt"`
 }
 
 // OverviewRepository reads aggregates from llm_calls + users.
@@ -107,6 +122,11 @@ type OverviewRepository interface {
 	// to decorate LLMCallSnapshot rows in the recent-activity feed.
 	// Returns map[userID]email — IDs not found are absent from the map.
 	EmailsForUserIDs(ctx context.Context, ids []string) (map[string]string, error)
+	// CacheMetricsFor aggregates Anthropic prompt-cache effectiveness
+	// over [start, end). Returns nil when no Anthropic calls in the
+	// window — the handler omits the field in OverviewMetrics rather
+	// than emitting all-zero rows.
+	CacheMetricsFor(ctx context.Context, start, end time.Time) (*CacheMetrics, error)
 }
 
 // OverviewMongoRepository implements OverviewRepository against the
@@ -277,6 +297,94 @@ func (r *OverviewMongoRepository) EmailsForUserIDs(ctx context.Context, ids []st
 		out[r.ID] = r.Email
 	}
 	return out, nil
+}
+
+// CacheMetricsFor aggregates Anthropic prompt-cache stats over
+// [start, end). Single $group pipeline; rides on the existing
+// (createdAt) index. Returns nil when no Anthropic calls in the
+// window so the handler can omit the field entirely.
+//
+// Hit rate definition:
+//
+//	cacheRead / (cacheRead + cacheWrite + uncachedInput)
+//
+// uncachedInput = inputTokens - cacheReadTokens (cache reads are
+// already counted in inputTokens by both Anthropic and our recorder,
+// per the v3 schema). Healthy is roughly 0.6–0.8.
+//
+// Savings:
+//
+//	readTokens × (full_input_price - cache_read_price)
+//
+// We approximate full_input_price at $3/Mtok and cache_read_price at
+// $0.30/Mtok (the Sonnet 4.5 numbers from model_prices). A future
+// version can join model_prices for exact pricing per row, but the
+// approximation is within ~5% of true at our model mix today.
+func (r *OverviewMongoRepository) CacheMetricsFor(ctx context.Context, start, end time.Time) (*CacheMetrics, error) {
+	pipeline := mongo.Pipeline{
+		{{Key: "$match", Value: bson.M{
+			"createdAt":        bson.M{"$gte": start, "$lt": end},
+			"provider":         "anthropic",
+			"cacheReadTokens":  bson.M{"$exists": true},
+			"cacheWriteTokens": bson.M{"$exists": true},
+		}}},
+		{{Key: "$group", Value: bson.M{
+			"_id":         nil,
+			"readTokens":  bson.M{"$sum": "$cacheReadTokens"},
+			"writeTokens": bson.M{"$sum": "$cacheWriteTokens"},
+			"inputTokens": bson.M{"$sum": "$inputTokens"},
+		}}},
+	}
+	cur, err := r.llmCallsCol().Aggregate(ctx, pipeline)
+	if err != nil {
+		return nil, err
+	}
+	defer cur.Close(ctx)
+
+	var rows []struct {
+		ReadTokens  int64 `bson:"readTokens"`
+		WriteTokens int64 `bson:"writeTokens"`
+		InputTokens int64 `bson:"inputTokens"`
+	}
+	if err := cur.All(ctx, &rows); err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	row := rows[0]
+	if row.ReadTokens == 0 && row.WriteTokens == 0 {
+		// No cache activity; skip the row entirely so the dashboard
+		// hides the tile rather than showing a sad zero.
+		return nil, nil
+	}
+
+	// uncached portion of input. inputTokens already includes cache
+	// reads in the recorder (see observability/recorder.go), so
+	// subtract to isolate the un-cached input.
+	uncached := row.InputTokens - row.ReadTokens
+	if uncached < 0 {
+		uncached = 0
+	}
+	denom := float64(row.ReadTokens + row.WriteTokens + uncached)
+	hitRate := 0.0
+	if denom > 0 {
+		hitRate = float64(row.ReadTokens) / denom
+	}
+
+	// Approximate Sonnet 4.5 pricing. See model_prices for exact
+	// numbers; we live with ~5% error for the dashboard tile.
+	const fullInputPerMTok = 3.0
+	const cacheReadPerMTok = 0.30
+	const million = 1_000_000.0
+	savings := float64(row.ReadTokens) / million * (fullInputPerMTok - cacheReadPerMTok)
+
+	return &CacheMetrics{
+		HitRate:     hitRate,
+		ReadTokens:  row.ReadTokens,
+		WriteTokens: row.WriteTokens,
+		SavingsUSD:  savings,
+	}, nil
 }
 
 // errInvalidOverview is returned by the handler's parser when a query

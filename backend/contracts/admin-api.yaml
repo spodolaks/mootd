@@ -225,6 +225,20 @@ components:
         status:
           type: string
           enum: [success, error, timeout]
+        cacheReadTokens:
+          type: integer
+          format: int64
+          description: |
+            Anthropic prompt-cache read tokens (charged at ~10% of
+            normal input cost). 0 for OpenAI/Ollama, or for Anthropic
+            calls that didn't hit cache.
+        cacheWriteTokens:
+          type: integer
+          format: int64
+          description: |
+            Anthropic prompt-cache write tokens (charged at ~125% of
+            normal input cost — the surcharge to seed the cache).
+            0 for OpenAI/Ollama.
         createdAt:
           type: string
           format: date-time
@@ -300,9 +314,42 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/LLMCallSnapshot"
+        cacheMetrics:
+          $ref: "#/components/schemas/CacheMetrics"
         generatedAt:
           type: string
           format: date-time
+
+    CacheMetrics:
+      type: object
+      description: |
+        Anthropic prompt-cache effectiveness over the selected period.
+        Aggregated from llm_calls.cacheReadTokens / cacheWriteTokens.
+        All zero when no Anthropic calls hit the period (common in
+        Ollama-only dev environments).
+      required: [hitRate, readTokens, writeTokens, savingsUsd]
+      properties:
+        hitRate:
+          type: number
+          format: double
+          description: |
+            cache_read / (cache_read + cache_write + uncached_input).
+            0.0 = no cache benefit; 1.0 = every input token came from
+            cache (impossible in practice; ~0.6-0.8 is healthy).
+        readTokens:
+          type: integer
+          format: int64
+          description: Sum of cache_read_input_tokens across the period.
+        writeTokens:
+          type: integer
+          format: int64
+          description: Sum of cache_creation_input_tokens (cache seeding).
+        savingsUsd:
+          type: number
+          format: double
+          description: |
+            Estimated USD saved by cache reads vs uncached pricing.
+            Computed as readTokens * (full_input_price - cache_read_price).
 
     TracesPage:
       type: object

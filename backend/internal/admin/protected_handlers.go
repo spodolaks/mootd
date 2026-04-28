@@ -226,6 +226,14 @@ func (h *Handler) Overview(w http.ResponseWriter, r *http.Request) {
 		calls = nil
 	}
 
+	// Cache metrics — best-effort; nil when no Anthropic activity in
+	// the period (which is fine, frontend hides the tile).
+	cacheMetrics, err := h.overviewRepo.CacheMetricsFor(ctx, start, end)
+	if err != nil {
+		h.logger.Printf("admin /overview: cache metrics: %v", err)
+		cacheMetrics = nil
+	}
+
 	// Resolve user IDs → emails for the recent-calls feed.
 	if len(calls) > 0 {
 		ids := make([]string, 0, len(calls))
@@ -264,6 +272,7 @@ func (h *Handler) Overview(w http.ResponseWriter, r *http.Request) {
 		CallCountSeries: countSeries,
 		DauSeries:       dauSeries,
 		LastCalls:       calls,
+		CacheMetrics:    cacheMetrics,
 		GeneratedAt:     now,
 	})
 }

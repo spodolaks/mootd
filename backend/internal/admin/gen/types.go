@@ -123,6 +123,27 @@ type BuildInfo struct {
 // BuildInfoEnvironment defines model for BuildInfo.Environment.
 type BuildInfoEnvironment string
 
+// CacheMetrics Anthropic prompt-cache effectiveness over the selected period.
+// Aggregated from llm_calls.cacheReadTokens / cacheWriteTokens.
+// All zero when no Anthropic calls hit the period (common in
+// Ollama-only dev environments).
+type CacheMetrics struct {
+	// HitRate cache_read / (cache_read + cache_write + uncached_input).
+	// 0.0 = no cache benefit; 1.0 = every input token came from
+	// cache (impossible in practice; ~0.6-0.8 is healthy).
+	HitRate float64 `json:"hitRate"`
+
+	// ReadTokens Sum of cache_read_input_tokens across the period.
+	ReadTokens int64 `json:"readTokens"`
+
+	// SavingsUsd Estimated USD saved by cache reads vs uncached pricing.
+	// Computed as readTokens * (full_input_price - cache_read_price).
+	SavingsUsd float64 `json:"savingsUsd"`
+
+	// WriteTokens Sum of cache_creation_input_tokens (cache seeding).
+	WriteTokens int64 `json:"writeTokens"`
+}
+
 // DailyMetric One day's value for a sparkline series. Date is YYYY-MM-DD
 // in UTC. Series in OverviewMetrics are 30 entries long,
 // oldest-first, with zero-fill for days that had no data.
@@ -138,9 +159,18 @@ type ErrorResponse struct {
 
 // LLMCallSnapshot defines model for LLMCallSnapshot.
 type LLMCallSnapshot struct {
-	CostUsd    float64   `json:"costUsd"`
-	CreatedAt  time.Time `json:"createdAt"`
-	DurationMs int64     `json:"durationMs"`
+	// CacheReadTokens Anthropic prompt-cache read tokens (charged at ~10% of
+	// normal input cost). 0 for OpenAI/Ollama, or for Anthropic
+	// calls that didn't hit cache.
+	CacheReadTokens *int64 `json:"cacheReadTokens,omitempty"`
+
+	// CacheWriteTokens Anthropic prompt-cache write tokens (charged at ~125% of
+	// normal input cost — the surcharge to seed the cache).
+	// 0 for OpenAI/Ollama.
+	CacheWriteTokens *int64    `json:"cacheWriteTokens,omitempty"`
+	CostUsd          float64   `json:"costUsd"`
+	CreatedAt        time.Time `json:"createdAt"`
+	DurationMs       int64     `json:"durationMs"`
 
 	// Feature e.g. "outfit_generate", "detection_submit"
 	Feature  string                  `json:"feature"`
@@ -187,6 +217,12 @@ type LoginResponse struct {
 
 // OverviewMetrics defines model for OverviewMetrics.
 type OverviewMetrics struct {
+	// CacheMetrics Anthropic prompt-cache effectiveness over the selected period.
+	// Aggregated from llm_calls.cacheReadTokens / cacheWriteTokens.
+	// All zero when no Anthropic calls hit the period (common in
+	// Ollama-only dev environments).
+	CacheMetrics *CacheMetrics `json:"cacheMetrics,omitempty"`
+
 	// CallCount Total LLM calls across the selected period.
 	CallCount       int64          `json:"callCount"`
 	CallCountPrior  *int64         `json:"callCountPrior,omitempty"`
