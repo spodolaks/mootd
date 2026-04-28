@@ -264,33 +264,68 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 		return result, nil
 	})
 
-	// Pick the active outfit generator. "claude" uses Anthropic's Messages API
-	// with tool use (and optionally vision); "ollama" falls back to the local
-	// Qwen-style model. The choice is driven by OUTFIT_PROVIDER + ANTHROPIC_*
-	// environment variables.
-	var generator outfit.Generator
+	// Pick the active outfit generator. The OUTFIT_PROVIDER env var
+	// accepts:
+	//   - a single name (e.g. "claude", "openai", "ollama") — single
+	//     provider, original behaviour
+	//   - a comma-separated chain (e.g. "claude,openai,ollama") —
+	//     wraps in a CascadeGenerator that falls through on transient
+	//     failures. Health-tracked per provider; unhealthy providers
+	//     skipped during a 60s cooldown after 3 consecutive failures.
+	//
+	// Recommended production setup: "claude,openai,ollama". Single-
+	// provider deploys keep the original simpler path.
 	useVision := false
-	switch a.OutfitProvider {
-	case "claude":
-		claudeCfg := outfit.ClaudeConfig{
-			BaseURL: a.AnthropicBaseURL,
-			APIKey:  a.AnthropicAPIKey,
-			Model:   a.AnthropicModel,
-			Vision:  a.AnthropicVision,
+	buildOne := func(name string) outfit.Generator {
+		switch name {
+		case "claude":
+			useVision = useVision || a.AnthropicVision
+			return outfit.NewClaudeGenerator(outfit.ClaudeConfig{
+				BaseURL: a.AnthropicBaseURL,
+				APIKey:  a.AnthropicAPIKey,
+				Model:   a.AnthropicModel,
+				Vision:  a.AnthropicVision,
+			}, a.Logger, wardrobeRepo)
+		case "openai":
+			return outfit.NewOpenAIGenerator(outfit.OpenAIConfig{
+				BaseURL: a.OpenAIBaseURL,
+				APIKey:  a.OpenAIAPIKey,
+			}, a.Logger)
+		default:
+			return outfit.NewOllamaGenerator(outfit.OllamaConfig{
+				BaseURL: a.OllamaBaseURL,
+				Model:   a.OllamaModel,
+			})
 		}
-		generator = outfit.NewClaudeGenerator(claudeCfg, a.Logger, wardrobeRepo)
-		useVision = a.AnthropicVision
-		a.Logger.Printf("outfit: using Claude generator (model=%s, vision=%v)", a.AnthropicModel, a.AnthropicVision)
-	case "openai":
-		openaiCfg := outfit.OpenAIConfig{
-			BaseURL: a.OpenAIBaseURL,
-			APIKey:  a.OpenAIAPIKey,
+	}
+
+	chainNames := strings.Split(a.OutfitProvider, ",")
+	for i := range chainNames {
+		chainNames[i] = strings.TrimSpace(chainNames[i])
+	}
+	// Filter out empty entries (handles trailing commas / "" input).
+	chain := make([]outfit.Generator, 0, len(chainNames))
+	cleaned := make([]string, 0, len(chainNames))
+	for _, n := range chainNames {
+		if n == "" {
+			continue
 		}
-		generator = outfit.NewOpenAIGenerator(openaiCfg, a.Logger)
-		a.Logger.Printf("outfit: using OpenAI generator (model=gpt-4o)")
-	default:
-		generator = outfit.NewOllamaGenerator(outfit.OllamaConfig{BaseURL: a.OllamaBaseURL, Model: a.OllamaModel})
-		a.Logger.Printf("outfit: using Ollama generator (model=%s)", a.OllamaModel)
+		chain = append(chain, buildOne(n))
+		cleaned = append(cleaned, n)
+	}
+	if len(chain) == 0 {
+		// Empty / all-whitespace OUTFIT_PROVIDER → Ollama default.
+		chain = []outfit.Generator{buildOne("ollama")}
+		cleaned = []string{"ollama"}
+	}
+
+	var generator outfit.Generator
+	if len(chain) == 1 {
+		generator = chain[0]
+		a.Logger.Printf("outfit: single provider %s (no cascade)", cleaned[0])
+	} else {
+		generator = outfit.NewCascadeGenerator(a.Logger, chain...)
+		a.Logger.Printf("outfit: cascade chain %v", cleaned)
 	}
 	// Populate the name variable captured by moodboardOnSave. At this point
 	// no request has been served yet, so the closure will always read a
