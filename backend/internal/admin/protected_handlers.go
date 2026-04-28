@@ -2,6 +2,8 @@ package admin
 
 import (
 	"context"
+	"encoding/csv"
+	"fmt"
 	"net/http"
 	"net/url"
 	"os"
@@ -288,21 +290,22 @@ func (h *Handler) ListTraces(w http.ResponseWriter, r *http.Request) {
 	}
 
 	v := r.URL.Query()
-	q := TracesQuery{
-		UserID:     v.Get("userId"),
-		Model:      v.Get("model"),
-		Feature:    v.Get("feature"),
-		Status:     v.Get("status"),
-		MinCostUSD: parseFloat0(v.Get("minCost")),
-		From:       parseTimePtr(v.Get("from")),
-		To:         parseTimePtr(v.Get("to")),
-		Cursor:     v.Get("cursor"),
+	q := parseTracesQuery(v)
+
+	// CSV export takes a different code path: no pagination, audit
+	// log, and a streamed text/csv response. Cap at maxExportRows so
+	// a no-filter export can't OOM the server.
+	if v.Get("format") == "csv" {
+		h.exportTracesCSV(w, r, q)
+		return
 	}
+
 	if l := v.Get("limit"); l != "" {
 		if n, err := strconv.Atoi(l); err == nil {
 			q.Limit = n
 		}
 	}
+	q.Cursor = v.Get("cursor")
 
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
@@ -315,6 +318,140 @@ func (h *Handler) ListTraces(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response.WriteJSON(w, http.StatusOK, page)
+}
+
+// TracesSummaryHandler handles GET /admin/v1/traces/summary.
+//
+// Aggregate over the same filter as /admin/v1/traces — total count,
+// total cost, mean and approximate p95 latency. Pagination params
+// are ignored. Powers the strip above the firehose table.
+func (h *Handler) TracesSummaryHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if h.tracesRepo == nil {
+		response.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "traces repository not configured"})
+		return
+	}
+
+	q := parseTracesQuery(r.URL.Query())
+
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	summary, err := h.tracesRepo.Summary(ctx, q)
+	if err != nil {
+		h.logger.Printf("admin /traces/summary: aggregate failed: %v", err)
+		response.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	response.WriteJSON(w, http.StatusOK, summary)
+}
+
+// maxExportRows caps a single CSV export. Bigger sets need to be
+// fetched via the API directly; the UI never hands an admin a
+// half-million-row CSV.
+const maxExportRows = 50_000
+
+// exportTracesCSV streams a CSV of every llm_calls row matching the
+// filter. Audited — exporting customer data is a sensitive action.
+func (h *Handler) exportTracesCSV(w http.ResponseWriter, r *http.Request, q TracesQuery) {
+	// Cursor + limit don't apply to CSV — clear them defensively in
+	// case a caller stitched them in.
+	q.Cursor = ""
+	q.Limit = 0
+
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	rows, err := h.tracesRepo.IterAll(ctx, q, maxExportRows)
+	if err != nil {
+		h.logger.Printf("admin /traces export: iter failed: %v", err)
+		response.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+
+	// Audit. Best-effort — if the audit write fails we still serve
+	// the CSV; the alternative (denying the export over an audit
+	// hiccup) is worse for operators. Email lookup is best-effort
+	// too: empty email in the audit row beats blocking the export.
+	if h.repo != nil {
+		adminID, _ := AdminIDFromContext(r.Context())
+		var adminEmail string
+		if a, _ := h.repo.FindByID(r.Context(), adminID); a != nil {
+			adminEmail = a.Email
+		}
+		Audit(r.Context(), h.repo, h.logger, AuditEntry{
+			ID:         generateAuditID(),
+			AdminID:    adminID,
+			AdminEmail: adminEmail,
+			Action:     "traces.export",
+			At:         time.Now().UTC(),
+			IP:         clientIP(r),
+			UserAgent:  r.Header.Get("User-Agent"),
+			Metadata: map[string]any{
+				"format":   "csv",
+				"rowCount": len(rows),
+				"filter": map[string]any{
+					"userId":  q.UserID,
+					"model":   q.Model,
+					"feature": q.Feature,
+					"status":  q.Status,
+					"minCost": q.MinCostUSD,
+					"from":    timeStr(q.From),
+					"to":      timeStr(q.To),
+				},
+			},
+		})
+	}
+
+	filename := fmt.Sprintf("traces-%s.csv", time.Now().UTC().Format("20060102-150405"))
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+	w.WriteHeader(http.StatusOK)
+
+	writer := csv.NewWriter(w)
+	_ = writer.Write([]string{
+		"id", "createdAt", "userId", "provider", "model", "feature",
+		"status", "costUsd", "durationMs",
+	})
+	for _, c := range rows {
+		_ = writer.Write([]string{
+			c.ID,
+			c.CreatedAt.UTC().Format(time.RFC3339Nano),
+			c.UserID,
+			c.Provider,
+			c.Model,
+			c.Feature,
+			c.Status,
+			strconv.FormatFloat(c.CostUSD, 'f', -1, 64),
+			strconv.FormatInt(c.DurationMs, 10),
+		})
+	}
+	writer.Flush()
+}
+
+// parseTracesQuery hoists URL query parsing out of the handler. Note
+// that pagination params (cursor / limit) are NOT read here — they
+// only apply to the JSON list path and the caller stitches them in.
+func parseTracesQuery(v url.Values) TracesQuery {
+	return TracesQuery{
+		UserID:     v.Get("userId"),
+		Model:      v.Get("model"),
+		Feature:    v.Get("feature"),
+		Status:     v.Get("status"),
+		MinCostUSD: parseFloat0(v.Get("minCost")),
+		From:       parseTimePtr(v.Get("from")),
+		To:         parseTimePtr(v.Get("to")),
+	}
+}
+
+func timeStr(t *time.Time) string {
+	if t == nil {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339)
 }
 
 // parseUsersQuery hoists URL query parsing out of the handler so it

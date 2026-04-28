@@ -31,12 +31,28 @@ type TracesPage struct {
 	NextCursor string            `json:"nextCursor,omitempty"`
 }
 
+// TracesSummary is the aggregate over the same filter set as List.
+// Independent of pagination; powers the "1,234 calls · $45.20 ·
+// avg 4.2s · p95 12.1s" strip on the /traces page.
+type TracesSummary struct {
+	TotalCount     int64   `json:"totalCount"`
+	TotalCostUSD   float64 `json:"totalCostUsd"`
+	AvgDurationMs  int64   `json:"avgDurationMs"`
+	P95DurationMs  int64   `json:"p95DurationMs"`
+}
+
 // TracesRepository owns the read side of llm_calls. We deliberately
 // keep this separate from the OverviewRepository — the queries
 // shape differently (paginated vs aggregate) and the use sites
 // don't share code worth deduping.
 type TracesRepository interface {
 	List(ctx context.Context, q TracesQuery) (TracesPage, error)
+	// Summary aggregates over the same filter — count, spend, mean
+	// + p95 latency. Pagination params on q are ignored.
+	Summary(ctx context.Context, q TracesQuery) (TracesSummary, error)
+	// IterAll streams every row matching the filter (no pagination).
+	// Used by CSV export; capped at maxRows by the caller.
+	IterAll(ctx context.Context, q TracesQuery, maxRows int) ([]LLMCallSnapshot, error)
 }
 
 // TracesMongoRepository implements TracesRepository against the
@@ -58,15 +74,11 @@ func (r *TracesMongoRepository) col() *mongo.Collection {
 	return r.client.Database(r.dbName).Collection("llm_calls")
 }
 
-// List returns one page of llm_calls rows matching q. Sort is
-// always createdAt-desc, _id-desc (tiebreaker so pagination is
-// stable when many rows share the same millisecond).
-func (r *TracesMongoRepository) List(ctx context.Context, q TracesQuery) (TracesPage, error) {
-	limit := q.Limit
-	if limit <= 0 || limit > 100 {
-		limit = 25
-	}
-
+// buildFilter translates a TracesQuery into the bson filter used
+// by all read paths. Cursor handling is intentionally NOT included
+// here — it's specific to the paginated List path and stitched on
+// after this returns.
+func buildTracesFilter(q TracesQuery) bson.M {
 	filter := bson.M{}
 	if q.UserID != "" {
 		filter["userId"] = q.UserID
@@ -93,6 +105,19 @@ func (r *TracesMongoRepository) List(ctx context.Context, q TracesQuery) (Traces
 		}
 		filter["createdAt"] = ts
 	}
+	return filter
+}
+
+// List returns one page of llm_calls rows matching q. Sort is
+// always createdAt-desc, _id-desc (tiebreaker so pagination is
+// stable when many rows share the same millisecond).
+func (r *TracesMongoRepository) List(ctx context.Context, q TracesQuery) (TracesPage, error) {
+	limit := q.Limit
+	if limit <= 0 || limit > 100 {
+		limit = 25
+	}
+
+	filter := buildTracesFilter(q)
 	if q.Cursor != "" {
 		// Cursor encodes the last row's _id — pull rows whose _id
 		// is "less than" it under the descending sort.
@@ -125,6 +150,81 @@ func (r *TracesMongoRepository) List(ctx context.Context, q TracesQuery) (Traces
 		page.NextCursor = rows[len(rows)-1].ID
 	}
 	return page, nil
+}
+
+// Summary computes aggregate count, spend, mean and p95 latency over
+// the filter. One $group pipeline using $percentile (Mongo 7.0+).
+// Approximate percentile method — exact would scan and sort the
+// whole match; approximate uses a t-digest internally and is fine
+// for the "rough p95" the strip displays.
+func (r *TracesMongoRepository) Summary(ctx context.Context, q TracesQuery) (TracesSummary, error) {
+	filter := buildTracesFilter(q)
+	pipeline := mongo.Pipeline{
+		{{Key: "$match", Value: filter}},
+		{{Key: "$group", Value: bson.M{
+			"_id":           nil,
+			"totalCount":    bson.M{"$sum": 1},
+			"totalCostUsd":  bson.M{"$sum": "$costUsd"},
+			"avgDurationMs": bson.M{"$avg": "$durationMs"},
+			"p95":           bson.M{"$percentile": bson.M{"input": "$durationMs", "p": []float64{0.95}, "method": "approximate"}},
+		}}},
+	}
+	cur, err := r.col().Aggregate(ctx, pipeline)
+	if err != nil {
+		return TracesSummary{}, err
+	}
+	defer cur.Close(ctx)
+
+	var rows []struct {
+		TotalCount    int64     `bson:"totalCount"`
+		TotalCostUSD  float64   `bson:"totalCostUsd"`
+		AvgDurationMs float64   `bson:"avgDurationMs"`
+		P95           []float64 `bson:"p95"`
+	}
+	if err := cur.All(ctx, &rows); err != nil {
+		return TracesSummary{}, err
+	}
+	if len(rows) == 0 {
+		return TracesSummary{}, nil
+	}
+	row := rows[0]
+	p95 := int64(0)
+	if len(row.P95) > 0 {
+		p95 = int64(row.P95[0])
+	}
+	return TracesSummary{
+		TotalCount:    row.TotalCount,
+		TotalCostUSD:  row.TotalCostUSD,
+		AvgDurationMs: int64(row.AvgDurationMs),
+		P95DurationMs: p95,
+	}, nil
+}
+
+// IterAll returns every row matching the filter, capped at maxRows.
+// Used by CSV export; the cap protects the server from a no-filter
+// export blowing up memory. Caller's responsibility to communicate
+// truncation if len(result) == maxRows.
+func (r *TracesMongoRepository) IterAll(ctx context.Context, q TracesQuery, maxRows int) ([]LLMCallSnapshot, error) {
+	if maxRows <= 0 {
+		maxRows = 50_000
+	}
+	filter := buildTracesFilter(q)
+	cur, err := r.col().Find(
+		ctx, filter,
+		findOpts().
+			SetSort(bson.D{{Key: "createdAt", Value: -1}, {Key: "_id", Value: -1}}).
+			SetLimit(int64(maxRows)),
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer cur.Close(ctx)
+
+	var rows []LLMCallSnapshot
+	if err := cur.All(ctx, &rows); err != nil {
+		return nil, err
+	}
+	return rows, nil
 }
 
 // errInvalidTracesQuery is returned by the handler's parser when a

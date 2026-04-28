@@ -64,6 +64,19 @@ const (
 	AdminListTracesParamsStatusTimeout AdminListTracesParamsStatus = "timeout"
 )
 
+// Defines values for AdminListTracesParamsFormat.
+const (
+	Csv  AdminListTracesParamsFormat = "csv"
+	Json AdminListTracesParamsFormat = "json"
+)
+
+// Defines values for AdminTracesSummaryParamsStatus.
+const (
+	Error   AdminTracesSummaryParamsStatus = "error"
+	Success AdminTracesSummaryParamsStatus = "success"
+	Timeout AdminTracesSummaryParamsStatus = "timeout"
+)
+
 // Defines values for AdminListUsersParamsTier.
 const (
 	AdminListUsersParamsTierBeta    AdminListUsersParamsTier = "beta"
@@ -218,6 +231,24 @@ type TracesPage struct {
 	NextCursor *string           `json:"nextCursor,omitempty"`
 }
 
+// TracesSummary Aggregate over the same filter set as GET /admin/v1/traces.
+// Independent of pagination: returns totals across the *whole*
+// matched set, not just the current page. Powers the "1,234 calls
+// · $45.20 · avg 4.2s · p95 12.1s" strip on /traces.
+type TracesSummary struct {
+	// AvgDurationMs Mean durationMs (rounded). 0 when totalCount == 0.
+	AvgDurationMs int64 `json:"avgDurationMs"`
+
+	// P95DurationMs 95th-percentile durationMs (interpolated). 0 when totalCount == 0.
+	P95DurationMs int64 `json:"p95DurationMs"`
+
+	// TotalCostUsd Sum of costUsd across the matched set.
+	TotalCostUsd float64 `json:"totalCostUsd"`
+
+	// TotalCount Number of llm_calls rows matching the filter.
+	TotalCount int64 `json:"totalCount"`
+}
+
 // UserSummary defines model for UserSummary.
 type UserSummary struct {
 	// Email Redacted (`u***@gmail.com`) unless caller has the `users:pii`
@@ -286,10 +317,34 @@ type AdminListTracesParams struct {
 	To     *time.Time `form:"to,omitempty" json:"to,omitempty"`
 	Cursor *string    `form:"cursor,omitempty" json:"cursor,omitempty"`
 	Limit  *int       `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Format Response format. Default `json` returns a TracesPage with
+	// cursor pagination. `csv` streams every row matching the
+	// filter (capped at 50_000) with a CSV `Content-Type` and
+	// `Content-Disposition: attachment` header. CSV exports are
+	// audited.
+	Format *AdminListTracesParamsFormat `form:"format,omitempty" json:"format,omitempty"`
 }
 
 // AdminListTracesParamsStatus defines parameters for AdminListTraces.
 type AdminListTracesParamsStatus string
+
+// AdminListTracesParamsFormat defines parameters for AdminListTraces.
+type AdminListTracesParamsFormat string
+
+// AdminTracesSummaryParams defines parameters for AdminTracesSummary.
+type AdminTracesSummaryParams struct {
+	UserId  *string                         `form:"userId,omitempty" json:"userId,omitempty"`
+	Model   *string                         `form:"model,omitempty" json:"model,omitempty"`
+	Feature *string                         `form:"feature,omitempty" json:"feature,omitempty"`
+	Status  *AdminTracesSummaryParamsStatus `form:"status,omitempty" json:"status,omitempty"`
+	MinCost *float64                        `form:"minCost,omitempty" json:"minCost,omitempty"`
+	From    *time.Time                      `form:"from,omitempty" json:"from,omitempty"`
+	To      *time.Time                      `form:"to,omitempty" json:"to,omitempty"`
+}
+
+// AdminTracesSummaryParamsStatus defines parameters for AdminTracesSummary.
+type AdminTracesSummaryParamsStatus string
 
 // AdminListUsersParams defines parameters for AdminListUsers.
 type AdminListUsersParams struct {

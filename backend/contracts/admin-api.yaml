@@ -315,6 +315,32 @@ components:
         nextCursor:
           type: string
 
+    TracesSummary:
+      type: object
+      description: |
+        Aggregate over the same filter set as GET /admin/v1/traces.
+        Independent of pagination: returns totals across the *whole*
+        matched set, not just the current page. Powers the "1,234 calls
+        · $45.20 · avg 4.2s · p95 12.1s" strip on /traces.
+      required: [totalCount, totalCostUsd, avgDurationMs, p95DurationMs]
+      properties:
+        totalCount:
+          type: integer
+          format: int64
+          description: Number of llm_calls rows matching the filter.
+        totalCostUsd:
+          type: number
+          format: double
+          description: Sum of costUsd across the matched set.
+        avgDurationMs:
+          type: integer
+          format: int64
+          description: Mean durationMs (rounded). 0 when totalCount == 0.
+        p95DurationMs:
+          type: integer
+          format: int64
+          description: 95th-percentile durationMs (interpolated). 0 when totalCount == 0.
+
     BuildInfo:
       type: object
       description: |
@@ -511,7 +537,9 @@ paths:
       operationId: adminListTraces
       summary: |
         Paginated firehose of llm_calls rows with filters by user / model
-        / feature / status / minimum cost / date range.
+        / feature / status / minimum cost / date range. Optionally
+        streams the *entire* matched set as CSV when format=csv —
+        bypassing cursor pagination — for ad-hoc export.
       tags: [traces]
       parameters:
         - name: userId
@@ -556,13 +584,78 @@ paths:
             minimum: 1
             maximum: 100
             default: 25
+        - name: format
+          in: query
+          description: |
+            Response format. Default `json` returns a TracesPage with
+            cursor pagination. `csv` streams every row matching the
+            filter (capped at 50_000) with a CSV `Content-Type` and
+            `Content-Disposition: attachment` header. CSV exports are
+            audited.
+          schema:
+            type: string
+            enum: [json, csv]
+            default: json
       responses:
         "200":
-          description: One page of LLM call snapshots.
+          description: One page of LLM call snapshots, or a streamed CSV.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/TracesPage"
+            text/csv:
+              schema:
+                type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /admin/v1/traces/summary:
+    get:
+      operationId: adminTracesSummary
+      summary: |
+        Aggregate totals over the current /traces filter — count,
+        spend, mean and p95 latency. Independent of pagination so the
+        /traces page can show "1,234 calls · $45.20 · avg 4.2s ·
+        p95 12.1s" above the table without scanning every page.
+      tags: [traces]
+      parameters:
+        - name: userId
+          in: query
+          schema: { type: string }
+        - name: model
+          in: query
+          schema: { type: string }
+        - name: feature
+          in: query
+          schema: { type: string }
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [success, error, timeout]
+        - name: minCost
+          in: query
+          schema:
+            type: number
+            format: double
+            minimum: 0
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: Aggregate over the filter.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TracesSummary"
         "401":
           $ref: "#/components/responses/Unauthorized"
 
