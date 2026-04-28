@@ -1,0 +1,26 @@
+{
+  "id": "02-maximalist-sunny",
+  "description": "Maximalist archetype, 24°C sunny weather, smaller wardrobe with bold pieces.",
+  "userID": "eval-user-02",
+  "items": [
+    { "id": "top-1", "category": "shirt", "label": "printed silk camp shirt", "traits": { "color": "multi", "fabric": "silk" } },
+    { "id": "top-2", "category": "tshirt", "label": "linen v-neck", "traits": { "color": "cream", "fabric": "linen" } },
+    { "id": "bot-1", "category": "trouser", "label": "wide-leg crepe trouser", "traits": { "color": "olive", "fabric": "crepe" } },
+    { "id": "bot-2", "category": "short", "label": "tailored cotton short", "traits": { "color": "khaki", "fabric": "cotton" } },
+    { "id": "shoe-1", "category": "sandal", "label": "huarache leather sandal", "traits": { "color": "tan", "fabric": "leather" } },
+    { "id": "shoe-2", "category": "sneaker", "label": "yellow suede sneaker", "traits": { "color": "yellow", "fabric": "suede" } },
+    { "id": "acc-1", "category": "bag", "label": "rattan tote", "traits": { "color": "natural", "fabric": "rattan" } },
+    { "id": "acc-2", "category": "necklace", "label": "amber pendant", "traits": { "color": "amber" } }
+  ],
+  "topArchetypes": [
+    { "name": "maximalist", "score": 0.78 }
+  ],
+  "weather": { "temperature": "24", "unit": "C", "condition": "Sunny" },
+  "expectations": {
+    "minItems": 4,
+    "maxItems": 5,
+    "mustIncludeCategories": ["shirt", "short", "sandal"],
+    "preferTraits": ["fabric: linen", "fabric: silk"],
+    "avoidBannedWords": true
+  }
+}

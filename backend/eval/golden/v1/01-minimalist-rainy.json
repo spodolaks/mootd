@@ -1,0 +1,27 @@
+{
+  "id": "01-minimalist-rainy",
+  "description": "Minimalist archetype, 12°C rainy weather, mid-size wardrobe.",
+  "userID": "eval-user-01",
+  "items": [
+    { "id": "top-1", "category": "shirt", "label": "white cotton oxford", "traits": { "color": "white", "fabric": "cotton", "style": "preppy" } },
+    { "id": "top-2", "category": "tshirt", "label": "black merino tee", "traits": { "color": "black", "fabric": "wool" } },
+    { "id": "bot-1", "category": "trouser", "label": "navy wool trouser", "traits": { "color": "navy", "fabric": "wool" } },
+    { "id": "bot-2", "category": "jean", "label": "raw indigo denim", "traits": { "color": "indigo", "fabric": "denim" } },
+    { "id": "out-1", "category": "coat", "label": "charcoal wool overcoat", "traits": { "color": "charcoal", "fabric": "wool" } },
+    { "id": "shoe-1", "category": "boot", "label": "black chelsea boot", "traits": { "color": "black", "fabric": "leather" } },
+    { "id": "shoe-2", "category": "sneaker", "label": "white minimal sneaker", "traits": { "color": "white", "fabric": "leather" } },
+    { "id": "acc-1", "category": "watch", "label": "matte black field watch", "traits": { "color": "black" } },
+    { "id": "acc-2", "category": "scarf", "label": "grey wool scarf", "traits": { "color": "grey", "fabric": "wool" } }
+  ],
+  "topArchetypes": [
+    { "name": "minimalist", "score": 0.82 }
+  ],
+  "weather": { "temperature": "12", "unit": "C", "condition": "Rainy" },
+  "expectations": {
+    "minItems": 4,
+    "maxItems": 5,
+    "mustIncludeCategories": ["shirt", "trouser", "boot"],
+    "preferTraits": ["fabric: wool", "color: charcoal"],
+    "avoidBannedWords": true
+  }
+}

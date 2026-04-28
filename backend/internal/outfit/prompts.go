@@ -309,6 +309,17 @@ EXAMPLE OUTPUT (uses placeholder IDs — do NOT reuse them; notice description a
 	return sb.String()
 }
 
+// BuildSystemPromptForEval is a small exported wrapper around
+// buildSystemPrompt for the eval harness (mootd/eval). The harness
+// lives outside this package and needs to render the *same* system
+// prompt the production service does, so it has to call the same
+// builder. The unexported version stays the canonical entry point
+// for the rest of the package; this one exists solely so eval can
+// see what the LLM would see.
+func BuildSystemPromptForEval(weather Weather, recentBoards []RecentBoard, topArchetypes []archetype.ScoredArchetype, panels, backgrounds []SurfaceOption) string {
+	return buildSystemPrompt(weather, recentBoards, topArchetypes, panels, backgrounds)
+}
+
 // BuildUserMessage produces a single compact representation of the wardrobe
 // (one section grouped by role + a small per-item trait block). Shared by all
 // generators: Ollama, OpenAI, and Claude (text part).
