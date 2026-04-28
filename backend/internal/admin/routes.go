@@ -29,6 +29,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, authLimit Middleware, requi
 	// adding a new route here without wrapping is a bug we'd want to
 	// catch in code review, hence the explicit wrap on each line.
 	mux.Handle("/admin/v1/me", requireAdmin(http.HandlerFunc(h.Me)))
+	mux.Handle("/admin/v1/build-info", requireAdmin(http.HandlerFunc(h.BuildInfoHandler)))
 	mux.Handle("/admin/v1/users", requireAdmin(http.HandlerFunc(h.ListUsers)))
 	mux.Handle("/admin/v1/overview", requireAdmin(http.HandlerFunc(h.Overview)))
 	mux.Handle("/admin/v1/traces", requireAdmin(http.HandlerFunc(h.ListTraces)))

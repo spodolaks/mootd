@@ -258,6 +258,32 @@ components:
         nextCursor:
           type: string
 
+    BuildInfo:
+      type: object
+      description: |
+        Compile-time identity of the running backend. Cacheable — value
+        never changes between deploys, so the admin UI can display it
+        in the sidebar footer without re-fetching.
+      required: [version, sha, environment]
+      properties:
+        version:
+          type: string
+          description: package.json-style version string (e.g. "0.2.0").
+          example: "0.2.0"
+        sha:
+          type: string
+          description: |
+            Git short SHA of the build. "dev" when unset (local docker
+            builds). Set in production via -ldflags at compile time.
+          example: "e21a668"
+        environment:
+          type: string
+          enum: [development, staging, production]
+        builtAt:
+          type: string
+          format: date-time
+          description: When the binary was compiled (UTC).
+
 paths:
   /admin/v1/auth/login:
     post:
@@ -329,6 +355,25 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Admin"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /admin/v1/build-info:
+    get:
+      operationId: adminBuildInfo
+      summary: Backend version + commit SHA + environment.
+      description: |
+        Returned values change only on deploy. The admin UI fetches
+        this once per session and renders it in the sidebar footer
+        so operators always know which backend version is serving.
+      tags: [auth]
+      responses:
+        "200":
+          description: Build identity.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BuildInfo"
         "401":
           $ref: "#/components/responses/Unauthorized"
 

@@ -21,6 +21,13 @@ const (
 	AdminRolesSupport  AdminRoles = "support"
 )
 
+// Defines values for BuildInfoEnvironment.
+const (
+	Development BuildInfoEnvironment = "development"
+	Production  BuildInfoEnvironment = "production"
+	Staging     BuildInfoEnvironment = "staging"
+)
+
 // Defines values for LLMCallSnapshotProvider.
 const (
 	Anthropic LLMCallSnapshotProvider = "anthropic"
@@ -76,6 +83,25 @@ type Admin struct {
 
 // AdminRoles defines model for Admin.Roles.
 type AdminRoles string
+
+// BuildInfo Compile-time identity of the running backend. Cacheable — value
+// never changes between deploys, so the admin UI can display it
+// in the sidebar footer without re-fetching.
+type BuildInfo struct {
+	// BuiltAt When the binary was compiled (UTC).
+	BuiltAt     *time.Time           `json:"builtAt,omitempty"`
+	Environment BuildInfoEnvironment `json:"environment"`
+
+	// Sha Git short SHA of the build. "dev" when unset (local docker
+	// builds). Set in production via -ldflags at compile time.
+	Sha string `json:"sha"`
+
+	// Version package.json-style version string (e.g. "0.2.0").
+	Version string `json:"version"`
+}
+
+// BuildInfoEnvironment defines model for BuildInfo.Environment.
+type BuildInfoEnvironment string
 
 // ErrorResponse defines model for ErrorResponse.
 type ErrorResponse struct {

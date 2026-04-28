@@ -4,11 +4,55 @@ import (
 	"context"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"time"
 
+	"mootd/backend/internal/buildinfo"
 	"mootd/backend/internal/shared/response"
 )
+
+// BuildInfo is the wire shape returned by GET /admin/v1/build-info.
+// Mirrors the BuildInfo schema in admin-api.yaml; kept hand-written
+// rather than imported from gen/ to avoid the Id-vs-ID convention
+// fight (per backend/internal/admin/gen/README.md).
+type BuildInfo struct {
+	Version     string `json:"version"`
+	SHA         string `json:"sha"`
+	Environment string `json:"environment"`
+	BuiltAt     string `json:"builtAt,omitempty"`
+}
+
+// BuildInfoHandler handles GET /admin/v1/build-info.
+//
+// Returns the compile-time identity of the running backend (version,
+// SHA, environment, build timestamp). Cacheable — values only change
+// on deploy, so the admin UI fetches once per session and shows the
+// result in the sidebar footer.
+func (h *Handler) BuildInfoHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	env := os.Getenv("ENVIRONMENT")
+	switch env {
+	case "":
+		env = "development"
+	case "development", "staging", "production":
+		// supported, leave as-is
+	default:
+		// Anything else collapses to "development" so the spec enum holds.
+		env = "development"
+	}
+
+	response.WriteJSON(w, http.StatusOK, BuildInfo{
+		Version:     buildinfo.Version,
+		SHA:         buildinfo.SHA,
+		Environment: env,
+		BuiltAt:     buildinfo.BuiltAt,
+	})
+}
 
 // Me handles GET /admin/v1/me.
 //
