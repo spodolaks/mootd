@@ -162,15 +162,32 @@ func (h *Handler) Overview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	period := resolvePeriod(r.URL.Query().Get("period"))
+
+	// 8s budget for the whole page — daily series can be the slowest
+	// query; we want it bounded.
+	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
 	defer cancel()
 
 	now := time.Now().UTC()
-	spend, count, err := h.overviewRepo.TodayMetrics(ctx, now)
+	start, end := periodWindow(period, now)
+	priorEnd := start
+	priorStart := priorEnd.Add(-end.Sub(start)) // window of equal length immediately before
+
+	// Headline period.
+	spend, count, err := h.overviewRepo.PeriodMetrics(ctx, start, end)
 	if err != nil {
-		h.logger.Printf("admin /overview: today metrics: %v", err)
+		h.logger.Printf("admin /overview: period metrics: %v", err)
 		response.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
 		return
+	}
+
+	// Prior period — same shape, used for WoW deltas. Best-effort:
+	// failure here just elides the delta on the frontend.
+	priorSpend, priorCount, err := h.overviewRepo.PeriodMetrics(ctx, priorStart, priorEnd)
+	if err != nil {
+		h.logger.Printf("admin /overview: prior metrics: %v", err)
+		priorSpend, priorCount = 0, 0
 	}
 
 	dau, err := h.overviewRepo.ApproxDAU(ctx, now.Add(-24*time.Hour))
@@ -179,20 +196,73 @@ func (h *Handler) Overview(w http.ResponseWriter, r *http.Request) {
 		h.logger.Printf("admin /overview: dau: %v", err)
 		dau = 0
 	}
+	priorDau, err := h.overviewRepo.ApproxDAU(ctx, now.Add(-48*time.Hour))
+	if err != nil {
+		h.logger.Printf("admin /overview: prior dau: %v", err)
+		priorDau = 0
+	}
+	// ApproxDAU(48h) gives us [now-48h, now]; subtract today's slice
+	// to get the prior 24h-only count.
+	if priorDau > dau {
+		priorDau -= dau
+	} else {
+		priorDau = 0
+	}
+
+	// Daily series — 30 entries each, zero-filled.
+	spendSeries, countSeries, dauSeries, err := h.overviewRepo.DailySeries(ctx, now)
+	if err != nil {
+		h.logger.Printf("admin /overview: daily series: %v", err)
+		// Sparklines are nice-to-have; don't fail the page on a
+		// series error.
+		spendSeries, countSeries, dauSeries = nil, nil, nil
+	}
 
 	calls, err := h.overviewRepo.RecentLLMCalls(ctx, 10)
 	if err != nil {
 		h.logger.Printf("admin /overview: recent calls: %v", err)
-		// Same logic — never fail the whole page on a partial read.
 		calls = nil
 	}
 
+	// Resolve user IDs → emails for the recent-calls feed.
+	if len(calls) > 0 {
+		ids := make([]string, 0, len(calls))
+		seen := make(map[string]struct{}, len(calls))
+		for _, c := range calls {
+			if c.UserID == "" {
+				continue
+			}
+			if _, dup := seen[c.UserID]; dup {
+				continue
+			}
+			seen[c.UserID] = struct{}{}
+			ids = append(ids, c.UserID)
+		}
+		emails, err := h.overviewRepo.EmailsForUserIDs(ctx, ids)
+		if err != nil {
+			h.logger.Printf("admin /overview: email resolve: %v", err)
+		} else {
+			for i := range calls {
+				if e, ok := emails[calls[i].UserID]; ok {
+					calls[i].UserEmail = e
+				}
+			}
+		}
+	}
+
 	response.WriteJSON(w, http.StatusOK, OverviewMetrics{
-		SpendUsdToday:  spend,
-		CallCountToday: count,
-		DauApprox:      dau,
-		LastCalls:      calls,
-		GeneratedAt:    now,
+		Period:          period,
+		SpendUSD:        spend,
+		CallCount:       count,
+		DauApprox:       dau,
+		SpendUSDPrior:   priorSpend,
+		CallCountPrior:  priorCount,
+		DauPrior:        priorDau,
+		SpendSeries:     spendSeries,
+		CallCountSeries: countSeries,
+		DauSeries:       dauSeries,
+		LastCalls:       calls,
+		GeneratedAt:     now,
 	})
 }
 

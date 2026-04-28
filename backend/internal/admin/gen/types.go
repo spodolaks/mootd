@@ -42,6 +42,13 @@ const (
 	LLMCallSnapshotStatusTimeout LLMCallSnapshotStatus = "timeout"
 )
 
+// Defines values for OverviewPeriod.
+const (
+	N30d  OverviewPeriod = "30d"
+	N7d   OverviewPeriod = "7d"
+	Today OverviewPeriod = "today"
+)
+
 // Defines values for UserSummaryTier.
 const (
 	UserSummaryTierBeta    UserSummaryTier = "beta"
@@ -103,6 +110,14 @@ type BuildInfo struct {
 // BuildInfoEnvironment defines model for BuildInfo.Environment.
 type BuildInfoEnvironment string
 
+// DailyMetric One day's value for a sparkline series. Date is YYYY-MM-DD
+// in UTC. Series in OverviewMetrics are 30 entries long,
+// oldest-first, with zero-fill for days that had no data.
+type DailyMetric struct {
+	Date  string  `json:"date"`
+	Value float64 `json:"value"`
+}
+
 // ErrorResponse defines model for ErrorResponse.
 type ErrorResponse struct {
 	Error string `json:"error"`
@@ -120,7 +135,13 @@ type LLMCallSnapshot struct {
 	Model    string                  `json:"model"`
 	Provider LLMCallSnapshotProvider `json:"provider"`
 	Status   LLMCallSnapshotStatus   `json:"status"`
-	UserId   string                  `json:"userId"`
+
+	// UserEmail Optional — present when the backend resolves the user
+	// in-flight. Frontend masks before display unless the
+	// caller has the `users:pii` permission AND has
+	// MFA-verified.
+	UserEmail *string `json:"userEmail,omitempty"`
+	UserId    string  `json:"userId"`
 }
 
 // LLMCallSnapshotProvider defines model for LLMCallSnapshot.Provider.
@@ -153,16 +174,38 @@ type LoginResponse struct {
 
 // OverviewMetrics defines model for OverviewMetrics.
 type OverviewMetrics struct {
-	CallCountToday int64 `json:"callCountToday"`
+	// CallCount Total LLM calls across the selected period.
+	CallCount       int64          `json:"callCount"`
+	CallCountPrior  *int64         `json:"callCountPrior,omitempty"`
+	CallCountSeries *[]DailyMetric `json:"callCountSeries,omitempty"`
 
-	// DauApprox Count of distinct users updatedAt'd in the last 24h.
-	// Heuristic until P2-02 (events) introduces real activity
-	// tracking.
-	DauApprox     int64              `json:"dauApprox"`
-	GeneratedAt   time.Time          `json:"generatedAt"`
-	LastCalls     *[]LLMCallSnapshot `json:"lastCalls,omitempty"`
-	SpendUsdToday float64            `json:"spendUsdToday"`
+	// DauApprox Distinct user_ids active in the last 24h (heuristic).
+	// Independent of the period selector — DAU is always today's.
+	DauApprox   int64              `json:"dauApprox"`
+	DauPrior    *int64             `json:"dauPrior,omitempty"`
+	DauSeries   *[]DailyMetric     `json:"dauSeries,omitempty"`
+	GeneratedAt time.Time          `json:"generatedAt"`
+	LastCalls   *[]LLMCallSnapshot `json:"lastCalls,omitempty"`
+
+	// Period Period selector for the headline metrics. `today` is the
+	// UTC day so far; `7d`/`30d` are rolling windows ending now.
+	Period OverviewPeriod `json:"period"`
+
+	// SpendSeries 30-day sparkline series for spend (oldest-first).
+	SpendSeries *[]DailyMetric `json:"spendSeries,omitempty"`
+
+	// SpendUsd Total spend across the selected period.
+	SpendUsd float64 `json:"spendUsd"`
+
+	// SpendUsdPrior Spend over the prior period of equal length, used to render
+	// week-over-week deltas. Today → yesterday; 7d → previous 7d;
+	// 30d → previous 30d.
+	SpendUsdPrior *float64 `json:"spendUsdPrior,omitempty"`
 }
+
+// OverviewPeriod Period selector for the headline metrics. `today` is the
+// UTC day so far; `7d`/`30d` are rolling windows ending now.
+type OverviewPeriod string
 
 // RefreshRequest defines model for RefreshRequest.
 type RefreshRequest struct {
@@ -218,6 +261,15 @@ type InternalError = ErrorResponse
 
 // Unauthorized defines model for Unauthorized.
 type Unauthorized = ErrorResponse
+
+// AdminOverviewParams defines parameters for AdminOverview.
+type AdminOverviewParams struct {
+	// Period Period selector for the headline metrics. Defaults to
+	// `today` when unset. Sparkline series are always 30 days
+	// regardless of period — they're the trend, not the
+	// headline.
+	Period *OverviewPeriod `form:"period,omitempty" json:"period,omitempty"`
+}
 
 // AdminListTracesParams defines parameters for AdminListTraces.
 type AdminListTracesParams struct {

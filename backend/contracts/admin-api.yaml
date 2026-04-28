@@ -201,6 +201,13 @@ components:
           type: string
         userId:
           type: string
+        userEmail:
+          type: string
+          description: |
+            Optional — present when the backend resolves the user
+            in-flight. Frontend masks before display unless the
+            caller has the `users:pii` permission AND has
+            MFA-verified.
         provider:
           type: string
           enum: [anthropic, openai, ollama]
@@ -222,23 +229,73 @@ components:
           type: string
           format: date-time
 
-    OverviewMetrics:
+    DailyMetric:
       type: object
-      required: [spendUsdToday, callCountToday, dauApprox, generatedAt]
+      description: |
+        One day's value for a sparkline series. Date is YYYY-MM-DD
+        in UTC. Series in OverviewMetrics are 30 entries long,
+        oldest-first, with zero-fill for days that had no data.
+      required: [date, value]
       properties:
-        spendUsdToday:
+        date:
+          type: string
+        value:
           type: number
           format: double
-        callCountToday:
+
+    OverviewPeriod:
+      type: string
+      enum: [today, 7d, 30d]
+      description: |
+        Period selector for the headline metrics. `today` is the
+        UTC day so far; `7d`/`30d` are rolling windows ending now.
+
+    OverviewMetrics:
+      type: object
+      required: [period, spendUsd, callCount, dauApprox, generatedAt]
+      properties:
+        period:
+          $ref: "#/components/schemas/OverviewPeriod"
+        spendUsd:
+          type: number
+          format: double
+          description: Total spend across the selected period.
+        callCount:
           type: integer
           format: int64
+          description: Total LLM calls across the selected period.
         dauApprox:
           type: integer
           format: int64
           description: |
-            Count of distinct users updatedAt'd in the last 24h.
-            Heuristic until P2-02 (events) introduces real activity
-            tracking.
+            Distinct user_ids active in the last 24h (heuristic).
+            Independent of the period selector — DAU is always today's.
+        spendUsdPrior:
+          type: number
+          format: double
+          description: |
+            Spend over the prior period of equal length, used to render
+            week-over-week deltas. Today → yesterday; 7d → previous 7d;
+            30d → previous 30d.
+        callCountPrior:
+          type: integer
+          format: int64
+        dauPrior:
+          type: integer
+          format: int64
+        spendSeries:
+          type: array
+          items:
+            $ref: "#/components/schemas/DailyMetric"
+          description: 30-day sparkline series for spend (oldest-first).
+        callCountSeries:
+          type: array
+          items:
+            $ref: "#/components/schemas/DailyMetric"
+        dauSeries:
+          type: array
+          items:
+            $ref: "#/components/schemas/DailyMetric"
         lastCalls:
           type: array
           items:
@@ -382,6 +439,16 @@ paths:
       operationId: adminOverview
       summary: Top-line dashboard metrics + recent-activity feed.
       tags: [overview]
+      parameters:
+        - name: period
+          in: query
+          description: |
+            Period selector for the headline metrics. Defaults to
+            `today` when unset. Sparkline series are always 30 days
+            regardless of period — they're the trend, not the
+            headline.
+          schema:
+            $ref: "#/components/schemas/OverviewPeriod"
       responses:
         "200":
           description: Overview metrics.
