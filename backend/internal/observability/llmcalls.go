@@ -53,6 +53,11 @@ type LLMCall struct {
 	UserMessage     string   `bson:"userMessage,omitempty"`
 	ResponseRaw     string   `bson:"responseRaw,omitempty"`
 	WardrobeItemIDs []string `bson:"wardrobeItemIds,omitempty"`
+	// DetectionRunID stamps detection_* rows with the parent run id
+	// so the admin trace-detail panel can fetch the input photo +
+	// generated images via /admin/v1/detection-runs/{id}.
+	// Empty for outfit-generation rows.
+	DetectionRunID string `bson:"detectionRunId,omitempty"`
 }
 
 // LLMCallRepository persists LLMCall rows. Reads come later (admin

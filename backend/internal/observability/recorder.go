@@ -44,6 +44,10 @@ type CallContext struct {
 	SystemPrompt    string // P1-11 archival: rendered system prompt
 	UserMessage     string // P1-11 archival: rendered user message
 	WardrobeItemIDs []string
+	// DetectionRunID links detection_* rows to their parent run.
+	// Empty for outfit-generation; populated by the wardrobe
+	// adapter when the detection handler creates a run id upfront.
+	DetectionRunID string
 }
 
 // CallObservation is the result of calling the LLM, packaged so we
@@ -116,6 +120,7 @@ func (r *LLMRecorder) Record(ctx context.Context, cc CallContext, obs CallObserv
 		UserMessage:     truncateField(cc.UserMessage),
 		ResponseRaw:     truncateField(obs.RawResponse),
 		WardrobeItemIDs: cc.WardrobeItemIDs,
+		DetectionRunID:  cc.DetectionRunID,
 	}
 	// PromptHash dedupe key. Prefer PromptText (caller's pre-built
 	// concat) over re-stitching, but fall back to system+user when

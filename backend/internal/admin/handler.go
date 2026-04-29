@@ -17,12 +17,21 @@ import (
 // current admin (/admin/v1/me). Domain endpoints under /admin/v1/users,
 // /admin/v1/traces, etc. live in their own handlers within this package.
 type Handler struct {
-	logger       *log.Logger
-	repo         Repository
-	usersRepo    UsersRepository
-	overviewRepo OverviewRepository
-	tracesRepo   TracesRepository
-	secret       string
+	logger        *log.Logger
+	repo          Repository
+	usersRepo     UsersRepository
+	overviewRepo  OverviewRepository
+	tracesRepo    TracesRepository
+	detectionRuns DetectionRunRepository // optional — when nil, /detection-runs returns 503
+	secret        string
+}
+
+// WithDetectionRuns wires the detection-run archive reader. Optional —
+// keeps NewHandler's signature stable for tests; production app.go
+// opts in once the wardrobe-side repo is up.
+func (h *Handler) WithDetectionRuns(r DetectionRunRepository) *Handler {
+	h.detectionRuns = r
+	return h
 }
 
 // NewHandler constructs a Handler.

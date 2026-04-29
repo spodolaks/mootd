@@ -122,8 +122,8 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 	adminOverviewRepo := admin.NewOverviewMongoRepository(a.MongoClient, a.MongoDB)
 	adminTracesRepo := admin.NewTracesMongoRepository(a.MongoClient, a.MongoDB)
 	requireAdmin := middleware.RequireAdminAuth(a.AdminJWTSecret)
-	admin.NewHandler(a.Logger, adminRepo, adminUsersRepo, adminOverviewRepo, adminTracesRepo, a.AdminJWTSecret).
-		RegisterRoutes(mux, authLimit, requireAdmin)
+	adminHandler := admin.NewHandler(a.Logger, adminRepo, adminUsersRepo, adminOverviewRepo, adminTracesRepo, a.AdminJWTSecret)
+	adminHandler.RegisterRoutes(mux, authLimit, requireAdmin)
 
 	userRepo := user.NewMongoRepository(a.MongoClient, a.MongoDB)
 	health.NewHandler(a.Logger, a.MongoClient, a.MongoDB).RegisterRoutes(mux)
@@ -139,7 +139,21 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 	if redisClient != nil {
 		detectJobs = wardrobe.NewDetectJobStore(redisClient)
 	}
-	wardrobe.NewHandler(a.Logger, detector, searcher, wardrobeRepo, bgRemover, workerCtx, detectJobs).RegisterRoutes(mux, authMiddleware)
+	// Detection-run archive (P1-04 / mootd-admin#16). Best-effort:
+	// init failure logs but doesn't gate startup. The wardrobe
+	// handler keeps working (detection, item save), it just stops
+	// archiving the input photo + per-image cost.
+	detectionRunRepo, err := wardrobe.NewDetectionRunMongoRepository(context.Background(), a.MongoClient, a.MongoDB)
+	if err != nil {
+		a.Logger.Printf("wardrobe: detection_runs repo init failed: %v (continuing without archive)", err)
+	}
+	wardrobeHandler := wardrobe.NewHandler(a.Logger, detector, searcher, wardrobeRepo, bgRemover, workerCtx, detectJobs)
+	if detectionRunRepo != nil {
+		wardrobeHandler.WithDetectionRuns(detectionRunRepo)
+		// Same archive readable from the admin side via the wardrobe→admin adapter.
+		adminHandler.WithDetectionRuns(newDetectionRunAdapter(detectionRunRepo))
+	}
+	wardrobeHandler.RegisterRoutes(mux, authMiddleware)
 
 	brands.NewHandler(a.Logger, brands.NewMongoRepository(a.MongoClient, a.MongoDB)).RegisterRoutes(mux, authMiddleware)
 

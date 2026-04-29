@@ -23,21 +23,32 @@ const maxImageSize = 10 << 20 // 10 MB
 
 // Handler handles wardrobe HTTP endpoints.
 type Handler struct {
-	logger       *log.Logger
-	detector     *Detector
-	searcher     *Searcher
-	repo         Repository
-	bgRemover    *BackgroundRemover
-	workerCtx    context.Context // server-scoped context for background goroutines
-	detectJobs   *DetectJobStore // optional — when nil, the async path is unavailable
+	logger        *log.Logger
+	detector      *Detector
+	searcher      *Searcher
+	repo          Repository
+	bgRemover     *BackgroundRemover
+	workerCtx     context.Context // server-scoped context for background goroutines
+	detectJobs    *DetectJobStore // optional — when nil, the async path is unavailable
+	detectionRuns DetectionRunRepository // optional — when nil, runs aren't archived (P1-04)
 }
 
 // NewHandler creates a Handler with the given dependencies.
 // workerCtx should be tied to server lifetime so background goroutines stop on shutdown.
 // detectJobs may be nil (e.g. when Redis is unavailable); the async Detect path
 // returns 503 in that case and clients fall back to the sync endpoint.
+// detectionRuns may be nil; the wardrobe still works, just without the
+// per-call archive that powers the admin trace-detail panel.
 func NewHandler(logger *log.Logger, detector *Detector, searcher *Searcher, repo Repository, bgRemover *BackgroundRemover, workerCtx context.Context, detectJobs *DetectJobStore) *Handler {
 	return &Handler{logger: logger, detector: detector, searcher: searcher, repo: repo, bgRemover: bgRemover, workerCtx: workerCtx, detectJobs: detectJobs}
+}
+
+// WithDetectionRuns wires the detection-runs archive repository.
+// Optional — keeps NewHandler's signature stable while letting
+// app.go opt in to P1-04 archival without breaking existing tests.
+func (h *Handler) WithDetectionRuns(r DetectionRunRepository) *Handler {
+	h.detectionRuns = r
+	return h
 }
 
 // Detect handles POST /v1/wardrobe/detect.
@@ -74,14 +85,20 @@ func (h *Handler) Detect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	detected, err := h.detector.Detect(r.Context(), userID, imageData, header.Filename)
+	runID := id.Generate()
+	detected, runData, err := h.detector.Detect(r.Context(), userID, runID, imageData, header.Filename)
 	if err != nil {
 		h.logger.Printf("wardrobe: detect for user %s: %v", userID, err)
 		response.WriteJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "clothing detection failed"})
 		return
 	}
 
+	// Archive the run (P1-04). Best-effort — a Mongo blip here
+	// shouldn't fail the user-facing detection.
+	h.persistDetectionRun(r.Context(), runID, userID, runData, detected, imageData, header.Header.Get("Content-Type"))
+
 	items := h.processDetected(r.Context(), userID, detected)
+	h.linkRunToItems(r.Context(), runID, detected, items)
 	response.WriteJSON(w, http.StatusOK, DetectResponse{Items: items})
 }
 
@@ -227,6 +244,84 @@ func (h *Handler) processDetected(ctx context.Context, userID string, detected [
 	return responseItems
 }
 
+// persistDetectionRun writes the detection_run row + the original
+// input image to GridFS. Best-effort: failures here log + return,
+// they never bubble to the user-facing 5xx — the detection itself
+// succeeded, we just lose the archive for this one call.
+//
+// runData may be nil on partial failures (when both /analyze and
+// /generate failed and Detect returned an error before constructing
+// it); the caller already handled that path. When runData is
+// present we have at least one of analyze / generate stats.
+func (h *Handler) persistDetectionRun(ctx context.Context, runID, userID string, runData *DetectionRunData, detected []jobItem, imageData []byte, contentType string) {
+	if h.detectionRuns == nil || runData == nil {
+		return
+	}
+	if contentType == "" {
+		contentType = "image/jpeg"
+	}
+
+	// Build the per-item slice from the jobItems Detect() returned.
+	// Each item carries PromptUsed + GenerateCostUSD when /generate
+	// matched it to a generated image; analyze-only items leave
+	// those zero-valued.
+	items := make([]DetectionRunItem, 0, len(detected))
+	for _, d := range detected {
+		items = append(items, DetectionRunItem{
+			ItemType:   d.Type,
+			Category:   d.Family,
+			PromptUsed: d.PromptUsed,
+			CostUSD:    d.GenerateCostUSD,
+		})
+	}
+
+	run := DetectionRun{
+		ID:            runID,
+		UserID:        userID,
+		CreatedAt:     runData.StartedAt,
+		DurationMs:    runData.EndedAt.Sub(runData.StartedAt).Milliseconds(),
+		OverallStyle:  runData.OverallStyle,
+		AnalyzeStats:  runData.AnalyzeStats,
+		GenerateStats: runData.GenerateStats,
+		TotalCostUSD:  runData.TotalCostUSD,
+		Items:         items,
+	}
+	if err := h.detectionRuns.SaveRun(ctx, run); err != nil {
+		h.logger.Printf("wardrobe: detection_run save for %s: %v (continuing — detection succeeded)", runID, err)
+		return
+	}
+	if err := h.detectionRuns.SaveInputImage(ctx, runID, imageData, contentType); err != nil {
+		h.logger.Printf("wardrobe: detection_run input image save for %s: %v", runID, err)
+	}
+}
+
+// linkRunToItems patches the run row with the wardrobe_items _id
+// each generated image was persisted as. Maps by itemType+category
+// to handle the case where a single photo produces, say, two pairs
+// of shoes.
+func (h *Handler) linkRunToItems(ctx context.Context, runID string, detected []jobItem, persisted []DetectedItem) {
+	if h.detectionRuns == nil || len(persisted) == 0 {
+		return
+	}
+	idsByItemType := make(map[string]string, len(persisted))
+	// detected and persisted are aligned in order (processDetected
+	// preserves the input order), but persisted may be shorter when
+	// items got dropped. Walk persisted; for each entry, look up the
+	// matching detected entry by Type+Family.
+	for _, p := range persisted {
+		for _, d := range detected {
+			if d.Type == p.Label || d.Type+"|"+d.Family == p.Label+"|"+p.Category {
+				key := d.Type + "|" + d.Family
+				idsByItemType[key] = p.ID
+				break
+			}
+		}
+	}
+	if err := h.detectionRuns.SetWardrobeItemIDs(ctx, runID, idsByItemType); err != nil {
+		h.logger.Printf("wardrobe: link run %s to wardrobe items: %v", runID, err)
+	}
+}
+
 // SubmitDetect handles POST /v1/wardrobe/detect-jobs.
 //
 // Same input as Detect (multipart image), but returns immediately with
@@ -324,7 +419,8 @@ func (h *Handler) runDetectionJob(jobID, userID string, imageData []byte, filena
 		h.logger.Printf("wardrobe: mark job %s processing: %v", jobID, err)
 	}
 
-	detected, err := h.detector.Detect(ctx, userID, imageData, filename)
+	runID := id.Generate()
+	detected, runData, err := h.detector.Detect(ctx, userID, runID, imageData, filename)
 	if err != nil {
 		h.logger.Printf("wardrobe: detect for job %s: %v", jobID, err)
 		failed := &DetectJob{ID: jobID, UserID: userID, Status: DetectJobFailed, Error: "clothing detection failed", CreatedAt: time.Now().UTC()}
@@ -334,7 +430,14 @@ func (h *Handler) runDetectionJob(jobID, userID string, imageData []byte, filena
 		return
 	}
 
+	// Archive the run (P1-04). Async path doesn't have the original
+	// upload's Content-Type easily available — assume image/jpeg
+	// since that's what the RN app sends; GridFS stores the bytes
+	// as-is regardless and the admin can re-derive from filename.
+	h.persistDetectionRun(ctx, runID, userID, runData, detected, imageData, "image/jpeg")
+
 	items := h.processDetected(ctx, userID, detected)
+	h.linkRunToItems(ctx, runID, detected, items)
 
 	completed := &DetectJob{
 		ID:        jobID,

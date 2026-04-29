@@ -208,6 +208,58 @@ type DailyMetric struct {
 	Value float64 `json:"value"`
 }
 
+// DetectionRun Archive of one POST /v1/wardrobe/detect call (P1-04).
+// Stores the original photo the user uploaded, every image the
+// detection service generated, the per-image prompts, and the
+// full per-call cost breakdown. Powers the trace-detail panel
+// for `feature: detection_*` rows on /admin/v1/traces.
+type DetectionRun struct {
+	// AnalyzeStats Token + timing block from /api/v1/analyze.
+	AnalyzeStats *map[string]interface{} `json:"analyzeStats,omitempty"`
+	CreatedAt    time.Time               `json:"createdAt"`
+	DurationMs   int64                   `json:"durationMs"`
+
+	// GenerateStats Token + timing block from /api/v1/generate.
+	GenerateStats         *map[string]interface{} `json:"generateStats,omitempty"`
+	Id                    string                  `json:"id"`
+	InputImageBytes       *int64                  `json:"inputImageBytes,omitempty"`
+	InputImageContentType *string                 `json:"inputImageContentType,omitempty"`
+
+	// InputImageUrl Stable URL the admin can fetch the original photo from
+	// (proxied through /admin/v1/detection-runs/{id}/input-image).
+	InputImageUrl *string             `json:"inputImageUrl,omitempty"`
+	Items         *[]DetectionRunItem `json:"items,omitempty"`
+	OverallStyle  *string             `json:"overallStyle,omitempty"`
+	TotalCostUsd  *float64            `json:"totalCostUsd,omitempty"`
+
+	// UserEmail Resolved server-side; redaction follows the same convention as elsewhere.
+	UserEmail *string `json:"userEmail,omitempty"`
+	UserId    string  `json:"userId"`
+}
+
+// DetectionRunItem One generated image inside a detection run — the per-item
+// slice of /api/v1/generate's `generated_images` array,
+// archived for the admin prompt viewer.
+type DetectionRunItem struct {
+	Category string `json:"category"`
+
+	// CostUsd Per-image cost reported by the detection service.
+	CostUsd  float64 `json:"costUsd"`
+	ItemType string  `json:"itemType"`
+
+	// PromptUsed The full prompt the detection service sent to gpt-image-1.
+	PromptUsed *string `json:"promptUsed,omitempty"`
+
+	// RevisedPrompt The model's reinterpreted prompt (when present).
+	RevisedPrompt *string `json:"revisedPrompt,omitempty"`
+
+	// WardrobeItemId ID of the wardrobe_items row this image was persisted as,
+	// when the post-detection pipeline saved it. Empty when the
+	// user discarded the item before save. Use it to fetch the
+	// generated image at /v1/wardrobe/items/{id}/image.
+	WardrobeItemId *string `json:"wardrobeItemId,omitempty"`
+}
+
 // ErrorResponse defines model for ErrorResponse.
 type ErrorResponse struct {
 	Error string `json:"error"`
@@ -225,7 +277,13 @@ type LLMCallDetail struct {
 	CacheWriteTokens *int64    `json:"cacheWriteTokens,omitempty"`
 	CostUsd          float64   `json:"costUsd"`
 	CreatedAt        time.Time `json:"createdAt"`
-	DurationMs       int64     `json:"durationMs"`
+
+	// DetectionRunId Foreign key to /admin/v1/detection-runs/{id} when this
+	// llm_calls row was emitted by a detection submission
+	// (feature starts with `detection_`). Empty for outfit
+	// generation rows.
+	DetectionRunId *string `json:"detectionRunId,omitempty"`
+	DurationMs     int64   `json:"durationMs"`
 
 	// ErrorMsg Truncated error message; populated only when status != success.
 	ErrorMsg     *string `json:"errorMsg,omitempty"`

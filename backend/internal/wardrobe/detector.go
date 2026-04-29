@@ -62,8 +62,9 @@ type LLMRecorder interface {
 // DetectorRecorderContext mirrors observability.CallContext for the
 // fields the detection path supplies.
 type DetectorRecorderContext struct {
-	UserID  string
-	Feature string // "detection_analyze" | "detection_generate"
+	UserID         string
+	Feature        string // "detection_analyze" | "detection_generate"
+	DetectionRunID string // links the row to /admin/v1/detection-runs/{id}
 }
 
 // DetectorRecorderObservation mirrors observability.CallObservation.
@@ -103,10 +104,11 @@ type detectionStats struct {
 }
 
 type modelStats struct {
-	InputTokens  int    `json:"input_tokens"`
-	OutputTokens int    `json:"output_tokens"`
-	TotalTokens  int    `json:"total_tokens"`
-	Model        string `json:"model"`
+	InputTokens  int     `json:"input_tokens"`
+	OutputTokens int     `json:"output_tokens"`
+	TotalTokens  int     `json:"total_tokens"`
+	Model        string  `json:"model"`
+	CostUSD      float64 `json:"cost_usd,omitempty"` // 2026-04 update on openai_images
 }
 
 type localModelStats struct {
@@ -116,12 +118,13 @@ type localModelStats struct {
 }
 
 type generatedImage struct {
-	ItemType      string  `json:"item_type"`
-	Category      string  `json:"category"`
-	PromptUsed    *string `json:"prompt_used"`
-	RevisedPrompt *string `json:"revised_prompt"`
-	ImageB64      *string `json:"image_b64"`
-	Error         *string `json:"error"`
+	ItemType      string   `json:"item_type"`
+	Category      string   `json:"category"`
+	PromptUsed    *string  `json:"prompt_used"`
+	RevisedPrompt *string  `json:"revised_prompt"`
+	ImageB64      *string  `json:"image_b64"`
+	Error         *string  `json:"error"`
+	CostUSD       *float64 `json:"cost_usd"` // per-image cost from gpt-image-1 (2026-04 update)
 }
 
 // --- Local Cloth Detection API response types (POST /api/v1/analyze) ---
@@ -179,6 +182,26 @@ type jobItem struct {
 	Traits     map[string]string `json:"traits"`
 	Category   string            `json:"category"`
 	Label      string            `json:"label"`
+	// PromptUsed + GenerateCostUSD bubble up the per-item generation
+	// metadata so the wardrobe handler can stamp them onto the
+	// detection_run archive (P1-04 / mootd-admin#16). Empty when the
+	// item came from /analyze only (no generated image).
+	PromptUsed       string  `json:"-"`
+	GenerateCostUSD  float64 `json:"-"`
+}
+
+// DetectionRunData is the per-call archive produced by Detect.
+// Contains everything the wardrobe handler needs to write a
+// detection_runs row: full stats from both upstream calls, per-item
+// generation metadata, and the timing window. The handler owns
+// persistence; the detector just produces the data.
+type DetectionRunData struct {
+	AnalyzeStats     *detectionStats
+	GenerateStats    *detectionStats
+	OverallStyle     string
+	StartedAt        time.Time
+	EndedAt          time.Time
+	TotalCostUSD     float64
 }
 
 // Detect submits an image to the local detection service.
@@ -188,7 +211,13 @@ type jobItem struct {
 // userID is required for the observability emission (so detection
 // rows in /admin/v1/traces attribute to the right user). Pass "" to
 // skip recorder emission entirely.
-func (d *Detector) Detect(ctx context.Context, userID string, imageData []byte, filename string) ([]jobItem, error) {
+//
+// runID stamps each emitted llm_calls row with the parent
+// detection_run id so the admin UI can navigate from a /traces row
+// to /admin/v1/detection-runs/{id}. Caller mints this upfront so
+// it can persist the run row alongside the input image atomically.
+func (d *Detector) Detect(ctx context.Context, userID, runID string, imageData []byte, filename string) ([]jobItem, *DetectionRunData, error) {
+	overallStart := time.Now().UTC()
 	// Run analyze and generate in parallel.
 	type analyzeResult struct {
 		resp     *analyzeResponse
@@ -243,13 +272,13 @@ func (d *Detector) Detect(ctx context.Context, userID string, imageData []byte, 
 	// service reported under `stats`. Best-effort — the recorder
 	// itself swallows write failures, so a Mongo blip never fails
 	// the user-facing detection.
-	d.recordStats(ctx, userID, "detection_analyze",
+	d.recordStats(ctx, userID, runID, "detection_analyze",
 		statsOf(aResult.resp), aResult.err, aResult.startedAt, aResult.endedAt)
-	d.recordStats(ctx, userID, "detection_generate",
+	d.recordStats(ctx, userID, runID, "detection_generate",
 		statsOf(gResult.resp), gResult.err, gResult.startedAt, gResult.endedAt)
 
 	if aResult.err != nil && gResult.err != nil {
-		return nil, fmt.Errorf("analyze: %w; generate: %w", aResult.err, gResult.err)
+		return nil, nil, fmt.Errorf("analyze: %w; generate: %w", aResult.err, gResult.err)
 	}
 
 	// Index generated images by category for fuzzy matching.
@@ -300,6 +329,7 @@ func (d *Detector) Detect(ctx context.Context, userID string, imageData []byte, 
 						if err == nil {
 							item.ImageData = decoded
 						}
+						copyGenerationMeta(&item, e.g)
 						e.taken = true
 						matched = true
 						break
@@ -313,6 +343,7 @@ func (d *Detector) Detect(ctx context.Context, userID string, imageData []byte, 
 							if err == nil {
 								item.ImageData = decoded
 							}
+							copyGenerationMeta(&item, e.g)
 							e.taken = true
 							break
 						}
@@ -339,11 +370,56 @@ func (d *Detector) Detect(ctx context.Context, userID string, imageData []byte, 
 					item.ImageData = decoded
 				}
 			}
+			copyGenerationMeta(&item, g)
 			items = append(items, item)
 		}
 	}
 
-	return items, nil
+	// Build the per-call run archive. Total cost rolls up Claude
+	// (analyze + generate) + per-image generation; the API exposes
+	// `cost_usd` on stats.openai_images, which already sums the
+	// per-item costs.
+	var totalCost float64
+	if aResult.resp != nil && aResult.resp.Stats != nil && aResult.resp.Stats.Claude != nil {
+		// Claude cost computed downstream via model_prices — we just
+		// sum what the service self-reported when present (today only
+		// gpt-image-1 reports cost_usd; Claude's cost is computed at
+		// the recorder).
+	}
+	if gResult.resp != nil && gResult.resp.Stats != nil {
+		if gResult.resp.Stats.OpenAIImages != nil {
+			totalCost += gResult.resp.Stats.OpenAIImages.CostUSD
+		}
+	}
+	overallStyle := ""
+	if aResult.resp != nil {
+		overallStyle = aResult.resp.OverallStyle
+	} else if gResult.resp != nil {
+		overallStyle = gResult.resp.OverallStyle
+	}
+	run := &DetectionRunData{
+		AnalyzeStats:  statsOf(aResult.resp),
+		GenerateStats: statsOf(gResult.resp),
+		OverallStyle:  overallStyle,
+		StartedAt:     overallStart,
+		EndedAt:       time.Now().UTC(),
+		TotalCostUSD:  totalCost,
+	}
+
+	return items, run, nil
+}
+
+// copyGenerationMeta lifts per-image fields from the detection
+// service's `generated_images` entry onto the corresponding jobItem
+// so the wardrobe handler can persist them on the detection_run row
+// (P1-04). Cheap field copies; called once per matched item.
+func copyGenerationMeta(item *jobItem, g generatedImage) {
+	if g.PromptUsed != nil {
+		item.PromptUsed = *g.PromptUsed
+	}
+	if g.CostUSD != nil {
+		item.GenerateCostUSD = *g.CostUSD
+	}
 }
 
 // callAnalyze calls POST /api/v1/analyze and returns the parsed response.
@@ -455,11 +531,11 @@ func statsOf(resp interface{}) *detectionStats {
 // failed at this provider"; subsequent rows record success.
 //
 // userID == "" disables emission entirely (test setups).
-func (d *Detector) recordStats(ctx context.Context, userID, feature string, stats *detectionStats, err error, startedAt, endedAt time.Time) {
+func (d *Detector) recordStats(ctx context.Context, userID, runID, feature string, stats *detectionStats, err error, startedAt, endedAt time.Time) {
 	if d.recorder == nil || userID == "" || stats == nil {
 		return
 	}
-	cc := DetectorRecorderContext{UserID: userID, Feature: feature}
+	cc := DetectorRecorderContext{UserID: userID, Feature: feature, DetectionRunID: runID}
 	// Claude: trait analysis (always present when /analyze or
 	// /generate succeeded — both call the same Claude pipeline).
 	if stats.Claude != nil && stats.Claude.Model != "" {

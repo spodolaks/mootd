@@ -32,8 +32,9 @@ func NewWardrobeRecorderAdapter(r *LLMRecorder) *WardrobeRecorderAdapter {
 // boundary" note (mootd@ef7461e for the original archival ship).
 func (a *WardrobeRecorderAdapter) Record(ctx context.Context, cc wardrobe.DetectorRecorderContext, obs wardrobe.DetectorRecorderObservation) {
 	a.r.Record(ctx, CallContext{
-		UserID:  cc.UserID,
-		Feature: cc.Feature,
+		UserID:         cc.UserID,
+		Feature:        cc.Feature,
+		DetectionRunID: cc.DetectionRunID,
 	}, CallObservation{
 		Provider:     obs.Provider,
 		Model:        obs.Model,

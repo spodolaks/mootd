@@ -282,6 +282,85 @@ components:
           type: string
           format: date-time
 
+    DetectionRunItem:
+      description: |
+        One generated image inside a detection run — the per-item
+        slice of /api/v1/generate's `generated_images` array,
+        archived for the admin prompt viewer.
+      type: object
+      required: [itemType, category, costUsd]
+      properties:
+        itemType:
+          type: string
+        category:
+          type: string
+        promptUsed:
+          type: string
+          description: The full prompt the detection service sent to gpt-image-1.
+        revisedPrompt:
+          type: string
+          description: The model's reinterpreted prompt (when present).
+        costUsd:
+          type: number
+          format: double
+          description: Per-image cost reported by the detection service.
+        wardrobeItemId:
+          type: string
+          description: |
+            ID of the wardrobe_items row this image was persisted as,
+            when the post-detection pipeline saved it. Empty when the
+            user discarded the item before save. Use it to fetch the
+            generated image at /v1/wardrobe/items/{id}/image.
+
+    DetectionRun:
+      description: |
+        Archive of one POST /v1/wardrobe/detect call (P1-04).
+        Stores the original photo the user uploaded, every image the
+        detection service generated, the per-image prompts, and the
+        full per-call cost breakdown. Powers the trace-detail panel
+        for `feature: detection_*` rows on /admin/v1/traces.
+      type: object
+      required: [id, userId, createdAt, durationMs]
+      properties:
+        id:
+          type: string
+        userId:
+          type: string
+        userEmail:
+          type: string
+          description: Resolved server-side; redaction follows the same convention as elsewhere.
+        createdAt:
+          type: string
+          format: date-time
+        durationMs:
+          type: integer
+          format: int64
+        inputImageUrl:
+          type: string
+          description: |
+            Stable URL the admin can fetch the original photo from
+            (proxied through /admin/v1/detection-runs/{id}/input-image).
+        inputImageContentType:
+          type: string
+        inputImageBytes:
+          type: integer
+          format: int64
+        overallStyle:
+          type: string
+        analyzeStats:
+          type: object
+          description: Token + timing block from /api/v1/analyze.
+        generateStats:
+          type: object
+          description: Token + timing block from /api/v1/generate.
+        totalCostUsd:
+          type: number
+          format: double
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/DetectionRunItem"
+
     UserWardrobeItem:
       description: |
         One clothing item from a user's wardrobe, surfaced to the
@@ -403,6 +482,13 @@ components:
           items:
             type: string
           description: Items present in the user's wardrobe at call time.
+        detectionRunId:
+          type: string
+          description: |
+            Foreign key to /admin/v1/detection-runs/{id} when this
+            llm_calls row was emitted by a detection submission
+            (feature starts with `detection_`). Empty for outfit
+            generation rows.
         createdAt:
           type: string
           format: date-time
@@ -864,6 +950,63 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           description: User not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /admin/v1/detection-runs/{id}:
+    get:
+      operationId: adminGetDetectionRun
+      summary: |
+        Archive of one detection submission (input photo + generated
+        images + per-image cost). Looked up by the
+        `detectionRunId` field on llm_calls rows tagged
+        `feature: detection_*`.
+      tags: [traces]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Detection run.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DetectionRun"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Run not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /admin/v1/detection-runs/{id}/input-image:
+    get:
+      operationId: adminGetDetectionRunInputImage
+      summary: |
+        Stream the original photo the user uploaded for this
+        detection run. Bytes come from the GridFS bucket where the
+        wardrobe handler stored them at submit time.
+      tags: [traces]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Image bytes (JPEG or PNG).
+          content:
+            image/*: {}
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Image not found.
           content:
             application/json:
               schema:

@@ -43,4 +43,8 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, authLimit Middleware, requi
 	mux.Handle("/admin/v1/traces/", requireAdmin(http.HandlerFunc(h.GetTrace)))
 	mux.Handle("/admin/v1/audit", requireAdmin(http.HandlerFunc(h.ListAudit)))
 	mux.Handle("/admin/v1/search", requireAdmin(http.HandlerFunc(h.Search)))
+	// Detection-run archive (P1-04). Same prefix-route trick as
+	// /users/ — handler dispatches on the trailing path segment
+	// (input-image vs the bare detail).
+	mux.Handle("/admin/v1/detection-runs/", requireAdmin(http.HandlerFunc(h.GetDetectionRun)))
 }

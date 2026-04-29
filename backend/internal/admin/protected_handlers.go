@@ -613,6 +613,91 @@ func timeStr(t *time.Time) string {
 	return t.UTC().Format(time.RFC3339)
 }
 
+// GetDetectionRun handles GET /admin/v1/detection-runs/{id} and
+// GET /admin/v1/detection-runs/{id}/input-image. Same handler so
+// the prefix mux can dispatch on a single registration.
+func (h *Handler) GetDetectionRun(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if h.detectionRuns == nil {
+		response.WriteJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "detection_runs archive not wired"})
+		return
+	}
+
+	rest := strings.TrimPrefix(r.URL.Path, "/admin/v1/detection-runs/")
+	if rest == "" {
+		response.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "missing detection-run id"})
+		return
+	}
+	id, sub := rest, ""
+	if idx := strings.Index(rest, "/"); idx > 0 {
+		id, sub = rest[:idx], rest[idx+1:]
+	}
+
+	switch sub {
+	case "":
+		h.getDetectionRunDetail(w, r, id)
+	case "input-image":
+		h.getDetectionRunInputImage(w, r, id)
+	default:
+		response.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "unknown sub-resource"})
+	}
+}
+
+func (h *Handler) getDetectionRunDetail(w http.ResponseWriter, r *http.Request, id string) {
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	run, err := h.detectionRuns.FindRun(ctx, id)
+	if err != nil {
+		h.logger.Printf("admin /detection-runs/%s: repo failed: %v", id, err)
+		response.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	if run == nil {
+		response.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "detection run not found"})
+		return
+	}
+
+	// Best-effort email join + input-image URL stitching.
+	if h.overviewRepo != nil && run.UserID != "" {
+		if emails, err := h.overviewRepo.EmailsForUserIDs(ctx, []string{run.UserID}); err == nil {
+			if e, ok := emails[run.UserID]; ok {
+				run.UserEmail = e
+			}
+		}
+	}
+	if run.InputImageContentType != "" {
+		// Path-only — caller composes against the admin API base.
+		run.InputImageURL = "/admin/v1/detection-runs/" + id + "/input-image"
+	}
+
+	response.WriteJSON(w, http.StatusOK, run)
+}
+
+func (h *Handler) getDetectionRunInputImage(w http.ResponseWriter, r *http.Request, id string) {
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	data, contentType, err := h.detectionRuns.GetInputImage(ctx, id)
+	if err != nil {
+		// Most likely "not found" from the GridFS layer — translate
+		// to 404 without leaking the internal error type.
+		h.logger.Printf("admin /detection-runs/%s/input-image: %v", id, err)
+		response.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "input image not found"})
+		return
+	}
+	if contentType == "" {
+		contentType = "image/jpeg"
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Cache-Control", "private, max-age=300")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(data)
+}
+
 // Search handles GET /admin/v1/search.
 //
 // Cross-collection lookup behind the Cmd+K palette + (future) global
