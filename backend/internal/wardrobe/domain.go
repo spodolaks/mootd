@@ -4,15 +4,25 @@ package wardrobe
 import "time"
 
 // ClothingItem is a persisted garment in a user's wardrobe.
+//
+// PngAttempts / PngLastAttemptAt / PngFailureReason are the
+// retry-budget fields the bg-removal worker uses (mootd#33). The
+// worker increments PngAttempts on failure and skips items past
+// the per-item cap or the global age-out so a poisoned image stops
+// retrying forever. JSON tags are omitted on those fields: they're
+// server-only observability, not part of the wire shape clients see.
 type ClothingItem struct {
-	ID          string            `bson:"_id"          json:"id"`
-	UserID      string            `bson:"userId"       json:"userId"`
-	Category    string            `bson:"category"     json:"category"`
-	Label       string            `bson:"label"        json:"label"`
-	ImageURL    string            `bson:"imageUrl"     json:"imageUrl"`
-	PngImageURL string            `bson:"pngImageUrl"  json:"pngImageUrl,omitempty"`
-	Traits      map[string]string `bson:"traits"       json:"traits"`
-	CreatedAt   time.Time         `bson:"createdAt"    json:"createdAt"`
+	ID               string            `bson:"_id"          json:"id"`
+	UserID           string            `bson:"userId"       json:"userId"`
+	Category         string            `bson:"category"     json:"category"`
+	Label            string            `bson:"label"        json:"label"`
+	ImageURL         string            `bson:"imageUrl"     json:"imageUrl"`
+	PngImageURL      string            `bson:"pngImageUrl"  json:"pngImageUrl,omitempty"`
+	PngAttempts      int               `bson:"pngAttempts,omitempty"`
+	PngLastAttemptAt time.Time         `bson:"pngLastAttemptAt,omitempty"`
+	PngFailureReason string            `bson:"pngFailureReason,omitempty"`
+	Traits           map[string]string `bson:"traits"       json:"traits"`
+	CreatedAt        time.Time         `bson:"createdAt"    json:"createdAt"`
 }
 
 // DetectedItem is the client-facing representation of one detected garment

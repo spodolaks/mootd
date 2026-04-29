@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -27,10 +28,16 @@ type Repository interface {
 	DeleteAllByUser(ctx context.Context, userID string) (int, error)
 	SaveImage(ctx context.Context, itemID string, data []byte, contentType string) error
 	GetImage(ctx context.Context, itemID string) ([]byte, string, error)
-	// FindMissingPNG returns items that have an imageUrl but no pngImageUrl yet.
-	FindMissingPNG(ctx context.Context) ([]ClothingItem, error)
+	// FindMissingPNG returns items eligible for bg-removal retry —
+	// has imageUrl, lacks pngImageUrl, hasn't exceeded maxAttempts,
+	// and was created within ageCap. Filters at query time so the
+	// worker doesn't iterate items it would just skip.
+	FindMissingPNG(ctx context.Context, maxAttempts int, ageCap time.Duration) ([]ClothingItem, error)
 	// UpdatePngURL sets the pngImageUrl field on an item.
 	UpdatePngURL(ctx context.Context, id, pngURL string) error
+	// RecordPngFailure increments pngAttempts + stamps the time and
+	// last-failure reason so the worker can age out poisoned items.
+	RecordPngFailure(ctx context.Context, id, reason string) error
 }
 
 // MongoRepository implements Repository using MongoDB.
@@ -178,11 +185,25 @@ func (r *MongoRepository) deleteGridFSByName(ctx context.Context, bucket *mongo.
 	return bucket.Delete(ctx, fileDoc.ID)
 }
 
-// FindMissingPNG returns items that have an imageUrl but an empty pngImageUrl.
-func (r *MongoRepository) FindMissingPNG(ctx context.Context) ([]ClothingItem, error) {
+// FindMissingPNG returns items that have an imageUrl but an empty
+// pngImageUrl AND are still eligible for retry (under the attempt
+// cap and within the age window). Without these guards, a poisoned
+// image with no bg-removable shape would retry every 30s forever.
+func (r *MongoRepository) FindMissingPNG(ctx context.Context, maxAttempts int, ageCap time.Duration) ([]ClothingItem, error) {
 	filter := bson.M{
 		"imageUrl":    bson.M{"$ne": ""},
 		"pngImageUrl": "",
+		// Items with no pngAttempts field (legacy / fresh) match the
+		// $exists:false branch; items that have failed before need to
+		// be under the cap.
+		"$or": []bson.M{
+			{"pngAttempts": bson.M{"$exists": false}},
+			{"pngAttempts": bson.M{"$lt": maxAttempts}},
+		},
+		// Age-out: items older than ageCap stop retrying. Bounds the
+		// retry window so a stuck item doesn't keep churning long
+		// after the user has moved on.
+		"createdAt": bson.M{"$gt": time.Now().UTC().Add(-ageCap)},
 	}
 	cursor, err := r.collection().Find(ctx, filter)
 	if err != nil {
@@ -199,6 +220,28 @@ func (r *MongoRepository) FindMissingPNG(ctx context.Context) ([]ClothingItem, e
 // UpdatePngURL sets the pngImageUrl field for the given item ID.
 func (r *MongoRepository) UpdatePngURL(ctx context.Context, id, pngURL string) error {
 	_, err := r.collection().UpdateOne(ctx, bson.M{"_id": id}, bson.M{"$set": bson.M{"pngImageUrl": pngURL}})
+	return err
+}
+
+// RecordPngFailure increments the per-item attempt counter and
+// stamps the latest failure time + reason. Reason is truncated so a
+// pathological upstream error message can't bloat the doc.
+func (r *MongoRepository) RecordPngFailure(ctx context.Context, id, reason string) error {
+	const maxReason = 256
+	if len(reason) > maxReason {
+		reason = reason[:maxReason] + "…"
+	}
+	_, err := r.collection().UpdateOne(
+		ctx,
+		bson.M{"_id": id},
+		bson.M{
+			"$inc": bson.M{"pngAttempts": 1},
+			"$set": bson.M{
+				"pngLastAttemptAt": time.Now().UTC(),
+				"pngFailureReason": reason,
+			},
+		},
+	)
 	return err
 }
 
