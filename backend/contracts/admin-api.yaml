@@ -401,6 +401,63 @@ components:
         nextCursor:
           type: string
 
+    AuditEntry:
+      type: object
+      description: |
+        One row in the admin_audit collection. Append-only; every
+        non-read admin action writes one. Adminemail is denormalised
+        at write time so renaming an admin doesn't rewrite history.
+      required: [id, adminId, action, at]
+      properties:
+        id:
+          type: string
+        adminId:
+          type: string
+        adminEmail:
+          type: string
+          description: |
+            Captured at write time. Empty when the admin record was
+            unavailable at audit time (rare).
+        action:
+          type: string
+          description: |
+            Verb-noun action key. Examples seen so far:
+            `traces.export`. P5 will add `users.pii_reveal`,
+            `roles.granted`, `prompt.published`, etc.
+        targetUserId:
+          type: string
+          description: User the action targeted (when applicable).
+        targetEntity:
+          type: string
+          description: |
+            Free-form pointer to the affected entity, e.g.
+            `prompt:v3` or `outfit_job:abc123`.
+        metadata:
+          type: object
+          additionalProperties: true
+          description: |
+            Action-specific payload. CSV exports include the filter
+            shape + row count. Schema is action-dependent and not
+            validated by the spec.
+        at:
+          type: string
+          format: date-time
+        ip:
+          type: string
+        userAgent:
+          type: string
+
+    AuditPage:
+      type: object
+      required: [entries]
+      properties:
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuditEntry"
+        nextCursor:
+          type: string
+
     TracesSummary:
       type: object
       description: |
@@ -775,11 +832,64 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+  /admin/v1/audit:
+    get:
+      operationId: adminListAudit
+      summary: |
+        Paginated audit-log feed. Foundation for the admin /audit
+        page (mootd-admin#95). Filterable by action, target user,
+        admin id, date range. Cursor pagination on (at desc, _id desc).
+      tags: [audit]
+      parameters:
+        - name: action
+          in: query
+          schema: { type: string }
+          description: Exact match. e.g. `traces.export`.
+        - name: adminId
+          in: query
+          schema: { type: string }
+        - name: targetUserId
+          in: query
+          schema: { type: string }
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+          description: Inclusive lower bound on `at` (RFC-3339).
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
+          description: Exclusive upper bound on `at` (RFC-3339).
+        - name: cursor
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 25
+      responses:
+        "200":
+          description: One page of audit entries.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditPage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
 tags:
   - name: auth
     description: Login + refresh.
   - name: overview
     description: Dashboard top-line metrics.
+  - name: audit
+    description: Audit log feed.
   - name: users
     description: User list + drill-through.
   - name: traces

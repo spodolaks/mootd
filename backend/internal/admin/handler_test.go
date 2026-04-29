@@ -117,6 +117,13 @@ func (m *memoryRepo) AppendAudit(ctx context.Context, e AuditEntry) error {
 	return nil
 }
 
+func (m *memoryRepo) ListAudit(ctx context.Context, q AuditQuery) ([]AuditEntry, string, error) {
+	// Empty stub — tests that exercise the audit-list handler should
+	// either inject a real Mongo backed repo or mock at the handler
+	// boundary.
+	return nil, "", nil
+}
+
 // ── helpers ─────────────────────────────────────────────────────────────
 
 func newTestHandler(t *testing.T) (*Handler, *memoryRepo) {

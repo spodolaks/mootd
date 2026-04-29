@@ -104,6 +104,43 @@ type Admin struct {
 // AdminRoles defines model for Admin.Roles.
 type AdminRoles string
 
+// AuditEntry One row in the admin_audit collection. Append-only; every
+// non-read admin action writes one. Adminemail is denormalised
+// at write time so renaming an admin doesn't rewrite history.
+type AuditEntry struct {
+	// Action Verb-noun action key. Examples seen so far:
+	// `traces.export`. P5 will add `users.pii_reveal`,
+	// `roles.granted`, `prompt.published`, etc.
+	Action string `json:"action"`
+
+	// AdminEmail Captured at write time. Empty when the admin record was
+	// unavailable at audit time (rare).
+	AdminEmail *string   `json:"adminEmail,omitempty"`
+	AdminId    string    `json:"adminId"`
+	At         time.Time `json:"at"`
+	Id         string    `json:"id"`
+	Ip         *string   `json:"ip,omitempty"`
+
+	// Metadata Action-specific payload. CSV exports include the filter
+	// shape + row count. Schema is action-dependent and not
+	// validated by the spec.
+	Metadata *map[string]interface{} `json:"metadata,omitempty"`
+
+	// TargetEntity Free-form pointer to the affected entity, e.g.
+	// `prompt:v3` or `outfit_job:abc123`.
+	TargetEntity *string `json:"targetEntity,omitempty"`
+
+	// TargetUserId User the action targeted (when applicable).
+	TargetUserId *string `json:"targetUserId,omitempty"`
+	UserAgent    *string `json:"userAgent,omitempty"`
+}
+
+// AuditPage defines model for AuditPage.
+type AuditPage struct {
+	Entries    []AuditEntry `json:"entries"`
+	NextCursor *string      `json:"nextCursor,omitempty"`
+}
+
 // BuildInfo Compile-time identity of the running backend. Cacheable — value
 // never changes between deploys, so the admin UI can display it
 // in the sidebar footer without re-fetching.
@@ -352,6 +389,22 @@ type InternalError = ErrorResponse
 
 // Unauthorized defines model for Unauthorized.
 type Unauthorized = ErrorResponse
+
+// AdminListAuditParams defines parameters for AdminListAudit.
+type AdminListAuditParams struct {
+	// Action Exact match. e.g. `traces.export`.
+	Action       *string `form:"action,omitempty" json:"action,omitempty"`
+	AdminId      *string `form:"adminId,omitempty" json:"adminId,omitempty"`
+	TargetUserId *string `form:"targetUserId,omitempty" json:"targetUserId,omitempty"`
+
+	// From Inclusive lower bound on `at` (RFC-3339).
+	From *time.Time `form:"from,omitempty" json:"from,omitempty"`
+
+	// To Exclusive upper bound on `at` (RFC-3339).
+	To     *time.Time `form:"to,omitempty" json:"to,omitempty"`
+	Cursor *string    `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit  *int       `form:"limit,omitempty" json:"limit,omitempty"`
+}
 
 // AdminOverviewParams defines parameters for AdminOverview.
 type AdminOverviewParams struct {

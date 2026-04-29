@@ -30,6 +30,9 @@ type Repository interface {
 	// need to thread a separate dependency; the storage is just one
 	// extra collection in the same Mongo.
 	AppendAudit(ctx context.Context, entry AuditEntry) error
+	// ListAudit returns one page of entries matching q. Cursor
+	// pagination on (at desc, _id desc).
+	ListAudit(ctx context.Context, q AuditQuery) ([]AuditEntry, string, error)
 }
 
 // MongoRepository backs Repository with the production MongoDB cluster.

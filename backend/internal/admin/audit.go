@@ -18,23 +18,44 @@ import (
 // so a renamed admin doesn't rewrite history; AdminID is the join key
 // for new-stage analytics.
 type AuditEntry struct {
-	ID            string         `bson:"_id"`
-	AdminID       string         `bson:"adminId"`
-	AdminEmail    string         `bson:"adminEmail"`
-	Action        string         `bson:"action"`
-	TargetUserID  string         `bson:"targetUserId,omitempty"`
-	TargetEntity  string         `bson:"targetEntity,omitempty"`
-	Metadata      map[string]any `bson:"metadata,omitempty"`
-	At            time.Time      `bson:"at"`
-	IP            string         `bson:"ip,omitempty"`
-	UserAgent     string         `bson:"userAgent,omitempty"`
+	ID           string         `bson:"_id" json:"id"`
+	AdminID      string         `bson:"adminId" json:"adminId"`
+	AdminEmail   string         `bson:"adminEmail" json:"adminEmail,omitempty"`
+	Action       string         `bson:"action" json:"action"`
+	TargetUserID string         `bson:"targetUserId,omitempty" json:"targetUserId,omitempty"`
+	TargetEntity string         `bson:"targetEntity,omitempty" json:"targetEntity,omitempty"`
+	Metadata     map[string]any `bson:"metadata,omitempty" json:"metadata,omitempty"`
+	At           time.Time      `bson:"at" json:"at"`
+	IP           string         `bson:"ip,omitempty" json:"ip,omitempty"`
+	UserAgent    string         `bson:"userAgent,omitempty" json:"userAgent,omitempty"`
 }
 
 // AuditRepository is the persistence contract for the audit log.
-// Kept narrow on purpose — Phase 0 only needs Append; reads land in
-// P5-04 when the admin UI exposes the log.
 type AuditRepository interface {
 	AppendAudit(ctx context.Context, entry AuditEntry) error
+	// ListAudit returns one page of entries matching q, plus the
+	// cursor for the next page (empty when no more). Cursor encodes
+	// the last entry's _id; sort is always (at desc, _id desc).
+	ListAudit(ctx context.Context, q AuditQuery) ([]AuditEntry, string, error)
+}
+
+// AuditQuery is the filter set accepted by GET /admin/v1/audit.
+// All fields optional — the empty query returns the most-recent
+// page across the whole log.
+type AuditQuery struct {
+	Action       string     // exact match (e.g. "traces.export")
+	AdminID      string     // exact match
+	TargetUserID string     // exact match
+	From         *time.Time // at >= From
+	To           *time.Time // at < To (exclusive)
+	Cursor       string     // last entry's _id from previous page
+	Limit        int        // 1..100; default 25
+}
+
+// AuditPage is the wire shape returned to the admin UI.
+type AuditPage struct {
+	Entries    []AuditEntry `json:"entries"`
+	NextCursor string       `json:"nextCursor,omitempty"`
 }
 
 // Implementations on MongoRepository ──────────────────────────────────
@@ -52,6 +73,68 @@ func (r *MongoRepository) auditCol() *mongo.Collection {
 func (r *MongoRepository) AppendAudit(ctx context.Context, entry AuditEntry) error {
 	_, err := r.auditCol().InsertOne(ctx, entry)
 	return err
+}
+
+// ListAudit returns one page of audit entries matching q. Sort is
+// always (at desc, _id desc) so cursor pagination is stable when many
+// rows share the same millisecond. Rides the existing
+// (action, at), (adminId, at), (targetUserId, at) indexes — single
+// indexed scan per filter combination.
+func (r *MongoRepository) ListAudit(ctx context.Context, q AuditQuery) ([]AuditEntry, string, error) {
+	limit := q.Limit
+	if limit <= 0 || limit > 100 {
+		limit = 25
+	}
+
+	filter := bson.M{}
+	if q.Action != "" {
+		filter["action"] = q.Action
+	}
+	if q.AdminID != "" {
+		filter["adminId"] = q.AdminID
+	}
+	if q.TargetUserID != "" {
+		filter["targetUserId"] = q.TargetUserID
+	}
+	if q.From != nil || q.To != nil {
+		ts := bson.M{}
+		if q.From != nil {
+			ts["$gte"] = q.From.UTC()
+		}
+		if q.To != nil {
+			ts["$lt"] = q.To.UTC()
+		}
+		filter["at"] = ts
+	}
+	if q.Cursor != "" {
+		// Cursor is the previous page's last _id. With (at desc, _id
+		// desc) order, "older than that one" means "_id < cursor".
+		filter["_id"] = bson.M{"$lt": q.Cursor}
+	}
+
+	cur, err := r.auditCol().Find(ctx, filter,
+		findOpts().
+			SetSort(bson.D{{Key: "at", Value: -1}, {Key: "_id", Value: -1}}).
+			SetLimit(int64(limit+1))) // +1 to detect more
+	if err != nil {
+		return nil, "", err
+	}
+	defer cur.Close(ctx)
+
+	var entries []AuditEntry
+	if err := cur.All(ctx, &entries); err != nil {
+		return nil, "", err
+	}
+
+	hasMore := len(entries) > limit
+	if hasMore {
+		entries = entries[:limit]
+	}
+	nextCursor := ""
+	if hasMore && len(entries) > 0 {
+		nextCursor = entries[len(entries)-1].ID
+	}
+	return entries, nextCursor, nil
 }
 
 // ensureAuditIndexes is called from ensureIndexes. Kept separate so

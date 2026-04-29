@@ -509,6 +509,53 @@ func timeStr(t *time.Time) string {
 	return t.UTC().Format(time.RFC3339)
 }
 
+// ListAudit handles GET /admin/v1/audit.
+//
+// Paginated audit-log feed. Filterable by action / adminId /
+// targetUserId / date range. Foundation for the admin /audit page
+// (mootd-admin#95). Closes the loop on every audit row written by
+// /traces export and (future) PII reveals + role changes.
+func (h *Handler) ListAudit(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if h.repo == nil {
+		response.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "audit repository not configured"})
+		return
+	}
+
+	v := r.URL.Query()
+	q := AuditQuery{
+		Action:       v.Get("action"),
+		AdminID:      v.Get("adminId"),
+		TargetUserID: v.Get("targetUserId"),
+		From:         parseTimePtr(v.Get("from")),
+		To:           parseTimePtr(v.Get("to")),
+		Cursor:       v.Get("cursor"),
+	}
+	if l := v.Get("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil {
+			q.Limit = n
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	entries, nextCursor, err := h.repo.ListAudit(ctx, q)
+	if err != nil {
+		h.logger.Printf("admin /audit: list failed: %v", err)
+		response.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+
+	response.WriteJSON(w, http.StatusOK, AuditPage{
+		Entries:    entries,
+		NextCursor: nextCursor,
+	})
+}
+
 // parseUsersQuery hoists URL query parsing out of the handler so it
 // stays trivially testable + the handler reads as a sequence of
 // repository calls.
