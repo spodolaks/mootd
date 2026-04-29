@@ -353,9 +353,14 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 		outfitCache = outfit.NewMongoCache(a.MongoClient, a.MongoDB, 24*time.Hour, a.Logger)
 	}
 
-	var jobStore *outfit.JobStore
-	if redisClient != nil {
-		jobStore = outfit.NewJobStore(redisClient)
+	// Outfit job store now writes Mongo (durable) + Redis (cache).
+	// Mongo is required so jobs survive backend restart; Redis is
+	// optional speed. Init also runs a stale-job recovery sweep —
+	// any `processing` job older than 10min from a previous boot
+	// gets marked failed (its goroutine died with the old process).
+	jobStore, err := outfit.NewJobStore(context.Background(), a.MongoClient, a.MongoDB, redisClient, a.Logger)
+	if err != nil {
+		a.Logger.Fatalf("outfit: job store init: %v", err)
 	}
 
 	// Observability ledger (P1-01). Every LLM call writes one row to
