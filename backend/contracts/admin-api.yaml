@@ -361,6 +361,99 @@ components:
           items:
             $ref: "#/components/schemas/DetectionRunItem"
 
+    UserMoodboard:
+      description: |
+        One saved moodboard surfaced on the admin user-detail page's
+        Moodboards tab. Mirrors moodboard.SavedMoodBoard with the
+        descriptive fields the admin actually renders. The full
+        rendered collage PNG (when present) is reachable via
+        imageUrl.
+      type: object
+      required: [id, date, outfit, createdAt]
+      properties:
+        id:
+          type: string
+        date:
+          type: string
+          description: YYYY-MM-DD — the day the user planned this outfit for.
+        outfit:
+          type: object
+          description: |
+            Untyped passthrough of the moodboard's outfit payload
+            (name / description / rationale / items / palette /
+            archetypeScores / etc.). The admin renders a small
+            subset; the rest is available for inspection.
+          additionalProperties: true
+        imageUrl:
+          type: string
+          description: |
+            Rendered collage PNG. Path-only; admin composes against
+            the API base. Empty when the client never uploaded a
+            board image (legacy rows).
+        createdAt:
+          type: string
+          format: date-time
+
+    UserMoodboardsPage:
+      description: |
+        Paginated moodboards for one user. Cursor pagination on
+        (createdAt desc, _id desc) — same pattern as the wardrobe
+        tab; consistent so the FE infinite-scroll hook reuses.
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/UserMoodboard"
+        nextCursor:
+          type: string
+
+    UserSpendBucket:
+      description: |
+        One day's spend slice for a single feature. The Spend tab
+        aggregates llm_calls.costUsd grouped by (feature, day) for
+        the last 30 days, zero-filled. Renders as a stacked-area
+        chart so admins see which feature drives the user's cost.
+      type: object
+      required: [date, feature, costUsd, callCount]
+      properties:
+        date:
+          type: string
+          description: YYYY-MM-DD (UTC).
+        feature:
+          type: string
+          description: e.g. `outfit_generate`, `detection_analyze`, `detection_generate`.
+        costUsd:
+          type: number
+          format: double
+        callCount:
+          type: integer
+          format: int64
+
+    UserSpendBreakdown:
+      description: |
+        30-day per-feature spend timeline for one user. The chart
+        component groups buckets by feature and renders one stacked
+        layer per feature. Empty buckets are zero-filled at the
+        backend so the chart spacing stays uniform.
+      type: object
+      required: [buckets, totalCostUsd]
+      properties:
+        buckets:
+          type: array
+          items:
+            $ref: "#/components/schemas/UserSpendBucket"
+        totalCostUsd:
+          type: number
+          format: double
+          description: Sum across all buckets — the same value as UserDetail.totalSpendUsd, repeated for caller convenience.
+        features:
+          type: array
+          items:
+            type: string
+          description: Distinct feature labels in the response, in display order (highest spend first).
+
     UserWardrobeItem:
       description: |
         One clothing item from a user's wardrobe, surfaced to the
@@ -1011,6 +1104,61 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+
+  /admin/v1/users/{id}/moodboards:
+    get:
+      operationId: adminListUserMoodboards
+      summary: |
+        Paginated saved moodboards for one user (mootd-admin#11
+        Moodboards tab). Cursor pagination on createdAt desc.
+      tags: [users]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: cursor
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 25
+      responses:
+        "200":
+          description: Moodboards page.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserMoodboardsPage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /admin/v1/users/{id}/spend:
+    get:
+      operationId: adminGetUserSpend
+      summary: |
+        30-day per-feature spend breakdown for one user (mootd-admin#11
+        Spend tab). Zero-filled at the backend so the chart spacing
+        is uniform.
+      tags: [users]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Spend breakdown.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserSpendBreakdown"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /admin/v1/users/{id}/wardrobe:
     get:

@@ -312,6 +312,10 @@ func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
 		h.getUserDetail(w, r, id)
 	case "wardrobe":
 		h.getUserWardrobe(w, r, id)
+	case "moodboards":
+		h.getUserMoodboards(w, r, id)
+	case "spend":
+		h.getUserSpend(w, r, id)
 	default:
 		response.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "unknown user sub-resource"})
 	}
@@ -369,6 +373,62 @@ func (h *Handler) getUserWardrobe(w http.ResponseWriter, r *http.Request, id str
 		Items:      items,
 		NextCursor: nextCursor,
 	})
+}
+
+// getUserMoodboards handles GET /admin/v1/users/{id}/moodboards.
+// Cursor-paginated, 25-row default. Returns 200 with empty items
+// when the user has no saved moodboards (vs 404 — empty is a valid
+// state for new users).
+func (h *Handler) getUserMoodboards(w http.ResponseWriter, r *http.Request, id string) {
+	if id == "" {
+		response.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "missing user id"})
+		return
+	}
+
+	cursor := r.URL.Query().Get("cursor")
+	limit := 25
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil {
+			limit = n
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	items, nextCursor, err := h.usersRepo.ListMoodboards(ctx, id, cursor, limit)
+	if err != nil {
+		h.logger.Printf("admin /users/%s/moodboards: repo failed: %v", id, err)
+		response.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	response.WriteJSON(w, http.StatusOK, UserMoodboardsPage{
+		Items:      items,
+		NextCursor: nextCursor,
+	})
+}
+
+// getUserSpend handles GET /admin/v1/users/{id}/spend.
+//
+// Returns 30-day per-feature spend breakdown, zero-filled. The
+// repo aggregates with a single $group; this handler is mostly a
+// transport-and-timeout wrapper.
+func (h *Handler) getUserSpend(w http.ResponseWriter, r *http.Request, id string) {
+	if id == "" {
+		response.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "missing user id"})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	breakdown, err := h.usersRepo.SpendBreakdown(ctx, id, time.Now().UTC())
+	if err != nil {
+		h.logger.Printf("admin /users/%s/spend: repo failed: %v", id, err)
+		response.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	response.WriteJSON(w, http.StatusOK, breakdown)
 }
 
 // ListTraces handles GET /admin/v1/traces.

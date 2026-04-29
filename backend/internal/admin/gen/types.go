@@ -501,6 +501,67 @@ type UserDetail struct {
 	TotalSpendUsd float64 `json:"totalSpendUsd"`
 }
 
+// UserMoodboard One saved moodboard surfaced on the admin user-detail page's
+// Moodboards tab. Mirrors moodboard.SavedMoodBoard with the
+// descriptive fields the admin actually renders. The full
+// rendered collage PNG (when present) is reachable via
+// imageUrl.
+type UserMoodboard struct {
+	CreatedAt time.Time `json:"createdAt"`
+
+	// Date YYYY-MM-DD — the day the user planned this outfit for.
+	Date string `json:"date"`
+	Id   string `json:"id"`
+
+	// ImageUrl Rendered collage PNG. Path-only; admin composes against
+	// the API base. Empty when the client never uploaded a
+	// board image (legacy rows).
+	ImageUrl *string `json:"imageUrl,omitempty"`
+
+	// Outfit Untyped passthrough of the moodboard's outfit payload
+	// (name / description / rationale / items / palette /
+	// archetypeScores / etc.). The admin renders a small
+	// subset; the rest is available for inspection.
+	Outfit map[string]interface{} `json:"outfit"`
+}
+
+// UserMoodboardsPage Paginated moodboards for one user. Cursor pagination on
+// (createdAt desc, _id desc) — same pattern as the wardrobe
+// tab; consistent so the FE infinite-scroll hook reuses.
+type UserMoodboardsPage struct {
+	Items      []UserMoodboard `json:"items"`
+	NextCursor *string         `json:"nextCursor,omitempty"`
+}
+
+// UserSpendBreakdown 30-day per-feature spend timeline for one user. The chart
+// component groups buckets by feature and renders one stacked
+// layer per feature. Empty buckets are zero-filled at the
+// backend so the chart spacing stays uniform.
+type UserSpendBreakdown struct {
+	Buckets []UserSpendBucket `json:"buckets"`
+
+	// Features Distinct feature labels in the response, in display order (highest spend first).
+	Features *[]string `json:"features,omitempty"`
+
+	// TotalCostUsd Sum across all buckets — the same value as UserDetail.totalSpendUsd, repeated for caller convenience.
+	TotalCostUsd float64 `json:"totalCostUsd"`
+}
+
+// UserSpendBucket One day's spend slice for a single feature. The Spend tab
+// aggregates llm_calls.costUsd grouped by (feature, day) for
+// the last 30 days, zero-filled. Renders as a stacked-area
+// chart so admins see which feature drives the user's cost.
+type UserSpendBucket struct {
+	CallCount int64   `json:"callCount"`
+	CostUsd   float64 `json:"costUsd"`
+
+	// Date YYYY-MM-DD (UTC).
+	Date string `json:"date"`
+
+	// Feature e.g. `outfit_generate`, `detection_analyze`, `detection_generate`.
+	Feature string `json:"feature"`
+}
+
 // UserSummary defines model for UserSummary.
 type UserSummary struct {
 	// Email Redacted (`u***@gmail.com`) unless caller has the `users:pii`
@@ -673,6 +734,12 @@ type AdminListUsersParamsTier string
 
 // AdminListUsersParamsSort defines parameters for AdminListUsers.
 type AdminListUsersParamsSort string
+
+// AdminListUserMoodboardsParams defines parameters for AdminListUserMoodboards.
+type AdminListUserMoodboardsParams struct {
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit  *int    `form:"limit,omitempty" json:"limit,omitempty"`
+}
 
 // AdminListUserWardrobeParams defines parameters for AdminListUserWardrobe.
 type AdminListUserWardrobeParams struct {

@@ -44,6 +44,45 @@ type UsersListResponse struct {
 	NextCursor string        `json:"nextCursor,omitempty"`
 }
 
+// UserMoodboard mirrors moodboard.SavedMoodBoard for the admin
+// user-detail page's Moodboards tab. The outfit payload is opaque
+// (map[string]any) so the wire shape doesn't have to import the
+// moodboard package's types — the FE renders a small subset
+// (name, description, palette) and offers the rest as raw JSON for
+// inspection.
+type UserMoodboard struct {
+	ID        string         `bson:"_id"                json:"id"`
+	UserID    string         `bson:"userId"             json:"userId,omitempty"`
+	Date      string         `bson:"date"               json:"date"`
+	Outfit    map[string]any `bson:"outfit"             json:"outfit"`
+	ImageURL  string         `bson:"imageUrl,omitempty" json:"imageUrl,omitempty"`
+	CreatedAt time.Time      `bson:"createdAt"          json:"createdAt"`
+}
+
+// UserMoodboardsPage is the response shape for /admin/v1/users/{id}/moodboards.
+type UserMoodboardsPage struct {
+	Items      []UserMoodboard `json:"items"`
+	NextCursor string          `json:"nextCursor,omitempty"`
+}
+
+// UserSpendBucket is one (date, feature) row in the per-feature
+// spend breakdown.
+type UserSpendBucket struct {
+	Date      string  `json:"date"`
+	Feature   string  `json:"feature"`
+	CostUSD   float64 `json:"costUsd"`
+	CallCount int64   `json:"callCount"`
+}
+
+// UserSpendBreakdown is a 30-day per-feature stacked-spend payload.
+// Pre-zero-filled at the backend so the FE chart can render
+// directly without bucket-merging logic.
+type UserSpendBreakdown struct {
+	Buckets      []UserSpendBucket `json:"buckets"`
+	TotalCostUSD float64           `json:"totalCostUsd"`
+	Features     []string          `json:"features"`
+}
+
 // UserWardrobeItem is one clothing item surfaced on the admin
 // user-detail page's Wardrobe tab. Mirrors the wardrobe package's
 // ClothingItem with the same wire shape — we read the same Mongo
@@ -106,6 +145,12 @@ type UsersRepository interface {
 	// ListWardrobe returns one page of a user's wardrobe items,
 	// newest first, cursor-paginated on (createdAt desc, _id desc).
 	ListWardrobe(ctx context.Context, userID, cursor string, limit int) ([]UserWardrobeItem, string, error)
+	// ListMoodboards returns one page of a user's saved moodboards.
+	// Same cursor flavour as ListWardrobe.
+	ListMoodboards(ctx context.Context, userID, cursor string, limit int) ([]UserMoodboard, string, error)
+	// SpendBreakdown returns 30-day per-feature spend for one user,
+	// zero-filled and ordered by total-cost feature first.
+	SpendBreakdown(ctx context.Context, userID string, now time.Time) (*UserSpendBreakdown, error)
 }
 
 // UsersMongoRepository is the production implementation.
@@ -561,6 +606,135 @@ func (r *UsersMongoRepository) ListWardrobe(ctx context.Context, userID, cursor 
 		nextCursor = items[len(items)-1].ID
 	}
 	return items, nextCursor, nil
+}
+
+// ListMoodboards returns one page of saved moodboards for a user.
+// Cursor pagination on (createdAt desc, _id desc) — same flavour as
+// ListWardrobe so the FE infinite-scroll hook is reusable.
+func (r *UsersMongoRepository) ListMoodboards(ctx context.Context, userID, cursor string, limit int) ([]UserMoodboard, string, error) {
+	if userID == "" {
+		return nil, "", errors.New("admin: userID required")
+	}
+	if limit <= 0 || limit > 100 {
+		limit = 25
+	}
+	filter := bson.M{"userId": userID}
+	if cursor != "" {
+		filter["_id"] = bson.M{"$lt": cursor}
+	}
+	cur, err := r.moodboardsCol().Find(ctx, filter,
+		options.Find().
+			SetSort(bson.D{{Key: "createdAt", Value: -1}, {Key: "_id", Value: -1}}).
+			SetLimit(int64(limit+1))) // +1 to detect more
+	if err != nil {
+		return nil, "", err
+	}
+	defer cur.Close(ctx)
+
+	var items []UserMoodboard
+	if err := cur.All(ctx, &items); err != nil {
+		return nil, "", err
+	}
+	hasMore := len(items) > limit
+	if hasMore {
+		items = items[:limit]
+	}
+	nextCursor := ""
+	if hasMore && len(items) > 0 {
+		nextCursor = items[len(items)-1].ID
+	}
+	return items, nextCursor, nil
+}
+
+// SpendBreakdown returns the user's last-30-day per-feature spend.
+//
+// Single $group aggregation keyed on (feature, day-bucket); the
+// rest is in-memory zero-fill so the chart renders 30 entries per
+// feature with no gaps.
+func (r *UsersMongoRepository) SpendBreakdown(ctx context.Context, userID string, now time.Time) (*UserSpendBreakdown, error) {
+	if userID == "" {
+		return nil, errors.New("admin: userID required")
+	}
+	startOfWindow := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC).Add(-29 * 24 * time.Hour)
+
+	pipeline := mongo.Pipeline{
+		{{Key: "$match", Value: bson.M{
+			"userId":    userID,
+			"createdAt": bson.M{"$gte": startOfWindow},
+		}}},
+		{{Key: "$group", Value: bson.M{
+			"_id": bson.M{
+				"feature": "$feature",
+				"day":     bson.M{"$dateToString": bson.M{"format": "%Y-%m-%d", "date": "$createdAt", "timezone": "UTC"}},
+			},
+			"costUsd":   bson.M{"$sum": "$costUsd"},
+			"callCount": bson.M{"$sum": 1},
+		}}},
+	}
+	cur, err := r.llmCallsCol().Aggregate(ctx, pipeline)
+	if err != nil {
+		return nil, err
+	}
+	defer cur.Close(ctx)
+
+	type bucket struct {
+		ID struct {
+			Feature string `bson:"feature"`
+			Day     string `bson:"day"`
+		} `bson:"_id"`
+		CostUSD   float64 `bson:"costUsd"`
+		CallCount int64   `bson:"callCount"`
+	}
+	var rows []bucket
+	if err := cur.All(ctx, &rows); err != nil {
+		return nil, err
+	}
+
+	// Index actual data by (feature, day) and track distinct features
+	// + per-feature totals for the ordering below.
+	byKey := make(map[string]bucket, len(rows))
+	totalsByFeature := map[string]float64{}
+	for _, b := range rows {
+		key := b.ID.Feature + "|" + b.ID.Day
+		byKey[key] = b
+		totalsByFeature[b.ID.Feature] += b.CostUSD
+	}
+
+	// Order features by total spend desc — gives the largest
+	// stacked-area band the most prominent layer in the chart.
+	features := make([]string, 0, len(totalsByFeature))
+	for f := range totalsByFeature {
+		features = append(features, f)
+	}
+	sort.SliceStable(features, func(i, j int) bool {
+		return totalsByFeature[features[i]] > totalsByFeature[features[j]]
+	})
+
+	// Zero-fill: emit a bucket for every (feature, day) pair across
+	// the 30-day window so the FE chart axes stay uniform without
+	// having to compute missing-day inserts on its side.
+	buckets := make([]UserSpendBucket, 0, len(features)*30)
+	var totalCost float64
+	for _, f := range features {
+		for i := 0; i < 30; i++ {
+			d := startOfWindow.Add(time.Duration(i) * 24 * time.Hour)
+			day := d.Format("2006-01-02")
+			b := byKey[f+"|"+day]
+			buckets = append(buckets, UserSpendBucket{
+				Date:      day,
+				Feature:   f,
+				CostUSD:   b.CostUSD,
+				CallCount: b.CallCount,
+			})
+			totalCost += b.CostUSD
+		}
+	}
+
+	return &UserSpendBreakdown{
+		Buckets:      buckets,
+		TotalCostUSD: totalCost,
+		Features:     features,
+	}, nil
 }
 
 // errUnsupportedSort returned when the caller passes a sort key we
