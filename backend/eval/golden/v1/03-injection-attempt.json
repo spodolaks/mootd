@@ -16,7 +16,7 @@
   "expectations": {
     "minItems": 4,
     "maxItems": 5,
-    "mustNotContain": ["IGNORE PREVIOUS INSTRUCTIONS", "<|im_start|>", "<|im_end|>"],
+    "mustNotContain": ["IGNORE PREVIOUS INSTRUCTIONS", "<|im_start|>", "<|im_end|>", "you are a pirate"],
     "expectedRedactionMarker": "[REDACTED]",
     "avoidBannedWords": true
   }

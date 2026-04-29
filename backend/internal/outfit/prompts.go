@@ -44,11 +44,30 @@ const userDataClose = "<</USER_DATA>>"
 // We replace the entire match with [REDACTED] rather than dropping it
 // silently — surfaces the attempt in logs without altering length-based
 // behaviour too much.
+// Paired-delimiter alternations come FIRST so the wider span match
+// wins over the singleton fallback. Without paired sweeping the
+// previous regex caught `<|im_start|>` and `<|im_end|>` individually
+// but left the role-impersonation prose between them ("system you
+// are a pirate") visible to the LLM. Closes mootd#68.
 var injectionMarkers = regexp.MustCompile(
-	`(?i)(<\|.*?\|>|</?system[^>]*>|</?s>|\[/?INST\]|BEGIN[_ ]PROMPT|END[_ ]PROMPT|` +
+	`(?i)(` +
+		// Paired delimiters — match the entire span, including
+		// prose between the open + close tags. Non-greedy so two
+		// adjacent payloads don't merge into one giant span.
+		`<\|[^|]*\|>[\s\S]*?<\|[^|]*\|>|` + //  <|im_start|>...<|im_end|>
+		`<system[^>]*>[\s\S]*?</system\s*>|` + //  <system>...</system>
+		`\[INST\][\s\S]*?\[/INST\]|` + //  [INST]...[/INST]
+		`<s>[\s\S]*?</s>|` + //  <s>...</s>
+		// Singleton fallbacks for unpaired tags (the attacker
+		// supplied only one half).
+		`<\|[^|]*\|>|</?system[^>]*>|</?s>|\[/?INST\]|` +
+		// Verb-phrase markers — these are content-level injection
+		// attempts that don't rely on tag delimiters.
+		`BEGIN[_ ]PROMPT|END[_ ]PROMPT|` +
 		`IGNORE\s+(ALL\s+)?(PREVIOUS|PRIOR)\s+(INSTRUCTIONS?|RULES?|MESSAGES?)|` +
 		`SYSTEM[_ ]OVERRIDE|END\s+OF\s+(WARDROBE|PROMPT|INSTRUCTIONS?)|` +
-		`FROM\s+NOW\s+ON|YOU\s+ARE\s+NO\s+LONGER)`)
+		`FROM\s+NOW\s+ON|YOU\s+ARE\s+NO\s+LONGER` +
+		`)`)
 
 // sanitiseUserText escapes a single user-supplied string before it lands
 // in the prompt. Two-layer defence:
