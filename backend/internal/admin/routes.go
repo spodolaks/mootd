@@ -37,6 +37,10 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, authLimit Middleware, requi
 	mux.Handle("/admin/v1/overview", requireAdmin(http.HandlerFunc(h.Overview)))
 	mux.Handle("/admin/v1/traces", requireAdmin(http.HandlerFunc(h.ListTraces)))
 	mux.Handle("/admin/v1/traces/summary", requireAdmin(http.HandlerFunc(h.TracesSummaryHandler)))
+	// /admin/v1/traces/{id} — prefix route. Go's mux gives the longer
+	// `/traces/summary` exact pattern priority, so this catches only
+	// real ids (anything after /traces/ that isn't "summary").
+	mux.Handle("/admin/v1/traces/", requireAdmin(http.HandlerFunc(h.GetTrace)))
 	mux.Handle("/admin/v1/audit", requireAdmin(http.HandlerFunc(h.ListAudit)))
 	mux.Handle("/admin/v1/search", requireAdmin(http.HandlerFunc(h.Search)))
 }

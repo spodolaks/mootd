@@ -31,6 +31,36 @@ type TracesPage struct {
 	NextCursor string            `json:"nextCursor,omitempty"`
 }
 
+// LLMCallDetail is the full llm_calls row including P1-11 archival
+// fields (systemPrompt / userMessage / responseRaw / wardrobeItemIds).
+// Returned by GET /admin/v1/traces/{id} for the prompt-viewer side
+// panel (P1-12 / mootd-admin#17). Excluded from the list response
+// by design — list rows ship the trim LLMCallSnapshot, the detail
+// page fetches the heavy fields on demand.
+type LLMCallDetail struct {
+	ID               string    `bson:"_id" json:"id"`
+	UserID           string    `bson:"userId" json:"userId"`
+	UserEmail        string    `bson:"-" json:"userEmail,omitempty"` // resolved server-side
+	Provider         string    `bson:"provider" json:"provider"`
+	Model            string    `bson:"model" json:"model"`
+	Feature          string    `bson:"feature" json:"feature"`
+	CostUSD          float64   `bson:"costUsd" json:"costUsd"`
+	InputTokens      int64     `bson:"inputTokens" json:"inputTokens,omitempty"`
+	OutputTokens     int64     `bson:"outputTokens" json:"outputTokens,omitempty"`
+	CacheReadTokens  int64     `bson:"cacheReadTokens" json:"cacheReadTokens,omitempty"`
+	CacheWriteTokens int64     `bson:"cacheWriteTokens" json:"cacheWriteTokens,omitempty"`
+	DurationMs       int64     `bson:"durationMs" json:"durationMs"`
+	Status           string    `bson:"status" json:"status"`
+	ErrorMsg         string    `bson:"errorMsg,omitempty" json:"errorMsg,omitempty"`
+	PromptVersion    string    `bson:"promptVersion,omitempty" json:"promptVersion,omitempty"`
+	PromptHash       string    `bson:"promptHash,omitempty" json:"promptHash,omitempty"`
+	SystemPrompt     string    `bson:"systemPrompt,omitempty" json:"systemPrompt,omitempty"`
+	UserMessage      string    `bson:"userMessage,omitempty" json:"userMessage,omitempty"`
+	ResponseRaw      string    `bson:"responseRaw,omitempty" json:"responseRaw,omitempty"`
+	WardrobeItemIDs  []string  `bson:"wardrobeItemIds,omitempty" json:"wardrobeItemIds,omitempty"`
+	CreatedAt        time.Time `bson:"createdAt" json:"createdAt"`
+}
+
 // TracesSummary is the aggregate over the same filter set as List.
 // Independent of pagination; powers the "1,234 calls · $45.20 ·
 // avg 4.2s · p95 12.1s" strip on the /traces page.
@@ -53,6 +83,11 @@ type TracesRepository interface {
 	// IterAll streams every row matching the filter (no pagination).
 	// Used by CSV export; capped at maxRows by the caller.
 	IterAll(ctx context.Context, q TracesQuery, maxRows int) ([]LLMCallSnapshot, error)
+	// FindDetail returns the full llm_calls row by id, including the
+	// archival fields (systemPrompt / userMessage / responseRaw /
+	// wardrobeItemIds). Returns (nil, nil) when not found so the
+	// handler can map to 404 without inspecting an error type.
+	FindDetail(ctx context.Context, id string) (*LLMCallDetail, error)
 }
 
 // TracesMongoRepository implements TracesRepository against the
@@ -225,6 +260,24 @@ func (r *TracesMongoRepository) IterAll(ctx context.Context, q TracesQuery, maxR
 		return nil, err
 	}
 	return rows, nil
+}
+
+// FindDetail returns the full llm_calls row by id, including the
+// P1-11 archival fields. Returns (nil, nil) when not found so the
+// handler can emit 404 without inspecting an error type.
+func (r *TracesMongoRepository) FindDetail(ctx context.Context, id string) (*LLMCallDetail, error) {
+	if id == "" {
+		return nil, nil
+	}
+	var doc LLMCallDetail
+	err := r.col().FindOne(ctx, bson.M{"_id": id}).Decode(&doc)
+	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &doc, nil
 }
 
 // errInvalidTracesQuery is returned by the handler's parser when a

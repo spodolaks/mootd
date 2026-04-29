@@ -282,6 +282,82 @@ components:
           type: string
           format: date-time
 
+    LLMCallDetail:
+      description: |
+        Full llm_calls row including the inline-archived prompt, user
+        message, raw model response, and wardrobe item IDs (P1-11
+        Step B / mootd-admin#16). Returned by GET
+        /admin/v1/traces/{id} for the prompt-viewer side panel.
+        Excluded from the /traces list response by design — list rows
+        ship the trim LLMCallSnapshot, detail page fetches the heavy
+        fields on demand.
+      type: object
+      required: [id, userId, provider, model, feature, costUsd, durationMs, status, createdAt]
+      properties:
+        id:
+          type: string
+        userId:
+          type: string
+        userEmail:
+          type: string
+        provider:
+          type: string
+          enum: [anthropic, openai, ollama]
+        model:
+          type: string
+        feature:
+          type: string
+        costUsd:
+          type: number
+          format: double
+        inputTokens:
+          type: integer
+          format: int64
+        outputTokens:
+          type: integer
+          format: int64
+        cacheReadTokens:
+          type: integer
+          format: int64
+        cacheWriteTokens:
+          type: integer
+          format: int64
+        durationMs:
+          type: integer
+          format: int64
+        status:
+          type: string
+          enum: [success, error, timeout]
+        errorMsg:
+          type: string
+          description: Truncated error message; populated only when status != success.
+        promptVersion:
+          type: string
+        promptHash:
+          type: string
+          description: |
+            sha256 of `systemPrompt + "\n" + userMessage`. Useful for
+            "show every call that used this prompt" queries.
+        systemPrompt:
+          type: string
+        userMessage:
+          type: string
+        responseRaw:
+          type: string
+          description: |
+            Provider-specific textual model output. Anthropic: tool-use
+            input JSON. OpenAI: choices[0].message.content. Ollama:
+            response body. Truncated at 64KB; sentinel "…(truncated)"
+            suffix indicates partial.
+        wardrobeItemIds:
+          type: array
+          items:
+            type: string
+          description: Items present in the user's wardrobe at call time.
+        createdAt:
+          type: string
+          format: date-time
+
     DailyMetric:
       type: object
       description: |
@@ -820,6 +896,36 @@ paths:
                 type: string
         "401":
           $ref: "#/components/responses/Unauthorized"
+
+  /admin/v1/traces/{id}:
+    get:
+      operationId: adminGetTrace
+      summary: |
+        Single-call detail for the admin prompt viewer (P1-12 /
+        mootd-admin#17). Returns the full llm_calls row including
+        the archived system prompt + user message + raw model
+        response + wardrobe item IDs at call time.
+      tags: [traces]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Full trace detail.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LLMCallDetail"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Trace not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /admin/v1/traces/summary:
     get:

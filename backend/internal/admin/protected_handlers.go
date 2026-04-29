@@ -375,6 +375,61 @@ func (h *Handler) ListTraces(w http.ResponseWriter, r *http.Request) {
 	response.WriteJSON(w, http.StatusOK, page)
 }
 
+// GetTrace handles GET /admin/v1/traces/{id}.
+//
+// Single-call detail for the admin prompt viewer (P1-12 /
+// mootd-admin#17). Returns the full llm_calls row including the
+// archived prompt + user message + raw response + wardrobe item
+// IDs. Resolves user email server-side so the FE can render it
+// directly under the masked-email convention.
+func (h *Handler) GetTrace(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if h.tracesRepo == nil {
+		response.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "traces repository not configured"})
+		return
+	}
+
+	// Path: /admin/v1/traces/{id}. The id is everything after the
+	// "/traces/" segment minus a trailing "/summary" — that
+	// shadowing is handled by registering /traces/summary explicitly
+	// on the mux, which has higher specificity than this prefix.
+	id := strings.TrimPrefix(r.URL.Path, "/admin/v1/traces/")
+	if id == "" || strings.Contains(id, "/") {
+		response.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "missing or invalid trace id"})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	detail, err := h.tracesRepo.FindDetail(ctx, id)
+	if err != nil {
+		h.logger.Printf("admin /traces/{id}: repo failed: %v", err)
+		response.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	if detail == nil {
+		response.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "trace not found"})
+		return
+	}
+
+	// Best-effort email join — same pattern as Overview's recent-
+	// calls feed. Single point lookup, never blocks the response on
+	// failure.
+	if h.overviewRepo != nil && detail.UserID != "" {
+		if emails, err := h.overviewRepo.EmailsForUserIDs(ctx, []string{detail.UserID}); err == nil {
+			if e, ok := emails[detail.UserID]; ok {
+				detail.UserEmail = e
+			}
+		}
+	}
+
+	response.WriteJSON(w, http.StatusOK, detail)
+}
+
 // TracesSummaryHandler handles GET /admin/v1/traces/summary.
 //
 // Aggregate over the same filter as /admin/v1/traces — total count,

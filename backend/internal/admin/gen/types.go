@@ -28,11 +28,25 @@ const (
 	Staging     BuildInfoEnvironment = "staging"
 )
 
+// Defines values for LLMCallDetailProvider.
+const (
+	LLMCallDetailProviderAnthropic LLMCallDetailProvider = "anthropic"
+	LLMCallDetailProviderOllama    LLMCallDetailProvider = "ollama"
+	LLMCallDetailProviderOpenai    LLMCallDetailProvider = "openai"
+)
+
+// Defines values for LLMCallDetailStatus.
+const (
+	LLMCallDetailStatusError   LLMCallDetailStatus = "error"
+	LLMCallDetailStatusSuccess LLMCallDetailStatus = "success"
+	LLMCallDetailStatusTimeout LLMCallDetailStatus = "timeout"
+)
+
 // Defines values for LLMCallSnapshotProvider.
 const (
-	Anthropic LLMCallSnapshotProvider = "anthropic"
-	Ollama    LLMCallSnapshotProvider = "ollama"
-	Openai    LLMCallSnapshotProvider = "openai"
+	LLMCallSnapshotProviderAnthropic LLMCallSnapshotProvider = "anthropic"
+	LLMCallSnapshotProviderOllama    LLMCallSnapshotProvider = "ollama"
+	LLMCallSnapshotProviderOpenai    LLMCallSnapshotProvider = "openai"
 )
 
 // Defines values for LLMCallSnapshotStatus.
@@ -77,9 +91,9 @@ const (
 
 // Defines values for AdminTracesSummaryParamsStatus.
 const (
-	Error   AdminTracesSummaryParamsStatus = "error"
-	Success AdminTracesSummaryParamsStatus = "success"
-	Timeout AdminTracesSummaryParamsStatus = "timeout"
+	AdminTracesSummaryParamsStatusError   AdminTracesSummaryParamsStatus = "error"
+	AdminTracesSummaryParamsStatusSuccess AdminTracesSummaryParamsStatus = "success"
+	AdminTracesSummaryParamsStatusTimeout AdminTracesSummaryParamsStatus = "timeout"
 )
 
 // Defines values for AdminListUsersParamsTier.
@@ -198,6 +212,55 @@ type DailyMetric struct {
 type ErrorResponse struct {
 	Error string `json:"error"`
 }
+
+// LLMCallDetail Full llm_calls row including the inline-archived prompt, user
+// message, raw model response, and wardrobe item IDs (P1-11
+// Step B / mootd-admin#16). Returned by GET
+// /admin/v1/traces/{id} for the prompt-viewer side panel.
+// Excluded from the /traces list response by design — list rows
+// ship the trim LLMCallSnapshot, detail page fetches the heavy
+// fields on demand.
+type LLMCallDetail struct {
+	CacheReadTokens  *int64    `json:"cacheReadTokens,omitempty"`
+	CacheWriteTokens *int64    `json:"cacheWriteTokens,omitempty"`
+	CostUsd          float64   `json:"costUsd"`
+	CreatedAt        time.Time `json:"createdAt"`
+	DurationMs       int64     `json:"durationMs"`
+
+	// ErrorMsg Truncated error message; populated only when status != success.
+	ErrorMsg     *string `json:"errorMsg,omitempty"`
+	Feature      string  `json:"feature"`
+	Id           string  `json:"id"`
+	InputTokens  *int64  `json:"inputTokens,omitempty"`
+	Model        string  `json:"model"`
+	OutputTokens *int64  `json:"outputTokens,omitempty"`
+
+	// PromptHash sha256 of `systemPrompt + "\n" + userMessage`. Useful for
+	// "show every call that used this prompt" queries.
+	PromptHash    *string               `json:"promptHash,omitempty"`
+	PromptVersion *string               `json:"promptVersion,omitempty"`
+	Provider      LLMCallDetailProvider `json:"provider"`
+
+	// ResponseRaw Provider-specific textual model output. Anthropic: tool-use
+	// input JSON. OpenAI: choices[0].message.content. Ollama:
+	// response body. Truncated at 64KB; sentinel "…(truncated)"
+	// suffix indicates partial.
+	ResponseRaw  *string             `json:"responseRaw,omitempty"`
+	Status       LLMCallDetailStatus `json:"status"`
+	SystemPrompt *string             `json:"systemPrompt,omitempty"`
+	UserEmail    *string             `json:"userEmail,omitempty"`
+	UserId       string              `json:"userId"`
+	UserMessage  *string             `json:"userMessage,omitempty"`
+
+	// WardrobeItemIds Items present in the user's wardrobe at call time.
+	WardrobeItemIds *[]string `json:"wardrobeItemIds,omitempty"`
+}
+
+// LLMCallDetailProvider defines model for LLMCallDetail.Provider.
+type LLMCallDetailProvider string
+
+// LLMCallDetailStatus defines model for LLMCallDetail.Status.
+type LLMCallDetailStatus string
 
 // LLMCallSnapshot defines model for LLMCallSnapshot.
 type LLMCallSnapshot struct {
