@@ -30,11 +30,20 @@ func NewLLMRecorder(repo LLMCallRepository, prices *PriceTable, logger *log.Logg
 // CallContext carries the per-request metadata needed to attribute a
 // row in the ledger. Built by the caller (outfit service) once per
 // request and passed into Record.
+//
+// SystemPrompt + UserMessage + WardrobeItemIDs are P1-11 archival
+// fields — see LLMCall for the storage rationale. PromptText is the
+// concatenated prompt used to compute the dedupe hash; pass it
+// alongside SystemPrompt/UserMessage so the recorder can stamp both
+// the hash AND the inline body in one pass.
 type CallContext struct {
-	UserID     string
-	Feature    string // "outfit_generate" today; "detection" / "search" later
-	TraceID    string // optional — empty until P1-03 lands
-	PromptText string // optional — used to compute promptHash for dedupe
+	UserID          string
+	Feature         string // "outfit_generate" today; "detection" / "search" later
+	TraceID         string // optional — empty until P1-03 lands
+	PromptText      string // optional — used to compute promptHash for dedupe
+	SystemPrompt    string // P1-11 archival: rendered system prompt
+	UserMessage     string // P1-11 archival: rendered user message
+	WardrobeItemIDs []string
 }
 
 // CallObservation is the result of calling the LLM, packaged so we
@@ -49,10 +58,19 @@ type CallObservation struct {
 	CacheReadTokens  int
 	CacheWriteTokens int
 	PromptVersion    string
+	RawResponse      string // P1-11 archival: the LLM's text/tool-use payload
 	StartedAt        time.Time
 	EndedAt          time.Time
 	Err              error // nil on success
 }
+
+// archivalFieldMaxBytes caps any single archival field. The actual
+// payload sizes today are well under this (system prompt ~5KB, user
+// message ~2KB, response ~10KB), so the cap is purely a safety net
+// against pathological growth (e.g. a model that ignores max_tokens
+// and floods us). Fields are truncated, not dropped — partial data
+// beats no data when debugging.
+const archivalFieldMaxBytes = 64 * 1024
 
 // Record writes one llm_calls row for the given call. Cost is computed
 // from the price table at write time (so historical rows stay accurate
@@ -92,9 +110,23 @@ func (r *LLMRecorder) Record(ctx context.Context, cc CallContext, obs CallObserv
 		PromptVersion:    obs.PromptVersion,
 		ErrorMsg:         errorMsg,
 		CreatedAt:        obs.StartedAt.UTC(),
+		// P1-11 archival — truncated for safety; sane payloads are
+		// orders of magnitude under the cap.
+		SystemPrompt:    truncateField(cc.SystemPrompt),
+		UserMessage:     truncateField(cc.UserMessage),
+		ResponseRaw:     truncateField(obs.RawResponse),
+		WardrobeItemIDs: cc.WardrobeItemIDs,
 	}
-	if cc.PromptText != "" {
-		row.PromptHash = HashPrompt(cc.PromptText)
+	// PromptHash dedupe key. Prefer PromptText (caller's pre-built
+	// concat) over re-stitching, but fall back to system+user when
+	// only the archival fields were supplied — gives callers one
+	// thing to populate.
+	hashSrc := cc.PromptText
+	if hashSrc == "" && (cc.SystemPrompt != "" || cc.UserMessage != "") {
+		hashSrc = cc.SystemPrompt + "\n" + cc.UserMessage
+	}
+	if hashSrc != "" {
+		row.PromptHash = HashPrompt(hashSrc)
 	}
 
 	if err := r.repo.AppendLLMCall(ctx, row); err != nil {
@@ -113,6 +145,18 @@ func truncateErr(s string, max int) string {
 		return s
 	}
 	return s[:max] + " …(truncated)"
+}
+
+// truncateField caps an archival field at archivalFieldMaxBytes.
+// Inserts a sentinel suffix so debug readers can tell the field was
+// truncated instead of legitimately ending mid-word. Byte-based
+// rather than rune-based — these fields contain JSON / English
+// prose, never multi-byte literals where the cut would matter.
+func truncateField(s string) string {
+	if len(s) <= archivalFieldMaxBytes {
+		return s
+	}
+	return s[:archivalFieldMaxBytes] + "…(truncated)"
 }
 
 // generateLLMCallID returns a unique row id. Mongo doesn't require

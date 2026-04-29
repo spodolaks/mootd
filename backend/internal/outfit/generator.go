@@ -76,4 +76,10 @@ type Usage struct {
 	CacheReadTokens  int // Anthropic only — 0 for OpenAI/Ollama
 	CacheWriteTokens int // Anthropic only — 0 for OpenAI/Ollama
 	PromptVersion    string // PromptVersion at call time, stamped for filtering
+	// RawResponse is the textual content the model produced, captured
+	// before our parser ran. Anthropic: tool-use input JSON.
+	// OpenAI: choices[0].message.content. Ollama: response body.
+	// Used by P1-11 prompt archival. Empty when transport failed
+	// before any response.
+	RawResponse string
 }

@@ -112,10 +112,13 @@ type llmRecorder interface {
 // package so the outfit service can build it without importing the
 // observability package directly.
 type LLMRecorderContext struct {
-	UserID     string
-	Feature    string
-	TraceID    string
-	PromptText string
+	UserID          string
+	Feature         string
+	TraceID         string
+	PromptText      string
+	SystemPrompt    string   // P1-11 archival: rendered system prompt
+	UserMessage     string   // P1-11 archival: rendered user message
+	WardrobeItemIDs []string // P1-11 archival: items present at call time
 }
 
 // LLMRecorderObservation mirrors observability.CallObservation.
@@ -127,6 +130,7 @@ type LLMRecorderObservation struct {
 	CacheReadTokens  int
 	CacheWriteTokens int
 	PromptVersion    string
+	RawResponse      string // P1-11 archival: model's text/tool-use payload
 	StartedAt        time.Time
 	EndedAt          time.Time
 	Err              error
@@ -287,16 +291,32 @@ func (s *Service) GenerateOutfits(ctx context.Context, userID string, weather We
 	// failures here are logged inside Record, never bubbled. Skipped
 	// when no recorder is wired (test setups, dev opt-out) or no
 	// usage came back (transport error before we hit the provider).
+	//
+	// P1-11 archival (Step B / mootd-admin#16): re-render the system
+	// + user prompt for storage. Each generator builds the prompt
+	// internally; rebuilding it here means we hash the *exact* string
+	// the generator saw, not a placeholder. The two builders
+	// (BuildSystemPromptForEval + BuildUserMessage) are pure of side
+	// effects and run in single-digit milliseconds at our wardrobe
+	// sizes — cheap enough to do unconditionally.
 	if s.llmRecorder != nil && usage != nil {
+		systemPrompt := BuildSystemPromptForEval(weather, recentBoards, topArchetypes, panels, backgrounds)
+		userMessage := BuildUserMessage(genItems)
+		itemIDs := make([]string, 0, len(genItems))
+		for _, it := range genItems {
+			itemIDs = append(itemIDs, it.ID)
+		}
 		s.llmRecorder.Record(ctx, LLMRecorderContext{
-			UserID:  userID,
-			Feature: "outfit_generate",
-			// PromptText left empty for now — adding the rendered
-			// prompt is P1-11 (prompt snapshot archival). Keeping
-			// the hash off avoids an early-stage performance
-			// surprise (sha256 over a 5KB string is fine, but we
-			// also need to control its growth in the response
-			// shape).
+			UserID:          userID,
+			Feature:         "outfit_generate",
+			SystemPrompt:    systemPrompt,
+			UserMessage:     userMessage,
+			WardrobeItemIDs: itemIDs,
+			// PromptText drives the dedupe hash. Recorder will also
+			// hash from SystemPrompt+UserMessage when this is empty;
+			// we set it explicitly here so the format stays stable
+			// even if the recorder's fallback changes.
+			PromptText: systemPrompt + "\n" + userMessage,
 		}, LLMRecorderObservation{
 			Provider:         usage.Provider,
 			Model:            usage.Model,
@@ -305,6 +325,7 @@ func (s *Service) GenerateOutfits(ctx context.Context, userID string, weather We
 			CacheReadTokens:  usage.CacheReadTokens,
 			CacheWriteTokens: usage.CacheWriteTokens,
 			PromptVersion:    usage.PromptVersion,
+			RawResponse:      usage.RawResponse,
 			StartedAt:        startedAt,
 			EndedAt:          endedAt,
 			Err:              err,

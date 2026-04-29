@@ -28,16 +28,31 @@ type LLMCall struct {
 	Model            string    `bson:"model"`
 	Feature          string    `bson:"feature"`
 	InputTokens      int       `bson:"inputTokens"`
-	OutputTokens    int       `bson:"outputTokens"`
+	OutputTokens     int       `bson:"outputTokens"`
 	CacheReadTokens  int       `bson:"cacheReadTokens"`
 	CacheWriteTokens int       `bson:"cacheWriteTokens"`
 	DurationMs       int64     `bson:"durationMs"`
 	Status           string    `bson:"status"` // "success" | "error" | "timeout"
 	CostUSD          float64   `bson:"costUsd"`
-	PromptHash       string    `bson:"promptHash,omitempty"`     // sha256 of the rendered prompt; supports dedupe in P1-11
+	PromptHash       string    `bson:"promptHash,omitempty"`    // sha256 of system+user prompt; powers dedupe + "show every call with this prompt"
 	PromptVersion    string    `bson:"promptVersion,omitempty"` // PromptVersion at call time
 	ErrorMsg         string    `bson:"errorMsg,omitempty"`
 	CreatedAt        time.Time `bson:"createdAt"`
+
+	// Prompt archival (P1-11 / mootd-admin#16, Step B — inline storage).
+	// Step C migrates these into a content-addressed prompt_snapshots
+	// collection if storage growth becomes a real concern. Today they
+	// live on the row directly because (a) it's simpler, (b) Mongo's
+	// 16MB doc cap is enormous compared to our ~10KB-per-call payload,
+	// and (c) it lets the future admin prompt-viewer (P1-12) be a
+	// single-doc fetch.
+	//
+	// Each field is capped via truncate() so a pathological response
+	// can't bloat the row past sane limits.
+	SystemPrompt    string   `bson:"systemPrompt,omitempty"`
+	UserMessage     string   `bson:"userMessage,omitempty"`
+	ResponseRaw     string   `bson:"responseRaw,omitempty"`
+	WardrobeItemIDs []string `bson:"wardrobeItemIds,omitempty"`
 }
 
 // LLMCallRepository persists LLMCall rows. Reads come later (admin
@@ -85,6 +100,12 @@ func (r *MongoLLMCallRepository) ensureIndexes(ctx context.Context) error {
 		{
 			Keys: bson.D{{Key: "promptVersion", Value: 1}, {Key: "createdAt", Value: -1}},
 			Options: options.Index().SetName("llm_calls_promptversion_created"),
+		},
+		{
+			// "Show me every call that used this prompt" — sparse so
+			// pre-archival rows (no hash) don't bloat the index.
+			Keys:    bson.D{{Key: "promptHash", Value: 1}, {Key: "createdAt", Value: -1}},
+			Options: options.Index().SetName("llm_calls_prompthash_created").SetSparse(true),
 		},
 		{
 			// Time-series scans — "everything from the last hour".

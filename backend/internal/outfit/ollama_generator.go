@@ -40,6 +40,7 @@ func (g *OllamaGenerator) Generate(ctx context.Context, req GeneratorRequest) ([
 	if err != nil {
 		return nil, usage, fmt.Errorf("ollama chat: %w", err)
 	}
+	usage.RawResponse = llmContent
 
 	parsed, err := parseLLMResponse(llmContent)
 	if err != nil {

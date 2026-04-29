@@ -133,7 +133,8 @@ func (g *ClaudeGenerator) Generate(ctx context.Context, req GeneratorRequest) ([
 		return nil, usage, err
 	}
 
-	outfits, parseErr := parseClaudeToolUse(resp, tool.Name)
+	outfits, rawJSON, parseErr := parseClaudeToolUse(resp, tool.Name)
+	usage.RawResponse = rawJSON
 	return outfits, usage, parseErr
 }
 
@@ -414,7 +415,11 @@ func (g *ClaudeGenerator) callAPI(ctx context.Context, payload claudeRequest) (*
 // parseClaudeToolUse extracts the propose_outfits tool input from Claude's
 // response and unmarshals it into []Outfit. Because the tool was forced via
 // tool_choice, exactly one tool_use block is expected.
-func parseClaudeToolUse(resp *claudeResponse, expectedTool string) ([]Outfit, error) {
+//
+// Returns (outfits, rawJSON, err) — rawJSON is the unparsed tool input,
+// captured for prompt archival (P1-11). Empty string when no matching
+// block was found.
+func parseClaudeToolUse(resp *claudeResponse, expectedTool string) ([]Outfit, string, error) {
 	for _, block := range resp.Content {
 		if block.Type != "tool_use" || block.Name != expectedTool {
 			continue
@@ -423,11 +428,11 @@ func parseClaudeToolUse(resp *claudeResponse, expectedTool string) ([]Outfit, er
 			Outfits []Outfit `json:"outfits"`
 		}
 		if err := json.Unmarshal(block.Input, &payload); err != nil {
-			return nil, fmt.Errorf("unmarshal tool input: %w", err)
+			return nil, string(block.Input), fmt.Errorf("unmarshal tool input: %w", err)
 		}
-		return payload.Outfits, nil
+		return payload.Outfits, string(block.Input), nil
 	}
-	return nil, fmt.Errorf("no %q tool_use block in claude response (stop_reason=%s)", expectedTool, resp.StopReason)
+	return nil, "", fmt.Errorf("no %q tool_use block in claude response (stop_reason=%s)", expectedTool, resp.StopReason)
 }
 
 // ── Anthropic Messages API wire types ───────────────────────────────────────

@@ -126,6 +126,7 @@ func (g *OpenAIGenerator) Generate(ctx context.Context, req GeneratorRequest) ([
 
 	content := result.Choices[0].Message.Content
 	g.logger.Printf("outfit: openai raw response length: %d bytes", len(content))
+	usage.RawResponse = content
 
 	parsed, err := parseLLMResponse(content)
 	if err != nil {

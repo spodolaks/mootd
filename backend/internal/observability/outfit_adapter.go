@@ -24,10 +24,13 @@ func NewOutfitRecorderAdapter(r *LLMRecorder) *OutfitRecorderAdapter {
 // Record satisfies the outfit.llmRecorder interface.
 func (a *OutfitRecorderAdapter) Record(ctx context.Context, cc outfit.LLMRecorderContext, obs outfit.LLMRecorderObservation) {
 	a.r.Record(ctx, CallContext{
-		UserID:     cc.UserID,
-		Feature:    cc.Feature,
-		TraceID:    cc.TraceID,
-		PromptText: cc.PromptText,
+		UserID:          cc.UserID,
+		Feature:         cc.Feature,
+		TraceID:         cc.TraceID,
+		PromptText:      cc.PromptText,
+		SystemPrompt:    cc.SystemPrompt,
+		UserMessage:     cc.UserMessage,
+		WardrobeItemIDs: cc.WardrobeItemIDs,
 	}, CallObservation{
 		Provider:         obs.Provider,
 		Model:            obs.Model,
@@ -36,6 +39,7 @@ func (a *OutfitRecorderAdapter) Record(ctx context.Context, cc outfit.LLMRecorde
 		CacheReadTokens:  obs.CacheReadTokens,
 		CacheWriteTokens: obs.CacheWriteTokens,
 		PromptVersion:    obs.PromptVersion,
+		RawResponse:      obs.RawResponse,
 		StartedAt:        obs.StartedAt,
 		EndedAt:          obs.EndedAt,
 		Err:              obs.Err,
