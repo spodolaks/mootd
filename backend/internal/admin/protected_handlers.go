@@ -199,16 +199,15 @@ func (h *Handler) Overview(w http.ResponseWriter, r *http.Request) {
 		h.logger.Printf("admin /overview: dau: %v", err)
 		dau = 0
 	}
-	priorDau, err := h.overviewRepo.ApproxDAU(ctx, now.Add(-48*time.Hour))
+	// Prior-period DAU is a half-open window [now-48h, now-24h). The
+	// previous implementation did `ApproxDAU(48h) - ApproxDAU(24h)`,
+	// which over-subtracted any user active in both windows and
+	// inflated the WoW delta (closes mootd#36). The new
+	// ApproxDAUBetween query carries a documented data-model caveat
+	// — see its godoc for the systematic-undercount tradeoff.
+	priorDau, err := h.overviewRepo.ApproxDAUBetween(ctx, now.Add(-48*time.Hour), now.Add(-24*time.Hour))
 	if err != nil {
 		h.logger.Printf("admin /overview: prior dau: %v", err)
-		priorDau = 0
-	}
-	// ApproxDAU(48h) gives us [now-48h, now]; subtract today's slice
-	// to get the prior 24h-only count.
-	if priorDau > dau {
-		priorDau -= dau
-	} else {
 		priorDau = 0
 	}
 

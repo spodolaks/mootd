@@ -118,6 +118,11 @@ type OverviewRepository interface {
 	RecentLLMCalls(ctx context.Context, n int) ([]LLMCallSnapshot, error)
 	// ApproxDAU — distinct users active since `since`.
 	ApproxDAU(ctx context.Context, since time.Time) (int64, error)
+	// ApproxDAUBetween — distinct users active in [from, to). Used
+	// to compute prior-period DAU without the overlap bug that bit
+	// the previous (ApproxDAU(48h) - ApproxDAU(24h)) approach.
+	// See the implementation comment for the data-model caveat.
+	ApproxDAUBetween(ctx context.Context, from, to time.Time) (int64, error)
 	// EmailsForUserIDs resolves user IDs to email addresses. Used
 	// to decorate LLMCallSnapshot rows in the recent-activity feed.
 	// Returns map[userID]email — IDs not found are absent from the map.
@@ -262,6 +267,38 @@ func (r *OverviewMongoRepository) RecentLLMCalls(ctx context.Context, n int) ([]
 func (r *OverviewMongoRepository) ApproxDAU(ctx context.Context, since time.Time) (int64, error) {
 	count, err := r.usersCol().CountDocuments(ctx, bson.M{
 		"updatedAt": bson.M{"$gte": since},
+	})
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+// ApproxDAUBetween returns distinct user_ids whose latest updatedAt
+// lies in the half-open interval [from, to). Used for prior-period
+// DAU on the dashboard.
+//
+// Data-model caveat (worth understanding when reading the chart):
+// the users collection only carries a single updatedAt — the
+// *latest* activity. A user who was active both yesterday and
+// today shows updatedAt=today and is therefore excluded from the
+// yesterday window. The number this method returns is "users last
+// seen in the window", not "users seen in the window."
+//
+// At our volume that systematically undercounts prior-period DAU
+// by the daily returning-users population; the chart still
+// communicates direction correctly, but the magnitude reads low.
+// A real fix needs a per-day activity rollup (lands with the
+// events pipeline in P2-02 / mootd-admin#19) — until then this is
+// the cleanest approximation, and importantly it doesn't have the
+// double-count overlap bug the previous
+// ApproxDAU(48h) - ApproxDAU(24h) approach did.
+func (r *OverviewMongoRepository) ApproxDAUBetween(ctx context.Context, from, to time.Time) (int64, error) {
+	if !to.After(from) {
+		return 0, nil
+	}
+	count, err := r.usersCol().CountDocuments(ctx, bson.M{
+		"updatedAt": bson.M{"$gte": from, "$lt": to},
 	})
 	if err != nil {
 		return 0, err
