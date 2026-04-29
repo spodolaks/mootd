@@ -314,6 +314,8 @@ func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
 		h.getUserWardrobe(w, r, id)
 	case "moodboards":
 		h.getUserMoodboards(w, r, id)
+	case "outfits":
+		h.getUserOutfits(w, r, id)
 	case "spend":
 		h.getUserSpend(w, r, id)
 	default:
@@ -404,6 +406,40 @@ func (h *Handler) getUserMoodboards(w http.ResponseWriter, r *http.Request, id s
 	}
 	response.WriteJSON(w, http.StatusOK, UserMoodboardsPage{
 		Items:      items,
+		NextCursor: nextCursor,
+	})
+}
+
+// getUserOutfits handles GET /admin/v1/users/{id}/outfits.
+//
+// Cursor-paginated, 15 batches per page (each batch has 3-4
+// candidates so 15 batches = ~45-60 outfits per page render).
+// Returns 200 with an empty array for new users.
+func (h *Handler) getUserOutfits(w http.ResponseWriter, r *http.Request, id string) {
+	if id == "" {
+		response.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "missing user id"})
+		return
+	}
+
+	cursor := r.URL.Query().Get("cursor")
+	limit := 15
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil {
+			limit = n
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	batches, nextCursor, err := h.usersRepo.ListOutfitBatches(ctx, id, cursor, limit)
+	if err != nil {
+		h.logger.Printf("admin /users/%s/outfits: repo failed: %v", id, err)
+		response.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	response.WriteJSON(w, http.StatusOK, UserOutfitsPage{
+		Batches:    batches,
 		NextCursor: nextCursor,
 	})
 }

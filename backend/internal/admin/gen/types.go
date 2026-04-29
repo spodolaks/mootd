@@ -68,6 +68,14 @@ const (
 	User SearchHitKind = "user"
 )
 
+// Defines values for UserOutfitBatchStatus.
+const (
+	Completed  UserOutfitBatchStatus = "completed"
+	Failed     UserOutfitBatchStatus = "failed"
+	Pending    UserOutfitBatchStatus = "pending"
+	Processing UserOutfitBatchStatus = "processing"
+)
+
 // Defines values for UserSummaryTier.
 const (
 	UserSummaryTierBeta    UserSummaryTier = "beta"
@@ -533,6 +541,41 @@ type UserMoodboardsPage struct {
 	NextCursor *string         `json:"nextCursor,omitempty"`
 }
 
+// UserOutfitBatch One generation request — the persisted outfit_jobs row that
+// backs the user's POST /v1/outfits/generate call. Carries
+// the candidates the LLM produced + the job's status + when
+// it ran so admins can see what was offered alongside what
+// the user ultimately picked (Moodboards tab).
+type UserOutfitBatch struct {
+	Candidates []UserOutfitCandidate `json:"candidates"`
+	CreatedAt  time.Time             `json:"createdAt"`
+
+	// Error Populated only when status = failed.
+	Error     *string               `json:"error,omitempty"`
+	Id        string                `json:"id"`
+	Status    UserOutfitBatchStatus `json:"status"`
+	UpdatedAt *time.Time            `json:"updatedAt,omitempty"`
+}
+
+// UserOutfitBatchStatus defines model for UserOutfitBatch.Status.
+type UserOutfitBatchStatus string
+
+// UserOutfitCandidate One LLM-generated outfit candidate inside an outfit_jobs
+// batch. Untyped outfit payload because the wire shape mirrors
+// whatever the LLM produced — name / description / items /
+// layoutRoles / visualWeights / palette / etc. Frontend
+// renders a small subset and offers the rest as raw JSON for
+// admin inspection.
+type UserOutfitCandidate map[string]interface{}
+
+// UserOutfitsPage One page of outfit batches for a user, newest first. Cursor
+// pagination on (createdAt desc, _id desc) — same flavour as
+// Wardrobe + Moodboards.
+type UserOutfitsPage struct {
+	Batches    []UserOutfitBatch `json:"batches"`
+	NextCursor *string           `json:"nextCursor,omitempty"`
+}
+
 // UserSpendBreakdown 30-day per-feature spend timeline for one user. The chart
 // component groups buckets by feature and renders one stacked
 // layer per feature. Empty buckets are zero-filled at the
@@ -737,6 +780,12 @@ type AdminListUsersParamsSort string
 
 // AdminListUserMoodboardsParams defines parameters for AdminListUserMoodboards.
 type AdminListUserMoodboardsParams struct {
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit  *int    `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// AdminListUserOutfitsParams defines parameters for AdminListUserOutfits.
+type AdminListUserOutfitsParams struct {
 	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
 	Limit  *int    `form:"limit,omitempty" json:"limit,omitempty"`
 }

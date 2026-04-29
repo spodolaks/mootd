@@ -361,6 +361,61 @@ components:
           items:
             $ref: "#/components/schemas/DetectionRunItem"
 
+    UserOutfitCandidate:
+      description: |
+        One LLM-generated outfit candidate inside an outfit_jobs
+        batch. Untyped outfit payload because the wire shape mirrors
+        whatever the LLM produced — name / description / items /
+        layoutRoles / visualWeights / palette / etc. Frontend
+        renders a small subset and offers the rest as raw JSON for
+        admin inspection.
+      type: object
+      additionalProperties: true
+
+    UserOutfitBatch:
+      description: |
+        One generation request — the persisted outfit_jobs row that
+        backs the user's POST /v1/outfits/generate call. Carries
+        the candidates the LLM produced + the job's status + when
+        it ran so admins can see what was offered alongside what
+        the user ultimately picked (Moodboards tab).
+      type: object
+      required: [id, status, createdAt, candidates]
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+          enum: [pending, processing, completed, failed]
+        error:
+          type: string
+          description: Populated only when status = failed.
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        candidates:
+          type: array
+          items:
+            $ref: "#/components/schemas/UserOutfitCandidate"
+
+    UserOutfitsPage:
+      description: |
+        One page of outfit batches for a user, newest first. Cursor
+        pagination on (createdAt desc, _id desc) — same flavour as
+        Wardrobe + Moodboards.
+      type: object
+      required: [batches]
+      properties:
+        batches:
+          type: array
+          items:
+            $ref: "#/components/schemas/UserOutfitBatch"
+        nextCursor:
+          type: string
+
     UserMoodboard:
       description: |
         One saved moodboard surfaced on the admin user-detail page's
@@ -1104,6 +1159,40 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+
+  /admin/v1/users/{id}/outfits:
+    get:
+      operationId: adminListUserOutfits
+      summary: |
+        Paginated outfit batches (one per generation request) for a
+        user (mootd-admin#11 Outfits tab). Each batch carries the
+        3-4 candidates the LLM produced. Use the Moodboards tab to
+        see which one was saved.
+      tags: [users]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: cursor
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 15
+      responses:
+        "200":
+          description: Outfits page.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserOutfitsPage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /admin/v1/users/{id}/moodboards:
     get:

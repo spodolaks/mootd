@@ -44,6 +44,27 @@ type UsersListResponse struct {
 	NextCursor string        `json:"nextCursor,omitempty"`
 }
 
+// UserOutfitBatch is one persisted outfit_jobs row, surfaced on the
+// admin user-detail page's Outfits tab. Carries the candidates the
+// LLM produced + the job's status + when it ran. Cross-domain read
+// of the outfit_jobs collection (admin doesn't import the outfit
+// package — same one-way pattern as wardrobe / moodboards).
+type UserOutfitBatch struct {
+	ID         string                   `bson:"_id"                json:"id"`
+	UserID     string                   `bson:"userId"             json:"userId,omitempty"`
+	Status     string                   `bson:"status"             json:"status"`
+	Error      string                   `bson:"error,omitempty"    json:"error,omitempty"`
+	CreatedAt  time.Time                `bson:"createdAt"          json:"createdAt"`
+	UpdatedAt  time.Time                `bson:"updatedAt,omitempty" json:"updatedAt,omitempty"`
+	Candidates []map[string]any         `bson:"outfits,omitempty"  json:"candidates,omitempty"`
+}
+
+// UserOutfitsPage is the response shape for /admin/v1/users/{id}/outfits.
+type UserOutfitsPage struct {
+	Batches    []UserOutfitBatch `json:"batches"`
+	NextCursor string            `json:"nextCursor,omitempty"`
+}
+
 // UserMoodboard mirrors moodboard.SavedMoodBoard for the admin
 // user-detail page's Moodboards tab. The outfit payload is opaque
 // (map[string]any) so the wire shape doesn't have to import the
@@ -151,6 +172,11 @@ type UsersRepository interface {
 	// SpendBreakdown returns 30-day per-feature spend for one user,
 	// zero-filled and ordered by total-cost feature first.
 	SpendBreakdown(ctx context.Context, userID string, now time.Time) (*UserSpendBreakdown, error)
+	// ListOutfitBatches returns one page of outfit_jobs rows for a
+	// user — each row is one generation request with its 3-4
+	// candidate outfits. Cursor pagination on (createdAt desc,
+	// _id desc) — same flavour as ListWardrobe + ListMoodboards.
+	ListOutfitBatches(ctx context.Context, userID, cursor string, limit int) ([]UserOutfitBatch, string, error)
 }
 
 // UsersMongoRepository is the production implementation.
@@ -735,6 +761,56 @@ func (r *UsersMongoRepository) SpendBreakdown(ctx context.Context, userID string
 		TotalCostUSD: totalCost,
 		Features:     features,
 	}, nil
+}
+
+// outfitJobsCol returns the outfit_jobs collection. Same cross-domain
+// read pattern as moodboardsCol/wardrobeCol — the admin reads what
+// the outfit package writes, without importing it.
+func (r *UsersMongoRepository) outfitJobsCol() *mongo.Collection {
+	return r.client.Database(r.dbName).Collection("outfit_jobs")
+}
+
+// ListOutfitBatches returns one page of outfit_jobs rows for a user.
+// Each row carries the candidates the LLM proposed, plus the job's
+// terminal status. Cursor pagination on (createdAt desc, _id desc).
+//
+// We deliberately accept all statuses (pending / processing /
+// completed / failed) so admins can see in-flight generations and
+// debug failures alongside successes. Failed rows have status =
+// "failed" + a populated error string.
+func (r *UsersMongoRepository) ListOutfitBatches(ctx context.Context, userID, cursor string, limit int) ([]UserOutfitBatch, string, error) {
+	if userID == "" {
+		return nil, "", errors.New("admin: userID required")
+	}
+	if limit <= 0 || limit > 50 {
+		limit = 15
+	}
+	filter := bson.M{"userId": userID}
+	if cursor != "" {
+		filter["_id"] = bson.M{"$lt": cursor}
+	}
+	cur, err := r.outfitJobsCol().Find(ctx, filter,
+		options.Find().
+			SetSort(bson.D{{Key: "createdAt", Value: -1}, {Key: "_id", Value: -1}}).
+			SetLimit(int64(limit+1))) // +1 to detect more
+	if err != nil {
+		return nil, "", err
+	}
+	defer cur.Close(ctx)
+
+	var batches []UserOutfitBatch
+	if err := cur.All(ctx, &batches); err != nil {
+		return nil, "", err
+	}
+	hasMore := len(batches) > limit
+	if hasMore {
+		batches = batches[:limit]
+	}
+	nextCursor := ""
+	if hasMore && len(batches) > 0 {
+		nextCursor = batches[len(batches)-1].ID
+	}
+	return batches, nextCursor, nil
 }
 
 // errUnsupportedSort returned when the caller passes a sort key we
