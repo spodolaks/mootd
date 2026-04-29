@@ -44,6 +44,26 @@ type UsersListResponse struct {
 	NextCursor string        `json:"nextCursor,omitempty"`
 }
 
+// UserWardrobeItem is one clothing item surfaced on the admin
+// user-detail page's Wardrobe tab. Mirrors the wardrobe package's
+// ClothingItem with the same wire shape — we read the same Mongo
+// docs.
+type UserWardrobeItem struct {
+	ID          string            `bson:"_id"          json:"id"`
+	Category    string            `bson:"category"     json:"category"`
+	Label       string            `bson:"label"        json:"label"`
+	ImageURL    string            `bson:"imageUrl"     json:"imageUrl,omitempty"`
+	PngImageURL string            `bson:"pngImageUrl"  json:"pngImageUrl,omitempty"`
+	Traits      map[string]string `bson:"traits"       json:"traits,omitempty"`
+	CreatedAt   time.Time         `bson:"createdAt"    json:"createdAt"`
+}
+
+// UserWardrobePage is the response shape for /admin/v1/users/{id}/wardrobe.
+type UserWardrobePage struct {
+	Items      []UserWardrobeItem `json:"items"`
+	NextCursor string             `json:"nextCursor,omitempty"`
+}
+
 // UserDetail is the drill-through payload for the admin
 // user-detail page (P1-06 / mootd-admin#11). Combines the existing
 // scalar facts (UserSummary) with 30-day spend / call series and a
@@ -83,6 +103,9 @@ type UsersRepository interface {
 	// Case-insensitive contains-match on email. Empty query returns []
 	// (not an error) so caller debouncing is forgiving.
 	SearchUsers(ctx context.Context, query string, maxHits int) ([]SearchHit, error)
+	// ListWardrobe returns one page of a user's wardrobe items,
+	// newest first, cursor-paginated on (createdAt desc, _id desc).
+	ListWardrobe(ctx context.Context, userID, cursor string, limit int) ([]UserWardrobeItem, string, error)
 }
 
 // UsersMongoRepository is the production implementation.
@@ -491,6 +514,53 @@ func (r *UsersMongoRepository) FindDetail(ctx context.Context, userID string) (*
 		TotalCallCount:  totalCount,
 		GeneratedAt:     time.Now().UTC(),
 	}, nil
+}
+
+// ListWardrobe returns one page of a user's wardrobe items.
+// Cursor encodes the previous page's last _id; sort is
+// (createdAt desc, _id desc) for stable pagination across same-
+// millisecond rows.
+//
+// We deliberately re-read the wardrobe_items collection directly
+// rather than going through the wardrobe package's Repository.
+// The admin scope reads only the shape this endpoint returns —
+// re-using wardrobe.Repository would tangle the import graph
+// (admin → wardrobe → … and there's no shared interface today).
+// The doc shape is stable; if it ever drifts, this is a one-line
+// edit alongside the wardrobe package's own ClothingItem.
+func (r *UsersMongoRepository) ListWardrobe(ctx context.Context, userID, cursor string, limit int) ([]UserWardrobeItem, string, error) {
+	if userID == "" {
+		return nil, "", errors.New("admin: userID required")
+	}
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	filter := bson.M{"userId": userID}
+	if cursor != "" {
+		filter["_id"] = bson.M{"$lt": cursor}
+	}
+	cur, err := r.wardrobeCol().Find(ctx, filter,
+		options.Find().
+			SetSort(bson.D{{Key: "createdAt", Value: -1}, {Key: "_id", Value: -1}}).
+			SetLimit(int64(limit+1))) // +1 to detect more
+	if err != nil {
+		return nil, "", err
+	}
+	defer cur.Close(ctx)
+
+	var items []UserWardrobeItem
+	if err := cur.All(ctx, &items); err != nil {
+		return nil, "", err
+	}
+	hasMore := len(items) > limit
+	if hasMore {
+		items = items[:limit]
+	}
+	nextCursor := ""
+	if hasMore && len(items) > 0 {
+		nextCursor = items[len(items)-1].ID
+	}
+	return items, nextCursor, nil
 }
 
 // errUnsupportedSort returned when the caller passes a sort key we

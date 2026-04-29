@@ -278,12 +278,15 @@ func (h *Handler) Overview(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// GetUser handles GET /admin/v1/users/{id}.
+// GetUser handles GET /admin/v1/users/{id} and dispatches on
+// sub-path:
 //
-// Drill-through detail for a single user (P1-06 / mootd-admin#11).
-// Foundation for the user-detail page; full tabbed UI (Wardrobe /
-// Outfits / Moodboards / Budget) builds on this with separate
-// paginated sub-endpoints in follow-up tickets.
+//   /admin/v1/users/{id}            → user detail (P1-06)
+//   /admin/v1/users/{id}/wardrobe   → wardrobe page (mootd-admin#11)
+//
+// Until Go 1.22 path variables, this dispatch lives inside the
+// handler instead of the mux. Adding new sub-paths (outfits /
+// moodboards / etc.) drops one more case into the switch below.
 func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -294,15 +297,28 @@ func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// URL: /admin/v1/users/{id}
-	// Until Go 1.22 path variables propagate everywhere, we strip the
-	// known prefix and use what's left as the ID.
-	id := strings.TrimPrefix(r.URL.Path, "/admin/v1/users/")
-	if id == "" || strings.Contains(id, "/") {
-		response.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "missing or invalid user id"})
+	// Path: /admin/v1/users/{id}[/{sub}]
+	rest := strings.TrimPrefix(r.URL.Path, "/admin/v1/users/")
+	if rest == "" {
+		response.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "missing user id"})
 		return
 	}
+	id, sub := rest, ""
+	if idx := strings.Index(rest, "/"); idx > 0 {
+		id, sub = rest[:idx], rest[idx+1:]
+	}
 
+	switch sub {
+	case "":
+		h.getUserDetail(w, r, id)
+	case "wardrobe":
+		h.getUserWardrobe(w, r, id)
+	default:
+		response.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "unknown user sub-resource"})
+	}
+}
+
+func (h *Handler) getUserDetail(w http.ResponseWriter, r *http.Request, id string) {
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 
@@ -321,6 +337,39 @@ func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
 	// admin has full PII so nothing redacted yet.
 
 	response.WriteJSON(w, http.StatusOK, detail)
+}
+
+// getUserWardrobe handles GET /admin/v1/users/{id}/wardrobe.
+// Cursor-paginated, 50-row default. Returns 404 if the user
+// doesn't exist (caught upstream by FindDetail's null check —
+// here we only verify the id is non-empty).
+func (h *Handler) getUserWardrobe(w http.ResponseWriter, r *http.Request, id string) {
+	if id == "" {
+		response.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "missing user id"})
+		return
+	}
+
+	cursor := r.URL.Query().Get("cursor")
+	limit := 50
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil {
+			limit = n
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	items, nextCursor, err := h.usersRepo.ListWardrobe(ctx, id, cursor, limit)
+	if err != nil {
+		h.logger.Printf("admin /users/%s/wardrobe: repo failed: %v", id, err)
+		response.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	response.WriteJSON(w, http.StatusOK, UserWardrobePage{
+		Items:      items,
+		NextCursor: nextCursor,
+	})
 }
 
 // ListTraces handles GET /admin/v1/traces.

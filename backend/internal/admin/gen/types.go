@@ -472,6 +472,37 @@ type UserSummary struct {
 // UserSummaryTier defines model for UserSummary.Tier.
 type UserSummaryTier string
 
+// UserWardrobeItem One clothing item from a user's wardrobe, surfaced to the
+// admin user-detail page (mootd-admin#11). Mirrors the
+// backend's wardrobe.ClothingItem; pngImageUrl is the
+// background-removed PNG when available, otherwise the
+// original-shot URL.
+type UserWardrobeItem struct {
+	Category  string    `json:"category"`
+	CreatedAt time.Time `json:"createdAt"`
+	Id        string    `json:"id"`
+
+	// ImageUrl Original detection-cropped image URL. May be a signed
+	// GCS link with expiry — frontend should handle 4xx with
+	// a placeholder.
+	ImageUrl *string `json:"imageUrl,omitempty"`
+	Label    string  `json:"label"`
+
+	// PngImageUrl Background-removed PNG; absent when the bg-remove worker hasn't processed yet.
+	PngImageUrl *string `json:"pngImageUrl,omitempty"`
+
+	// Traits Trait key/value pairs (color, fabric, style, occasion, …).
+	Traits *map[string]string `json:"traits,omitempty"`
+}
+
+// UserWardrobePage One page of a user's wardrobe items. Cursor pagination on
+// (createdAt desc, _id desc). Empty nextCursor signals the
+// last page.
+type UserWardrobePage struct {
+	Items      []UserWardrobeItem `json:"items"`
+	NextCursor *string            `json:"nextCursor,omitempty"`
+}
+
 // UsersListResponse defines model for UsersListResponse.
 type UsersListResponse struct {
 	NextCursor *string       `json:"nextCursor,omitempty"`
@@ -584,6 +615,12 @@ type AdminListUsersParamsTier string
 
 // AdminListUsersParamsSort defines parameters for AdminListUsers.
 type AdminListUsersParamsSort string
+
+// AdminListUserWardrobeParams defines parameters for AdminListUserWardrobe.
+type AdminListUserWardrobeParams struct {
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit  *int    `form:"limit,omitempty" json:"limit,omitempty"`
+}
 
 // AdminLoginJSONRequestBody defines body for AdminLogin for application/json ContentType.
 type AdminLoginJSONRequestBody = LoginRequest

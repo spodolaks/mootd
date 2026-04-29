@@ -282,6 +282,55 @@ components:
           type: string
           format: date-time
 
+    UserWardrobeItem:
+      description: |
+        One clothing item from a user's wardrobe, surfaced to the
+        admin user-detail page (mootd-admin#11). Mirrors the
+        backend's wardrobe.ClothingItem; pngImageUrl is the
+        background-removed PNG when available, otherwise the
+        original-shot URL.
+      type: object
+      required: [id, category, label, createdAt]
+      properties:
+        id:
+          type: string
+        category:
+          type: string
+        label:
+          type: string
+        imageUrl:
+          type: string
+          description: |
+            Original detection-cropped image URL. May be a signed
+            GCS link with expiry — frontend should handle 4xx with
+            a placeholder.
+        pngImageUrl:
+          type: string
+          description: Background-removed PNG; absent when the bg-remove worker hasn't processed yet.
+        traits:
+          type: object
+          additionalProperties:
+            type: string
+          description: Trait key/value pairs (color, fabric, style, occasion, …).
+        createdAt:
+          type: string
+          format: date-time
+
+    UserWardrobePage:
+      description: |
+        One page of a user's wardrobe items. Cursor pagination on
+        (createdAt desc, _id desc). Empty nextCursor signals the
+        last page.
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/UserWardrobeItem"
+        nextCursor:
+          type: string
+
     LLMCallDetail:
       description: |
         Full llm_calls row including the inline-archived prompt, user
@@ -811,6 +860,44 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/UserDetail"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: User not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /admin/v1/users/{id}/wardrobe:
+    get:
+      operationId: adminListUserWardrobe
+      summary: |
+        Paginated wardrobe items for a single user (mootd-admin#11
+        wardrobe tab). Cursor pagination on createdAt desc.
+      tags: [users]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: cursor
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+      responses:
+        "200":
+          description: Wardrobe page.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserWardrobePage"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "404":
