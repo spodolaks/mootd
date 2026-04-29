@@ -79,6 +79,10 @@ type UsersRepository interface {
 	// FindDetail returns the full drill-through for a single user.
 	// Returns (nil, nil) when the user doesn't exist (handler maps to 404).
 	FindDetail(ctx context.Context, userID string) (*UserDetail, error)
+	// SearchUsers powers the Cmd+K palette + global search bar.
+	// Case-insensitive contains-match on email. Empty query returns []
+	// (not an error) so caller debouncing is forgiving.
+	SearchUsers(ctx context.Context, query string, maxHits int) ([]SearchHit, error)
 }
 
 // UsersMongoRepository is the production implementation.

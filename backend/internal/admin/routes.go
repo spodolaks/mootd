@@ -38,4 +38,5 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, authLimit Middleware, requi
 	mux.Handle("/admin/v1/traces", requireAdmin(http.HandlerFunc(h.ListTraces)))
 	mux.Handle("/admin/v1/traces/summary", requireAdmin(http.HandlerFunc(h.TracesSummaryHandler)))
 	mux.Handle("/admin/v1/audit", requireAdmin(http.HandlerFunc(h.ListAudit)))
+	mux.Handle("/admin/v1/search", requireAdmin(http.HandlerFunc(h.Search)))
 }

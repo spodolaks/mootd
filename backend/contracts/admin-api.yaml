@@ -401,6 +401,45 @@ components:
         nextCursor:
           type: string
 
+    SearchHit:
+      type: object
+      description: |
+        One result in a global admin search response. Today only
+        `user` results are returned; future kinds (`trace`, `prompt`,
+        `audit`) extend the same shape — frontend dispatches on
+        `kind`.
+      required: [kind, id, title]
+      properties:
+        kind:
+          type: string
+          enum: [user]
+        id:
+          type: string
+          description: Stable identifier for navigation (e.g. user `_id`).
+        title:
+          type: string
+          description: |
+            Human-readable label. For users, this is the email — the
+            frontend masks before display unless caller has the
+            `users:pii` permission.
+        subtitle:
+          type: string
+          description: Optional secondary line. For users, the display name.
+
+    SearchResponse:
+      type: object
+      description: |
+        Cross-collection search results. Backed by GET
+        /admin/v1/search?q=… — Mongo `$regex` on the obvious
+        identifier columns. Capped at 10 hits per kind to bound
+        cost; admins refine the query when more is needed.
+      required: [hits]
+      properties:
+        hits:
+          type: array
+          items:
+            $ref: "#/components/schemas/SearchHit"
+
     AuditEntry:
       type: object
       description: |
@@ -832,6 +871,37 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+  /admin/v1/search:
+    get:
+      operationId: adminSearch
+      summary: |
+        Cross-collection search for the Cmd+K palette and (future)
+        global search bar (mootd-admin#92). Today: user-by-email
+        only. The kind dispatch in SearchHit is intentional so
+        future kinds (trace, prompt, audit) extend without breaking
+        callers.
+      tags: [search]
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 2
+          description: |
+            Search query. Case-insensitive contains-match against
+            indexed columns. <2 chars returns an empty result set
+            (rather than a 400) so caller debouncing is forgiving.
+      responses:
+        "200":
+          description: Search hits.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
   /admin/v1/audit:
     get:
       operationId: adminListAudit
@@ -890,6 +960,8 @@ tags:
     description: Dashboard top-line metrics.
   - name: audit
     description: Audit log feed.
+  - name: search
+    description: Cross-collection search for the command palette.
   - name: users
     description: User list + drill-through.
   - name: traces

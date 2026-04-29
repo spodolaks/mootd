@@ -509,6 +509,69 @@ func timeStr(t *time.Time) string {
 	return t.UTC().Format(time.RFC3339)
 }
 
+// Search handles GET /admin/v1/search.
+//
+// Cross-collection lookup behind the Cmd+K palette + (future) global
+// search bar (mootd-admin#92). Today: user-by-email only. Returns
+// up to 10 hits per kind.
+//
+// Audit: every query writes a row with action=search.users and the
+// query string in metadata. Search reveals identifying data (emails)
+// — that's an admin action worth recording.
+func (h *Handler) Search(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if h.usersRepo == nil {
+		response.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "users repository not configured"})
+		return
+	}
+
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	// Spec says <2 chars returns empty — keeps the FE debounce
+	// behaviour tolerant (a single keystroke shouldn't 400).
+	if len(q) < 2 {
+		response.WriteJSON(w, http.StatusOK, SearchResponse{Hits: []SearchHit{}})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	hits, err := h.usersRepo.SearchUsers(ctx, q, 10)
+	if err != nil {
+		h.logger.Printf("admin /search: users failed: %v", err)
+		response.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+
+	// Audit. Best-effort — the search itself succeeded, lost audit
+	// rows surface in monitoring, never a 5xx to the caller.
+	if h.repo != nil {
+		adminID, _ := AdminIDFromContext(r.Context())
+		var adminEmail string
+		if a, _ := h.repo.FindByID(r.Context(), adminID); a != nil {
+			adminEmail = a.Email
+		}
+		Audit(r.Context(), h.repo, h.logger, AuditEntry{
+			ID:         generateAuditID(),
+			AdminID:    adminID,
+			AdminEmail: adminEmail,
+			Action:     "search.users",
+			At:         time.Now().UTC(),
+			IP:         clientIP(r),
+			UserAgent:  r.Header.Get("User-Agent"),
+			Metadata: map[string]any{
+				"query":    q,
+				"hitCount": len(hits),
+			},
+		})
+	}
+
+	response.WriteJSON(w, http.StatusOK, SearchResponse{Hits: hits})
+}
+
 // ListAudit handles GET /admin/v1/audit.
 //
 // Paginated audit-log feed. Filterable by action / adminId /

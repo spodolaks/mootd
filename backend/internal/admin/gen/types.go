@@ -49,6 +49,11 @@ const (
 	Today OverviewPeriod = "today"
 )
 
+// Defines values for SearchHitKind.
+const (
+	User SearchHitKind = "user"
+)
+
 // Defines values for UserSummaryTier.
 const (
 	UserSummaryTierBeta    UserSummaryTier = "beta"
@@ -298,6 +303,35 @@ type RefreshRequest struct {
 	RefreshToken string `json:"refreshToken"`
 }
 
+// SearchHit One result in a global admin search response. Today only
+// `user` results are returned; future kinds (`trace`, `prompt`,
+// `audit`) extend the same shape — frontend dispatches on
+// `kind`.
+type SearchHit struct {
+	// Id Stable identifier for navigation (e.g. user `_id`).
+	Id   string        `json:"id"`
+	Kind SearchHitKind `json:"kind"`
+
+	// Subtitle Optional secondary line. For users, the display name.
+	Subtitle *string `json:"subtitle,omitempty"`
+
+	// Title Human-readable label. For users, this is the email — the
+	// frontend masks before display unless caller has the
+	// `users:pii` permission.
+	Title string `json:"title"`
+}
+
+// SearchHitKind defines model for SearchHit.Kind.
+type SearchHitKind string
+
+// SearchResponse Cross-collection search results. Backed by GET
+// /admin/v1/search?q=… — Mongo `$regex` on the obvious
+// identifier columns. Capped at 10 hits per kind to bound
+// cost; admins refine the query when more is needed.
+type SearchResponse struct {
+	Hits []SearchHit `json:"hits"`
+}
+
 // TracesPage defines model for TracesPage.
 type TracesPage struct {
 	Calls      []LLMCallSnapshot `json:"calls"`
@@ -413,6 +447,14 @@ type AdminOverviewParams struct {
 	// regardless of period — they're the trend, not the
 	// headline.
 	Period *OverviewPeriod `form:"period,omitempty" json:"period,omitempty"`
+}
+
+// AdminSearchParams defines parameters for AdminSearch.
+type AdminSearchParams struct {
+	// Q Search query. Case-insensitive contains-match against
+	// indexed columns. <2 chars returns an empty result set
+	// (rather than a 400) so caller debouncing is forgiving.
+	Q string `form:"q" json:"q"`
 }
 
 // AdminListTracesParams defines parameters for AdminListTraces.
