@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"mootd/backend/internal/buildinfo"
@@ -275,6 +276,51 @@ func (h *Handler) Overview(w http.ResponseWriter, r *http.Request) {
 		CacheMetrics:    cacheMetrics,
 		GeneratedAt:     now,
 	})
+}
+
+// GetUser handles GET /admin/v1/users/{id}.
+//
+// Drill-through detail for a single user (P1-06 / mootd-admin#11).
+// Foundation for the user-detail page; full tabbed UI (Wardrobe /
+// Outfits / Moodboards / Budget) builds on this with separate
+// paginated sub-endpoints in follow-up tickets.
+func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if h.usersRepo == nil {
+		response.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "users repository not configured"})
+		return
+	}
+
+	// URL: /admin/v1/users/{id}
+	// Until Go 1.22 path variables propagate everywhere, we strip the
+	// known prefix and use what's left as the ID.
+	id := strings.TrimPrefix(r.URL.Path, "/admin/v1/users/")
+	if id == "" || strings.Contains(id, "/") {
+		response.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "missing or invalid user id"})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	detail, err := h.usersRepo.FindDetail(ctx, id)
+	if err != nil {
+		h.logger.Printf("admin /users/{id}: repo failed: %v", err)
+		response.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	if detail == nil {
+		response.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "user not found"})
+		return
+	}
+
+	// PII redaction hook — same pattern as ListUsers; phase-0 every
+	// admin has full PII so nothing redacted yet.
+
+	response.WriteJSON(w, http.StatusOK, detail)
 }
 
 // ListTraces handles GET /admin/v1/traces.

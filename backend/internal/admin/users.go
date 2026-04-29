@@ -44,6 +44,22 @@ type UsersListResponse struct {
 	NextCursor string        `json:"nextCursor,omitempty"`
 }
 
+// UserDetail is the drill-through payload for the admin
+// user-detail page (P1-06 / mootd-admin#11). Combines the existing
+// scalar facts (UserSummary) with 30-day spend / call series and a
+// page of recent calls. Future tabs (Wardrobe / Outfits /
+// Moodboards / Budget) will be served via separate paginated
+// endpoints; this stays additive.
+type UserDetail struct {
+	Summary         UserSummary       `json:"summary"`
+	SpendSeries     []DailyMetric     `json:"spendSeries,omitempty"`
+	CallCountSeries []DailyMetric     `json:"callCountSeries,omitempty"`
+	RecentCalls     []LLMCallSnapshot `json:"recentCalls,omitempty"`
+	TotalSpendUSD   float64           `json:"totalSpendUsd"`
+	TotalCallCount  int64             `json:"totalCallCount"`
+	GeneratedAt     time.Time         `json:"generatedAt"`
+}
+
 // UsersQuery is the filter set accepted by GET /admin/v1/users. Kept
 // as a struct so the handler doesn't have a 6-arg call site.
 type UsersQuery struct {
@@ -60,6 +76,9 @@ type UsersQuery struct {
 // collections + llm_calls — never writes them.
 type UsersRepository interface {
 	ListSummaries(ctx context.Context, q UsersQuery) ([]UserSummary, string, error)
+	// FindDetail returns the full drill-through for a single user.
+	// Returns (nil, nil) when the user doesn't exist (handler maps to 404).
+	FindDetail(ctx context.Context, userID string) (*UserDetail, error)
 }
 
 // UsersMongoRepository is the production implementation.
@@ -339,6 +358,135 @@ func sortSummaries(s []UserSummary, key string) {
 	case "-spend_7d":
 		sort.SliceStable(s, func(i, j int) bool { return s[i].Last7dSpendUsd > s[j].Last7dSpendUsd })
 	}
+}
+
+// FindDetail builds the drill-through payload for one user. Stitches:
+//   - The existing UserSummary (item counts + 7d aggregates)
+//   - 30-day daily spend + call-count series for spark rendering
+//   - Last 25 LLM calls for the activity feed
+//   - Lifetime totals (totalSpendUsd, totalCallCount)
+//
+// Three Mongo round-trips: the user doc itself, one $group for series,
+// one Find+Limit for recent calls. ApproxDAU-style index access; no
+// scans even for high-volume users.
+//
+// Returns (nil, nil) when the user doesn't exist so the handler can
+// emit 404 without inspecting an error type.
+func (r *UsersMongoRepository) FindDetail(ctx context.Context, userID string) (*UserDetail, error) {
+	if userID == "" {
+		return nil, nil
+	}
+
+	// 1) The user doc.
+	var doc userListDoc
+	err := r.usersCol().FindOne(ctx, bson.M{"_id": userID}).Decode(&doc)
+	if err != nil {
+		if err.Error() == "mongo: no documents in result" {
+			return nil, nil
+		}
+		// errors.Is is the proper check but we avoid pulling
+		// mongo.ErrNoDocuments into this file's surface.
+		return nil, err
+	}
+
+	// 2) The existing summary fan-out: counts + 7d aggregates +
+	// spend join. populateSummaries handles all of this.
+	summaries := r.populateSummaries(ctx, []userListDoc{doc})
+	var summary UserSummary
+	if len(summaries) > 0 {
+		summary = summaries[0]
+	} else {
+		summary = UserSummary{ID: doc.ID, Email: doc.Email, Name: doc.Name, SignupDate: doc.CreatedAt, LastActiveAt: doc.UpdatedAt}
+	}
+
+	// 3) 30-day daily series for this user (spend + call count).
+	startOfWindow := time.Now().UTC().Truncate(24 * time.Hour).Add(-29 * 24 * time.Hour)
+	pipeline := mongo.Pipeline{
+		{{Key: "$match", Value: bson.M{
+			"userId":    userID,
+			"createdAt": bson.M{"$gte": startOfWindow},
+		}}},
+		{{Key: "$group", Value: bson.M{
+			"_id":   bson.M{"$dateToString": bson.M{"format": "%Y-%m-%d", "date": "$createdAt", "timezone": "UTC"}},
+			"spend": bson.M{"$sum": "$costUsd"},
+			"count": bson.M{"$sum": 1},
+		}}},
+	}
+	cur, err := r.llmCallsCol().Aggregate(ctx, pipeline)
+	if err != nil {
+		// Best-effort: failed series shouldn't fail the whole detail.
+		// Log path should be in the handler.
+		cur = nil
+	}
+	type bucket struct {
+		ID    string  `bson:"_id"`
+		Spend float64 `bson:"spend"`
+		Count int64   `bson:"count"`
+	}
+	var buckets []bucket
+	if cur != nil {
+		_ = cur.All(ctx, &buckets)
+		_ = cur.Close(ctx)
+	}
+	byDate := make(map[string]bucket, len(buckets))
+	for _, b := range buckets {
+		byDate[b.ID] = b
+	}
+	spendSeries := make([]DailyMetric, 0, 30)
+	countSeries := make([]DailyMetric, 0, 30)
+	for i := 0; i < 30; i++ {
+		d := startOfWindow.Add(time.Duration(i) * 24 * time.Hour)
+		key := d.Format("2006-01-02")
+		b := byDate[key]
+		spendSeries = append(spendSeries, DailyMetric{Date: key, Value: b.Spend})
+		countSeries = append(countSeries, DailyMetric{Date: key, Value: float64(b.Count)})
+	}
+
+	// 4) Last 25 calls for this user.
+	callsCur, err := r.llmCallsCol().Find(
+		ctx,
+		bson.M{"userId": userID},
+		findOpts().SetSort(bson.D{{Key: "createdAt", Value: -1}, {Key: "_id", Value: -1}}).SetLimit(25),
+	)
+	var calls []LLMCallSnapshot
+	if err == nil && callsCur != nil {
+		_ = callsCur.All(ctx, &calls)
+		_ = callsCur.Close(ctx)
+	}
+
+	// 5) Lifetime totals — same aggregation, no date bound.
+	var totalSpend float64
+	var totalCount int64
+	totalsCur, err := r.llmCallsCol().Aggregate(ctx, mongo.Pipeline{
+		{{Key: "$match", Value: bson.M{"userId": userID}}},
+		{{Key: "$group", Value: bson.M{
+			"_id":   nil,
+			"spend": bson.M{"$sum": "$costUsd"},
+			"count": bson.M{"$sum": 1},
+		}}},
+	})
+	if err == nil && totalsCur != nil {
+		var rows []struct {
+			Spend float64 `bson:"spend"`
+			Count int64   `bson:"count"`
+		}
+		_ = totalsCur.All(ctx, &rows)
+		_ = totalsCur.Close(ctx)
+		if len(rows) > 0 {
+			totalSpend = rows[0].Spend
+			totalCount = rows[0].Count
+		}
+	}
+
+	return &UserDetail{
+		Summary:         summary,
+		SpendSeries:     spendSeries,
+		CallCountSeries: countSeries,
+		RecentCalls:     calls,
+		TotalSpendUSD:   totalSpend,
+		TotalCallCount:  totalCount,
+		GeneratedAt:     time.Now().UTC(),
+	}, nil
 }
 
 // errUnsupportedSort returned when the caller passes a sort key we

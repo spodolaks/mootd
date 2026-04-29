@@ -31,6 +31,9 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, authLimit Middleware, requi
 	mux.Handle("/admin/v1/me", requireAdmin(http.HandlerFunc(h.Me)))
 	mux.Handle("/admin/v1/build-info", requireAdmin(http.HandlerFunc(h.BuildInfoHandler)))
 	mux.Handle("/admin/v1/users", requireAdmin(http.HandlerFunc(h.ListUsers)))
+	// /admin/v1/users/{id} — net/http (pre-1.22) doesn't pattern-match
+	// path variables, so we register a prefix and the handler trims it.
+	mux.Handle("/admin/v1/users/", requireAdmin(http.HandlerFunc(h.GetUser)))
 	mux.Handle("/admin/v1/overview", requireAdmin(http.HandlerFunc(h.Overview)))
 	mux.Handle("/admin/v1/traces", requireAdmin(http.HandlerFunc(h.ListTraces)))
 	mux.Handle("/admin/v1/traces/summary", requireAdmin(http.HandlerFunc(h.TracesSummaryHandler)))

@@ -192,6 +192,45 @@ components:
         nextCursor:
           type: string
 
+    UserDetail:
+      type: object
+      description: |
+        Drill-through payload for the admin user-detail page (P1-06).
+        Combines the existing UserSummary scalar facts with 30-day
+        spend + recent LLM calls. Future tabs (Wardrobe / Outfits /
+        Moodboards / Budget) extend this with separate paginated
+        endpoints; the spec shape stays additive.
+      required: [summary, totalSpendUsd, totalCallCount, generatedAt]
+      properties:
+        summary:
+          $ref: "#/components/schemas/UserSummary"
+        spendSeries:
+          type: array
+          items:
+            $ref: "#/components/schemas/DailyMetric"
+          description: 30-day daily spend (USD) for this user.
+        callCountSeries:
+          type: array
+          items:
+            $ref: "#/components/schemas/DailyMetric"
+          description: 30-day daily LLM call count for this user.
+        recentCalls:
+          type: array
+          items:
+            $ref: "#/components/schemas/LLMCallSnapshot"
+          description: Last 25 LLM calls for this user (newest first).
+        totalSpendUsd:
+          type: number
+          format: double
+          description: Lifetime spend across all calls.
+        totalCallCount:
+          type: integer
+          format: int64
+          description: Lifetime LLM call count.
+        generatedAt:
+          type: string
+          format: date-time
+
     LLMCallSnapshot:
       type: object
       required:
@@ -578,6 +617,36 @@ paths:
                 $ref: "#/components/schemas/UsersListResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
+
+  /admin/v1/users/{id}:
+    get:
+      operationId: adminGetUser
+      summary: |
+        Drill-through detail for a single user (P1-06). Foundation
+        for the admin user-detail page; tabs (Wardrobe / Outfits /
+        Moodboards / Budget) extend with paginated sub-endpoints in
+        follow-up tickets.
+      tags: [users]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: User detail.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserDetail"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: User not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /admin/v1/traces:
     get:

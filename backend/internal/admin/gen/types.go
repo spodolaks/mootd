@@ -285,6 +285,30 @@ type TracesSummary struct {
 	TotalCount int64 `json:"totalCount"`
 }
 
+// UserDetail Drill-through payload for the admin user-detail page (P1-06).
+// Combines the existing UserSummary scalar facts with 30-day
+// spend + recent LLM calls. Future tabs (Wardrobe / Outfits /
+// Moodboards / Budget) extend this with separate paginated
+// endpoints; the spec shape stays additive.
+type UserDetail struct {
+	// CallCountSeries 30-day daily LLM call count for this user.
+	CallCountSeries *[]DailyMetric `json:"callCountSeries,omitempty"`
+	GeneratedAt     time.Time      `json:"generatedAt"`
+
+	// RecentCalls Last 25 LLM calls for this user (newest first).
+	RecentCalls *[]LLMCallSnapshot `json:"recentCalls,omitempty"`
+
+	// SpendSeries 30-day daily spend (USD) for this user.
+	SpendSeries *[]DailyMetric `json:"spendSeries,omitempty"`
+	Summary     UserSummary    `json:"summary"`
+
+	// TotalCallCount Lifetime LLM call count.
+	TotalCallCount int64 `json:"totalCallCount"`
+
+	// TotalSpendUsd Lifetime spend across all calls.
+	TotalSpendUsd float64 `json:"totalSpendUsd"`
+}
+
 // UserSummary defines model for UserSummary.
 type UserSummary struct {
 	// Email Redacted (`u***@gmail.com`) unless caller has the `users:pii`
