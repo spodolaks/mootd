@@ -103,6 +103,15 @@ func (r *MongoLLMCallRepository) ensureIndexes(ctx context.Context) error {
 			Options: options.Index().SetName("llm_calls_feature_created"),
 		},
 		{
+			// Powers /admin/v1/traces?status=error filters + the
+			// "show me every failed call this hour" admin query.
+			// Tiny cardinality (success / error / timeout) but the
+			// index lets Mongo skip non-matching rows on the hot
+			// firehose path instead of scanning + filtering.
+			Keys:    bson.D{{Key: "status", Value: 1}, {Key: "createdAt", Value: -1}},
+			Options: options.Index().SetName("llm_calls_status_created"),
+		},
+		{
 			Keys: bson.D{{Key: "promptVersion", Value: 1}, {Key: "createdAt", Value: -1}},
 			Options: options.Index().SetName("llm_calls_promptversion_created"),
 		},
