@@ -74,7 +74,7 @@ func (h *Handler) Detect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	detected, err := h.detector.Detect(r.Context(), imageData, header.Filename)
+	detected, err := h.detector.Detect(r.Context(), userID, imageData, header.Filename)
 	if err != nil {
 		h.logger.Printf("wardrobe: detect for user %s: %v", userID, err)
 		response.WriteJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "clothing detection failed"})
@@ -324,7 +324,7 @@ func (h *Handler) runDetectionJob(jobID, userID string, imageData []byte, filena
 		h.logger.Printf("wardrobe: mark job %s processing: %v", jobID, err)
 	}
 
-	detected, err := h.detector.Detect(ctx, imageData, filename)
+	detected, err := h.detector.Detect(ctx, userID, imageData, filename)
 	if err != nil {
 		h.logger.Printf("wardrobe: detect for job %s: %v", jobID, err)
 		failed := &DetectJob{ID: jobID, UserID: userID, Status: DetectJobFailed, Error: "clothing detection failed", CreatedAt: time.Now().UTC()}

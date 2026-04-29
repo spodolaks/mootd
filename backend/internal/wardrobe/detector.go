@@ -20,11 +20,17 @@ import (
 // Detector submits images to the clothing-detection service and returns
 // detected items. The local service (Cloth Detection API) responds
 // synchronously — no polling required.
+//
+// recorder is an optional dependency that lets the detector emit
+// observability rows for each upstream LLM call the detection service
+// reports under `stats`. nil disables the emission (test setups, dev
+// opt-out). Wired identically to the outfit service's recorder hook.
 type Detector struct {
-	baseURL string
-	apiKey  string
-	client  *http.Client
-	logger  *log.Logger
+	baseURL  string
+	apiKey   string
+	client   *http.Client
+	logger   *log.Logger
+	recorder LLMRecorder // optional
 }
 
 // NewDetector creates a Detector.
@@ -37,11 +43,76 @@ func NewDetector(baseURL, apiKey string, logger *log.Logger) *Detector {
 	}
 }
 
+// WithRecorder returns the Detector wired with an LLMRecorder. Used
+// by app.go to thread observability into detection calls without
+// changing the constructor signature (which is shared with tests).
+func (d *Detector) WithRecorder(r LLMRecorder) *Detector {
+	d.recorder = r
+	return d
+}
+
+// LLMRecorder is the narrow interface the detector needs from
+// observability.LLMRecorder. Defined here so the wardrobe package
+// doesn't import observability directly — the dependency is injected
+// at app.go via a thin adapter.
+type LLMRecorder interface {
+	Record(ctx context.Context, cc DetectorRecorderContext, obs DetectorRecorderObservation)
+}
+
+// DetectorRecorderContext mirrors observability.CallContext for the
+// fields the detection path supplies.
+type DetectorRecorderContext struct {
+	UserID  string
+	Feature string // "detection_analyze" | "detection_generate"
+}
+
+// DetectorRecorderObservation mirrors observability.CallObservation.
+type DetectorRecorderObservation struct {
+	Provider     string
+	Model        string
+	InputTokens  int
+	OutputTokens int
+	StartedAt    time.Time
+	EndedAt      time.Time
+	Err          error
+}
+
 // --- Local Cloth Detection API response types (POST /api/v1/generate) ---
 
 type generateResponse struct {
 	GeneratedImages []generatedImage `json:"generated_images"`
 	OverallStyle    string           `json:"overall_style"`
+	Stats           *detectionStats  `json:"stats,omitempty"`
+}
+
+// DetectionStats captures the per-request cost / timing breakdown the
+// detection service returns under `stats`. Populated as of the
+// 2026-04 service update; absent on older deployments.
+//
+// Each modelStats block represents a single billable LLM call the
+// service made on our behalf (Claude for trait analysis,
+// gpt-image-1 for the per-item image generation). The wardrobe layer
+// uses these to write llm_calls rows so detection costs surface in
+// /admin/v1/traces alongside outfit-generation costs.
+type detectionStats struct {
+	Claude           *modelStats        `json:"claude,omitempty"`
+	OpenAIImages     *modelStats        `json:"openai_images,omitempty"`
+	LocalModels      []localModelStats  `json:"local_models,omitempty"`
+	TotalWallSeconds float64            `json:"total_wall_seconds,omitempty"`
+	ModelsUsed       []string           `json:"models_used,omitempty"`
+}
+
+type modelStats struct {
+	InputTokens  int    `json:"input_tokens"`
+	OutputTokens int    `json:"output_tokens"`
+	TotalTokens  int    `json:"total_tokens"`
+	Model        string `json:"model"`
+}
+
+type localModelStats struct {
+	ModelName    string  `json:"model_name"`
+	CPUSeconds   float64 `json:"cpu_seconds"`
+	WallSeconds  float64 `json:"wall_seconds"`
 }
 
 type generatedImage struct {
@@ -56,10 +127,11 @@ type generatedImage struct {
 // --- Local Cloth Detection API response types (POST /api/v1/analyze) ---
 
 type analyzeResponse struct {
-	Items             []analyzeItem `json:"items"`
-	Accessories       []analyzeItem `json:"accessories"`
-	OverallStyle      string        `json:"overall_style"`
-	SegmentationLabel []string      `json:"segmentation_labels"`
+	Items             []analyzeItem   `json:"items"`
+	Accessories       []analyzeItem   `json:"accessories"`
+	OverallStyle      string          `json:"overall_style"`
+	SegmentationLabel []string        `json:"segmentation_labels"`
+	Stats             *detectionStats `json:"stats,omitempty"`
 }
 
 type analyzeItem struct {
@@ -112,39 +184,49 @@ type jobItem struct {
 // Detect submits an image to the local detection service.
 // It calls /api/v1/analyze for traits and /api/v1/generate for per-item images,
 // then merges the results into jobItems the handler can process.
-func (d *Detector) Detect(ctx context.Context, imageData []byte, filename string) ([]jobItem, error) {
+//
+// userID is required for the observability emission (so detection
+// rows in /admin/v1/traces attribute to the right user). Pass "" to
+// skip recorder emission entirely.
+func (d *Detector) Detect(ctx context.Context, userID string, imageData []byte, filename string) ([]jobItem, error) {
 	// Run analyze and generate in parallel.
 	type analyzeResult struct {
-		resp *analyzeResponse
-		err  error
+		resp     *analyzeResponse
+		err      error
+		startedAt time.Time
+		endedAt  time.Time
 	}
 	type generateResult struct {
-		resp *generateResponse
-		err  error
+		resp      *generateResponse
+		err       error
+		startedAt time.Time
+		endedAt   time.Time
 	}
 
 	analyzeCh := make(chan analyzeResult, 1)
 	generateCh := make(chan generateResult, 1)
 
 	go func() {
+		startedAt := time.Now().UTC()
 		defer func() {
 			if r := recover(); r != nil {
 				d.logger.Printf("wardrobe: detector: analyze panic: %v", r)
-				analyzeCh <- analyzeResult{nil, fmt.Errorf("analyze panic: %v", r)}
+				analyzeCh <- analyzeResult{nil, fmt.Errorf("analyze panic: %v", r), startedAt, time.Now().UTC()}
 			}
 		}()
 		resp, err := d.callAnalyze(ctx, imageData, filename)
-		analyzeCh <- analyzeResult{resp, err}
+		analyzeCh <- analyzeResult{resp, err, startedAt, time.Now().UTC()}
 	}()
 	go func() {
+		startedAt := time.Now().UTC()
 		defer func() {
 			if r := recover(); r != nil {
 				d.logger.Printf("wardrobe: detector: generate panic: %v", r)
-				generateCh <- generateResult{nil, fmt.Errorf("generate panic: %v", r)}
+				generateCh <- generateResult{nil, fmt.Errorf("generate panic: %v", r), startedAt, time.Now().UTC()}
 			}
 		}()
 		resp, err := d.callGenerate(ctx, imageData, filename)
-		generateCh <- generateResult{resp, err}
+		generateCh <- generateResult{resp, err, startedAt, time.Now().UTC()}
 	}()
 
 	aResult := <-analyzeCh
@@ -156,6 +238,16 @@ func (d *Detector) Detect(ctx context.Context, imageData []byte, filename string
 	if gResult.err != nil {
 		d.logger.Printf("wardrobe: detector: generate failed: %v", gResult.err)
 	}
+
+	// Emit observability rows for each upstream LLM the detection
+	// service reported under `stats`. Best-effort — the recorder
+	// itself swallows write failures, so a Mongo blip never fails
+	// the user-facing detection.
+	d.recordStats(ctx, userID, "detection_analyze",
+		statsOf(aResult.resp), aResult.err, aResult.startedAt, aResult.endedAt)
+	d.recordStats(ctx, userID, "detection_generate",
+		statsOf(gResult.resp), gResult.err, gResult.startedAt, gResult.endedAt)
+
 	if aResult.err != nil && gResult.err != nil {
 		return nil, fmt.Errorf("analyze: %w; generate: %w", aResult.err, gResult.err)
 	}
@@ -330,6 +422,72 @@ func createFormFileWithMIME(w *multipart.Writer, fieldname, filename string) (io
 	h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="%s"; filename="%s"`, fieldname, filename))
 	h.Set("Content-Type", ct)
 	return w.CreatePart(h)
+}
+
+// statsOf is a tiny helper that lets callers pull *detectionStats
+// off either response shape uniformly. Returns nil when the response
+// itself is nil OR the stats block is absent (older detection-service
+// builds).
+func statsOf(resp interface{}) *detectionStats {
+	switch r := resp.(type) {
+	case *analyzeResponse:
+		if r == nil {
+			return nil
+		}
+		return r.Stats
+	case *generateResponse:
+		if r == nil {
+			return nil
+		}
+		return r.Stats
+	default:
+		return nil
+	}
+}
+
+// recordStats emits one llm_calls row per paid LLM the detection
+// service used. Local-model timing (yolos / segformer) is not in the
+// LLM ledger — those models are CPU-billed, not token-billed; if we
+// want them tracked separately a sibling `compute_costs` ledger is
+// the right shape, not this one. Best-effort: skipped silently when
+// no recorder is wired or stats is nil. The transport-level error
+// rides on the *first* row we emit so admins can see "the call
+// failed at this provider"; subsequent rows record success.
+//
+// userID == "" disables emission entirely (test setups).
+func (d *Detector) recordStats(ctx context.Context, userID, feature string, stats *detectionStats, err error, startedAt, endedAt time.Time) {
+	if d.recorder == nil || userID == "" || stats == nil {
+		return
+	}
+	cc := DetectorRecorderContext{UserID: userID, Feature: feature}
+	// Claude: trait analysis (always present when /analyze or
+	// /generate succeeded — both call the same Claude pipeline).
+	if stats.Claude != nil && stats.Claude.Model != "" {
+		d.recorder.Record(ctx, cc, DetectorRecorderObservation{
+			Provider:     "anthropic",
+			Model:        stats.Claude.Model,
+			InputTokens:  stats.Claude.InputTokens,
+			OutputTokens: stats.Claude.OutputTokens,
+			StartedAt:    startedAt,
+			EndedAt:      endedAt,
+			Err:          err,
+		})
+	}
+	// gpt-image-1: per-item image generation (only on /generate).
+	if stats.OpenAIImages != nil && stats.OpenAIImages.Model != "" {
+		d.recorder.Record(ctx, cc, DetectorRecorderObservation{
+			Provider:     "openai",
+			Model:        stats.OpenAIImages.Model,
+			InputTokens:  stats.OpenAIImages.InputTokens,
+			OutputTokens: stats.OpenAIImages.OutputTokens,
+			StartedAt:    startedAt,
+			EndedAt:      endedAt,
+			// Don't double-attribute the transport error to the
+			// second row — the err parameter applies to the upstream
+			// HTTP call, which already bubbled into the first emission.
+			Err: nil,
+		})
+	}
 }
 
 // buildTraits converts the rich analyze response into a flat traits map,

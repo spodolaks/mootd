@@ -231,6 +231,17 @@ func SeedDefaults(ctx context.Context, repo PriceRepository, logger *log.Logger)
 		{Model: "claude-sonnet-4-5", Provider: "anthropic", InputUsdPerMTok: 3.00, OutputUsdPerMTok: 15.00, CacheWriteUsdPerMTok: 3.75, CacheReadUsdPerMTok: 0.30, EffectiveFrom: from, Notes: "alias used by ANTHROPIC_MODEL default"},
 		{Model: "gpt-4o", Provider: "openai", InputUsdPerMTok: 2.50, OutputUsdPerMTok: 10.00, CacheReadUsdPerMTok: 1.25, EffectiveFrom: from, Notes: "2026-04 baseline; cache_read uses prompt_tokens_details.cached_tokens"},
 		{Model: "gpt-4o-mini", Provider: "openai", InputUsdPerMTok: 0.15, OutputUsdPerMTok: 0.60, CacheReadUsdPerMTok: 0.075, EffectiveFrom: from, Notes: "2026-04 baseline"},
+		// gpt-image-1 — used by the detection service for per-item
+		// image generation (returned in stats.openai_images). OpenAI
+		// publishes a tiered model:
+		//   text input  : $5/Mtok
+		//   image input : $10/Mtok
+		//   image output: $40/Mtok
+		// Detection's input is mostly the original photo (image
+		// tokens) so $10 is a fair approximation; output is always
+		// image tokens at $40. A future refinement can split based
+		// on prompt_tokens_details if the API exposes it.
+		{Model: "gpt-image-1", Provider: "openai", InputUsdPerMTok: 10.00, OutputUsdPerMTok: 40.00, EffectiveFrom: from, Notes: "2026-04 baseline; approx — see seed comment"},
 		// Ollama: free. Stored so the price table still has a row for
 		// the active model when OUTFIT_PROVIDER=ollama; ComputeCost
 		// returns 0 for it cleanly.

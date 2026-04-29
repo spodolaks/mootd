@@ -365,9 +365,12 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 		a.Logger.Fatalf("observability: price table init: %v", err)
 	}
 	priceTable.StartAutoRefresh(workerCtx, 5*time.Minute)
-	llmRecorder := observability.NewOutfitRecorderAdapter(
-		observability.NewLLMRecorder(llmCallRepo, priceTable, a.Logger),
-	)
+	// One core LLMRecorder, two domain adapters. Both detection and
+	// outfit generation flow into the same llm_calls ledger so admins
+	// see total spend across features in /admin/v1/overview.
+	coreLLMRec := observability.NewLLMRecorder(llmCallRepo, priceTable, a.Logger)
+	llmRecorder := observability.NewOutfitRecorderAdapter(coreLLMRec)
+	detector.WithRecorder(observability.NewWardrobeRecorderAdapter(coreLLMRec))
 
 	outfitService := outfit.NewService(a.Logger, outfit.ServiceConfig{
 		Generator:   generator,
