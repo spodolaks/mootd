@@ -33,6 +33,12 @@ type Outfit struct {
 	Items           []string           `bson:"items"            json:"items"`                       // wardrobe item IDs
 	Rationale       string             `bson:"rationale"        json:"rationale,omitempty"`         // 1-line stylist explanation
 	LayoutRoles     map[string]string  `bson:"layoutRoles"      json:"layoutRoles,omitempty"`       // itemID → hero|support|accent
+	// VisualWeights tags the signature piece per outfit (P1-H, prompts.go v2+).
+	// itemID → "statement" | "supporting" | "minor". Optional; older saves and
+	// outfits where the LLM omitted it deserialise unchanged. Without this
+	// field the strict JSON decoder 400s on every save the FE makes since
+	// the v2 prompt landed.
+	VisualWeights   map[string]string  `bson:"visualWeights,omitempty"  json:"visualWeights,omitempty"`
 	Snapshots       []OutfitItem       `bson:"snapshots"        json:"snapshots,omitempty"`         // resolved item data at save time
 	Suggestions     []string           `bson:"suggestions"      json:"suggestions,omitempty"`       // text hints for missing complementary items
 	ArchetypeScores map[string]float64 `bson:"archetypeScores"  json:"archetypeScores,omitempty"`   // archetype alignment at save time
