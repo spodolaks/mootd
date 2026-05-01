@@ -36,6 +36,17 @@ type DetectionRun struct {
 	GenerateStats         *detectionStats         `bson:"generateStats,omitempty"`
 	TotalCostUSD          float64                 `bson:"totalCostUsd,omitempty"`
 	Items                 []DetectionRunItem      `bson:"items,omitempty"`
+
+	// P1-10 (mootd-admin#15) — admin-triggered re-runs.
+	// ParentRunID points back at the original detection_run whose
+	// archived photo we replayed. Empty on the original run.
+	// CreatedBy is the admin ID that triggered the rerun (empty on
+	// user-driven runs). DetectionVersion is a free-text label the
+	// admin chose; the upstream detection service is currently
+	// versionless but the field is forward-compatible.
+	ParentRunID      string `bson:"parentRunId,omitempty"`
+	CreatedBy        string `bson:"createdBy,omitempty"`
+	DetectionVersion string `bson:"detectionVersion,omitempty"`
 }
 
 // DetectionRunItem is one generated image inside a run. Mirrors the
@@ -106,6 +117,11 @@ type DetectionRunRepository interface {
 	SaveInputImage(ctx context.Context, runID string, data []byte, contentType string) error
 	GetInputImage(ctx context.Context, runID string) ([]byte, string, error)
 	SetWardrobeItemIDs(ctx context.Context, runID string, idsByItemType map[string]string) error
+
+	// ListDistinctDetectionVersions returns every non-empty
+	// `detectionVersion` value present in the collection. Powers the
+	// rerun-modal dropdown on the admin UI (P1-10 / mootd-admin#15).
+	ListDistinctDetectionVersions(ctx context.Context) ([]string, error)
 }
 
 // DetectionRunMongoRepository implements DetectionRunRepository
@@ -244,6 +260,32 @@ func (r *DetectionRunMongoRepository) GetInputImage(ctx context.Context, runID s
 		return nil, "", fmt.Errorf("download input image: %w", err)
 	}
 	return buf.Bytes(), contentType, nil
+}
+
+// ListDistinctDetectionVersions returns the set of non-empty
+// `detectionVersion` strings ever seen on detection_runs. Used by
+// the admin rerun modal to populate its version dropdown.
+//
+// The collection is small (one row per detection submission) and
+// the field is sparsely populated (only on admin-triggered re-runs),
+// so a Distinct call is cheap enough — we don't index this field
+// today. If detection volume balloons we can revisit, but typical
+// rerun cadence is human-paced.
+func (r *DetectionRunMongoRepository) ListDistinctDetectionVersions(ctx context.Context) ([]string, error) {
+	res := r.col().Distinct(ctx, "detectionVersion", bson.M{
+		"detectionVersion": bson.M{"$exists": true, "$ne": ""},
+	})
+	if err := res.Err(); err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return []string{}, nil
+		}
+		return nil, fmt.Errorf("distinct detectionVersion: %w", err)
+	}
+	out := []string{}
+	if err := res.Decode(&out); err != nil {
+		return nil, fmt.Errorf("decode detectionVersion values: %w", err)
+	}
+	return out, nil
 }
 
 // SetWardrobeItemIDs patches the items array on a run row, mapping

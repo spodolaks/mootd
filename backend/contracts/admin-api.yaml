@@ -360,6 +360,68 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/DetectionRunItem"
+        parentRunId:
+          type: string
+          description: |
+            For admin-triggered re-runs (P1-10), points back at the
+            original detection_run whose archived photo was replayed.
+            Empty on the original run; set on every child.
+        createdBy:
+          type: string
+          description: |
+            Admin ID that triggered this run. Empty for user-driven
+            runs (the default — every detection from the app); set
+            when an admin replays the archived photo via
+            POST /admin/v1/detection-runs/{id}/rerun.
+        detectionVersion:
+          type: string
+          description: |
+            Free-text label for which detector build / model
+            combination produced this row. Empty for legacy rows;
+            populated by reruns from the version field on the
+            request body. The detection service is currently
+            versionless — this field exists so that when the upstream
+            service starts versioning we can dedupe + diff across
+            versions without a schema migration.
+
+    DetectionRunRerunRequest:
+      description: |
+        Re-run an archived detection — admin-only. Replays the
+        original photo bytes through the detection pipeline and
+        writes a child detection_runs row with `parent_run_id`
+        set so the UI can render a side-by-side diff.
+      type: object
+      properties:
+        detectionVersion:
+          type: string
+          description: |
+            Free-text label persisted onto the child run. Surface
+            it in the UI as a dropdown populated from
+            /admin/v1/detection-runs/versions, with a free-text
+            fallback for new versions.
+
+    DetectionRunRerunResponse:
+      description: Result of POST /admin/v1/detection-runs/{id}/rerun.
+      type: object
+      required: [runId, parentRunId]
+      properties:
+        runId:
+          type: string
+          description: ID of the new (child) detection_runs row.
+        parentRunId:
+          type: string
+          description: Echoes the path parameter for confirmation.
+
+    DetectionVersionsResponse:
+      description: |
+        Distinct, non-empty `detectionVersion` values seen across
+        all detection_runs. Powers the rerun-modal dropdown.
+      type: object
+      required: [versions]
+      properties:
+        versions:
+          type: array
+          items: { type: string }
 
     UserOutfitCandidate:
       description: |
@@ -1128,6 +1190,69 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           description: Run not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /admin/v1/detection-runs/versions:
+    get:
+      operationId: adminListDetectionVersions
+      summary: |
+        Distinct detection-version labels seen across detection_runs.
+        Drives the rerun-modal dropdown so admins pick from versions
+        the system has actually run before. Returns an empty list
+        when no rerun has ever set the field — UI falls back to a
+        free-text input in that case.
+      tags: [traces]
+      responses:
+        "200":
+          description: Versions list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DetectionVersionsResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /admin/v1/detection-runs/{id}/rerun:
+    post:
+      operationId: adminRerunDetectionRun
+      summary: |
+        Replay the archived photo from detection_runs/{id} through
+        the detection pipeline and persist a child run row with
+        `parent_run_id` set. Records an audit entry. The new run is
+        observation-only — no wardrobe items are created from its
+        output (see acceptance criteria on mootd-admin#15).
+      tags: [traces]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DetectionRunRerunRequest"
+      responses:
+        "200":
+          description: Rerun queued + completed (synchronous today).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DetectionRunRerunResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Original run or its archived photo not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Detection service failed.
           content:
             application/json:
               schema:

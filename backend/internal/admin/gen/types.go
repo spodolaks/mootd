@@ -225,7 +225,22 @@ type DetectionRun struct {
 	// AnalyzeStats Token + timing block from /api/v1/analyze.
 	AnalyzeStats *map[string]interface{} `json:"analyzeStats,omitempty"`
 	CreatedAt    time.Time               `json:"createdAt"`
-	DurationMs   int64                   `json:"durationMs"`
+
+	// CreatedBy Admin ID that triggered this run. Empty for user-driven
+	// runs (the default — every detection from the app); set
+	// when an admin replays the archived photo via
+	// POST /admin/v1/detection-runs/{id}/rerun.
+	CreatedBy *string `json:"createdBy,omitempty"`
+
+	// DetectionVersion Free-text label for which detector build / model
+	// combination produced this row. Empty for legacy rows;
+	// populated by reruns from the version field on the
+	// request body. The detection service is currently
+	// versionless — this field exists so that when the upstream
+	// service starts versioning we can dedupe + diff across
+	// versions without a schema migration.
+	DetectionVersion *string `json:"detectionVersion,omitempty"`
+	DurationMs       int64   `json:"durationMs"`
 
 	// GenerateStats Token + timing block from /api/v1/generate.
 	GenerateStats         *map[string]interface{} `json:"generateStats,omitempty"`
@@ -238,7 +253,12 @@ type DetectionRun struct {
 	InputImageUrl *string             `json:"inputImageUrl,omitempty"`
 	Items         *[]DetectionRunItem `json:"items,omitempty"`
 	OverallStyle  *string             `json:"overallStyle,omitempty"`
-	TotalCostUsd  *float64            `json:"totalCostUsd,omitempty"`
+
+	// ParentRunId For admin-triggered re-runs (P1-10), points back at the
+	// original detection_run whose archived photo was replayed.
+	// Empty on the original run; set on every child.
+	ParentRunId  *string  `json:"parentRunId,omitempty"`
+	TotalCostUsd *float64 `json:"totalCostUsd,omitempty"`
 
 	// UserEmail Resolved server-side; redaction follows the same convention as elsewhere.
 	UserEmail *string `json:"userEmail,omitempty"`
@@ -266,6 +286,33 @@ type DetectionRunItem struct {
 	// user discarded the item before save. Use it to fetch the
 	// generated image at /v1/wardrobe/items/{id}/image.
 	WardrobeItemId *string `json:"wardrobeItemId,omitempty"`
+}
+
+// DetectionRunRerunRequest Re-run an archived detection — admin-only. Replays the
+// original photo bytes through the detection pipeline and
+// writes a child detection_runs row with `parent_run_id`
+// set so the UI can render a side-by-side diff.
+type DetectionRunRerunRequest struct {
+	// DetectionVersion Free-text label persisted onto the child run. Surface
+	// it in the UI as a dropdown populated from
+	// /admin/v1/detection-runs/versions, with a free-text
+	// fallback for new versions.
+	DetectionVersion *string `json:"detectionVersion,omitempty"`
+}
+
+// DetectionRunRerunResponse Result of POST /admin/v1/detection-runs/{id}/rerun.
+type DetectionRunRerunResponse struct {
+	// ParentRunId Echoes the path parameter for confirmation.
+	ParentRunId string `json:"parentRunId"`
+
+	// RunId ID of the new (child) detection_runs row.
+	RunId string `json:"runId"`
+}
+
+// DetectionVersionsResponse Distinct, non-empty `detectionVersion` values seen across
+// all detection_runs. Powers the rerun-modal dropdown.
+type DetectionVersionsResponse struct {
+	Versions []string `json:"versions"`
 }
 
 // ErrorResponse defines model for ErrorResponse.
@@ -801,3 +848,6 @@ type AdminLoginJSONRequestBody = LoginRequest
 
 // AdminRefreshJSONRequestBody defines body for AdminRefresh for application/json ContentType.
 type AdminRefreshJSONRequestBody = RefreshRequest
+
+// AdminRerunDetectionRunJSONRequestBody defines body for AdminRerunDetectionRun for application/json ContentType.
+type AdminRerunDetectionRunJSONRequestBody = DetectionRunRerunRequest

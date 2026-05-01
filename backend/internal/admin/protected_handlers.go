@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"encoding/csv"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -708,14 +709,17 @@ func timeStr(t *time.Time) string {
 	return t.UTC().Format(time.RFC3339)
 }
 
-// GetDetectionRun handles GET /admin/v1/detection-runs/{id} and
-// GET /admin/v1/detection-runs/{id}/input-image. Same handler so
-// the prefix mux can dispatch on a single registration.
+// GetDetectionRun is the prefix-route dispatcher for everything
+// under /admin/v1/detection-runs/. Cases:
+//
+//   - GET  /admin/v1/detection-runs/versions          → list distinct labels
+//   - GET  /admin/v1/detection-runs/{id}              → run detail
+//   - GET  /admin/v1/detection-runs/{id}/input-image  → archived photo
+//   - POST /admin/v1/detection-runs/{id}/rerun        → admin rerun (P1-10)
+//
+// The "versions" keyword takes precedence over the {id} parse.
+// runIDs are random and won't collide.
 func (h *Handler) GetDetectionRun(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
 	if h.detectionRuns == nil {
 		response.WriteJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "detection_runs archive not wired"})
 		return
@@ -726,6 +730,17 @@ func (h *Handler) GetDetectionRun(w http.ResponseWriter, r *http.Request) {
 		response.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "missing detection-run id"})
 		return
 	}
+
+	// Top-level keyword routes (no {id}).
+	if rest == "versions" {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		h.listDetectionVersions(w, r)
+		return
+	}
+
 	id, sub := rest, ""
 	if idx := strings.Index(rest, "/"); idx > 0 {
 		id, sub = rest[:idx], rest[idx+1:]
@@ -733,9 +748,23 @@ func (h *Handler) GetDetectionRun(w http.ResponseWriter, r *http.Request) {
 
 	switch sub {
 	case "":
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
 		h.getDetectionRunDetail(w, r, id)
 	case "input-image":
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
 		h.getDetectionRunInputImage(w, r, id)
+	case "rerun":
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		h.rerunDetectionRun(w, r, id)
 	default:
 		response.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "unknown sub-resource"})
 	}
@@ -791,6 +820,114 @@ func (h *Handler) getDetectionRunInputImage(w http.ResponseWriter, r *http.Reque
 	w.Header().Set("Cache-Control", "private, max-age=300")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(data)
+}
+
+// listDetectionVersions handles
+// GET /admin/v1/detection-runs/versions. Returns the distinct,
+// non-empty `detectionVersion` strings ever persisted across
+// detection_runs. Powers the dropdown in the admin rerun modal —
+// when the list is empty the FE falls back to a free-text input
+// so admins can establish the first version themselves.
+func (h *Handler) listDetectionVersions(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	versions, err := h.detectionRuns.ListVersions(ctx)
+	if err != nil {
+		h.logger.Printf("admin /detection-runs/versions: %v", err)
+		response.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	if versions == nil {
+		versions = []string{}
+	}
+	response.WriteJSON(w, http.StatusOK, map[string]any{"versions": versions})
+}
+
+// rerunDetectionRun handles
+// POST /admin/v1/detection-runs/{id}/rerun. Replays the archived
+// photo from the original run through the detection pipeline,
+// persists a child detection_runs row with parent_run_id +
+// created_by + detection_version set, and writes an audit entry.
+//
+// Body is optional — { "detectionVersion": "..." } sets the label
+// on the child row. Today the upstream detection service is
+// versionless so the label is descriptive only; when versioning
+// lands we'll honour it as a real override.
+//
+// Synchronous on the wire: detection currently takes 5–30 seconds,
+// well within an HTTP-friendly window. If detection grows past
+// ~60 seconds we'll switch to the same async-job pattern as
+// /v1/outfits/generate.
+func (h *Handler) rerunDetectionRun(w http.ResponseWriter, r *http.Request, id string) {
+	if id == "" {
+		response.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "missing detection-run id"})
+		return
+	}
+
+	// Decode optional body. We deliberately do NOT use the strict
+	// decoder (response.DecodeJSON) because the spec marks the body
+	// optional — an empty POST is valid and means "rerun, no version
+	// label." We tolerate body absence + parse errors equally.
+	var body struct {
+		DetectionVersion string `json:"detectionVersion"`
+	}
+	if r.Body != nil {
+		// Best-effort decode — we ignore EOF (no body) + decode errors.
+		_ = json.NewDecoder(r.Body).Decode(&body)
+	}
+
+	// Detection itself is the slow part — 5–30s round-trip per run.
+	// 90s gives us comfortable headroom over the wardrobe handler's
+	// own timeouts.
+	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
+	defer cancel()
+
+	adminID, _ := AdminIDFromContext(r.Context())
+
+	newRunID, err := h.detectionRuns.Rerun(ctx, id, adminID, strings.TrimSpace(body.DetectionVersion))
+	if err != nil {
+		// Best-effort error mapping: the rerun helper wraps the
+		// not-found case with ErrRunNotFound. We can't import the
+		// wardrobe package from here (one-way dep), so we sniff the
+		// string. Other failures are 500.
+		switch {
+		case strings.Contains(err.Error(), "detection run not found"):
+			response.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "detection run or archived photo not found"})
+		default:
+			h.logger.Printf("admin rerun detection run %s: %v", id, err)
+			response.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "rerun failed"})
+		}
+		return
+	}
+
+	// Audit. Same fire-and-forget pattern as the trace export — we
+	// log + continue if Mongo wobbles.
+	if h.repo != nil {
+		var adminEmail string
+		if a, _ := h.repo.FindByID(r.Context(), adminID); a != nil {
+			adminEmail = a.Email
+		}
+		Audit(r.Context(), h.repo, h.logger, AuditEntry{
+			ID:         generateAuditID(),
+			AdminID:    adminID,
+			AdminEmail: adminEmail,
+			Action:     "detection.rerun",
+			At:         time.Now().UTC(),
+			IP:         clientIP(r),
+			UserAgent:  r.Header.Get("User-Agent"),
+			Metadata: map[string]any{
+				"originalRunId":    id,
+				"newRunId":         newRunID,
+				"detectionVersion": body.DetectionVersion,
+			},
+		})
+	}
+
+	response.WriteJSON(w, http.StatusOK, map[string]any{
+		"runId":       newRunID,
+		"parentRunId": id,
+	})
 }
 
 // Search handles GET /admin/v1/search.

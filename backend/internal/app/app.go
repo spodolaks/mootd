@@ -151,7 +151,7 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 	if detectionRunRepo != nil {
 		wardrobeHandler.WithDetectionRuns(detectionRunRepo)
 		// Same archive readable from the admin side via the wardrobe→admin adapter.
-		adminHandler.WithDetectionRuns(newDetectionRunAdapter(detectionRunRepo))
+		adminHandler.WithDetectionRuns(newDetectionRunAdapter(detectionRunRepo, detector))
 	}
 	wardrobeHandler.RegisterRoutes(mux, authMiddleware)
 

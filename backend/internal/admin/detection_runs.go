@@ -23,6 +23,11 @@ type DetectionRun struct {
 	GenerateStats         map[string]any     `json:"generateStats,omitempty"`
 	TotalCostUSD          float64            `json:"totalCostUsd,omitempty"`
 	Items                 []DetectionRunItem `json:"items,omitempty"`
+
+	// P1-10 (mootd-admin#15): admin-triggered re-runs.
+	ParentRunID      string `json:"parentRunId,omitempty"`
+	CreatedBy        string `json:"createdBy,omitempty"`
+	DetectionVersion string `json:"detectionVersion,omitempty"`
 }
 
 // DetectionRunItem is one entry from the per-call generated_images
@@ -46,4 +51,18 @@ type DetectionRunItem struct {
 type DetectionRunRepository interface {
 	FindRun(ctx context.Context, id string) (*DetectionRun, error)
 	GetInputImage(ctx context.Context, runID string) ([]byte, string, error)
+
+	// ListVersions returns the distinct, non-empty `detectionVersion`
+	// labels persisted across detection_runs. Backs the dropdown in
+	// the admin rerun modal — when empty (no rerun has set the field
+	// yet), the UI falls back to a free-text input.
+	ListVersions(ctx context.Context) ([]string, error)
+
+	// Rerun replays the archived photo for `originalRunID` through
+	// the detection pipeline and persists a child detection_runs row
+	// with `parent_run_id` + `created_by` + `detection_version` set.
+	// Returns the new (child) run ID. Observation-only — does NOT
+	// save items to wardrobe_items (per the acceptance criteria on
+	// mootd-admin#15).
+	Rerun(ctx context.Context, originalRunID, adminID, detectionVersion string) (string, error)
 }
