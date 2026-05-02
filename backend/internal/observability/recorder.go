@@ -17,14 +17,32 @@ import (
 // Single instance, shared across requests — safe for concurrent use
 // because the underlying repo + price table are.
 type LLMRecorder struct {
-	repo   LLMCallRepository
-	prices *PriceTable
-	logger *log.Logger
+	repo    LLMCallRepository
+	prices  *PriceTable
+	tracker SpendIncrementer // optional — bumps the budget tracker on every successful call
+	logger  *log.Logger
+}
+
+// SpendIncrementer is the slice of the budget package's
+// SpendTracker that the recorder uses. Defined here so observability
+// doesn't import the budget package — same one-way dep convention
+// as the rest of the codebase.
+type SpendIncrementer interface {
+	Increment(ctx context.Context, userID string, costUSD float64) error
 }
 
 // NewLLMRecorder constructs a recorder. All three deps are required.
 func NewLLMRecorder(repo LLMCallRepository, prices *PriceTable, logger *log.Logger) *LLMRecorder {
 	return &LLMRecorder{repo: repo, prices: prices, logger: logger}
+}
+
+// WithSpendTracker wires the budget tracker. Optional — when
+// unset, every Record call still writes to llm_calls but doesn't
+// update the per-user daily total. Production app.go always wires
+// it; tests can leave it nil.
+func (r *LLMRecorder) WithSpendTracker(t SpendIncrementer) *LLMRecorder {
+	r.tracker = t
+	return r
 }
 
 // CallContext carries the per-request metadata needed to attribute a
@@ -139,6 +157,18 @@ func (r *LLMRecorder) Record(ctx context.Context, cc CallContext, obs CallObserv
 		// don't want to retroactively fail it because the ledger
 		// write blipped.
 		r.logger.Printf("observability: append llm_calls failed: %v (user=%s, feature=%s, model=%s)", err, cc.UserID, cc.Feature, obs.Model)
+	}
+
+	// Budget tracker (P4-02 / mootd-admin#30): bump the per-user
+	// daily counter so the next request's enforcement gate sees
+	// today's spend including this call. Best-effort — Redis
+	// blips are logged but never fail the user-facing request,
+	// same pattern as the ledger write above. Skip when no cost
+	// was incurred (e.g. Ollama: free) or no userID was attached.
+	if r.tracker != nil && cost > 0 && cc.UserID != "" && status == "success" {
+		if terr := r.tracker.Increment(ctx, cc.UserID, cost); terr != nil {
+			r.logger.Printf("observability: budget tracker increment failed: %v (user=%s, cost=$%.4f)", terr, cc.UserID, cost)
+		}
 	}
 }
 

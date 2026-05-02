@@ -791,6 +791,21 @@ components:
         reason:
           type: string
           description: Free-text rationale captured at write time.
+        todaySpendUSD:
+          type: number
+          format: double
+          description: |
+            Spend so far today, in USD. Sourced from the
+            P4-02 budget tracker (mootd-admin#30). Always present
+            as a number (0 when no spend recorded). The UI uses
+            this with dailyUSD to render a progress bar.
+        suspendedUntil:
+          type: string
+          format: date-time
+          description: |
+            Set when a 200% breach has triggered the 24h auto-suspend.
+            Empty when the user is in good standing. UI renders a
+            warning banner with the timestamp.
 
     UserBudgetUpdate:
       description: |

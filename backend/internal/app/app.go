@@ -15,6 +15,7 @@ import (
 	"mootd/backend/internal/admin"
 	"mootd/backend/internal/auth"
 	"mootd/backend/internal/brands"
+	"mootd/backend/internal/budget"
 	"mootd/backend/internal/feedback"
 	"mootd/backend/internal/generic"
 	"mootd/backend/internal/health"
@@ -437,18 +438,52 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 	// outfit generation flow into the same llm_calls ledger so admins
 	// see total spend across features in /admin/v1/overview.
 	coreLLMRec := observability.NewLLMRecorder(llmCallRepo, priceTable, a.Logger)
+
+	// Budget tracker + enforcer (P4-02 / mootd-admin#30). Wire
+	// before the outfit service so the service config can pin the
+	// enforcer at construction time.
+	//
+	//   - SpendTracker is Redis-backed when Redis is up; falls
+	//     back to NoopSpendTracker (zero spend, never suspends)
+	//     so missing Redis doesn't block outfit generation.
+	//   - BudgetReader is the user_budgets repo from #29 wrapped
+	//     in a tiny adapter (newBudgetReaderAdapter, below).
+	//   - Enforcer combines both. Wired into outfit.Service for
+	//     pre-call gating + into the LLMRecorder for post-call
+	//     spend bookkeeping.
+	var spendTracker budget.SpendTracker = budget.NoopSpendTracker{}
+	if redisClient != nil {
+		spendTracker = budget.NewRedisSpendTracker(redisClient, "user")
+	} else {
+		a.Logger.Print("budget: Redis unavailable — spend tracker disabled (NoopSpendTracker). Per-user budget enforcement is OFF.")
+	}
+	var budgetEnforcer outfit.BudgetEnforcer
+	if userBudgetsRepo, _ := admin.NewUserBudgetsMongoRepository(context.Background(), a.MongoClient, a.MongoDB); userBudgetsRepo != nil {
+		budgetReader := newBudgetReaderAdapter(userBudgetsRepo)
+		budgetEnforcer = newOutfitBudgetEnforcerAdapter(budget.NewEnforcer(budgetReader, spendTracker))
+		// Bump the recorder so every successful llm_calls write
+		// also increments today's spend in Redis.
+		coreLLMRec.WithSpendTracker(spendTracker)
+		// Surface today's spend on the admin Budget tab. Late-bind
+		// onto the already-registered handler — RegisterRoutes
+		// captured the method receiver, which reads h.budgetState
+		// at request time, so this is safe.
+		adminHandler.WithBudgetState(spendTracker)
+	}
+
 	llmRecorder := observability.NewOutfitRecorderAdapter(coreLLMRec)
 	detector.WithRecorder(observability.NewWardrobeRecorderAdapter(coreLLMRec))
 
 	outfitService := outfit.NewService(a.Logger, outfit.ServiceConfig{
-		Generator:   generator,
-		Wardrobe:    wardrobeRepo,
-		Recent:      recentProvider,
-		UserProfile: profileProvider,
-		Surfaces:    newSurfaceAdapter(surfaceRepo),
-		UseVision:   useVision,
-		Cache:       outfitCache,
-		LLMRecorder: llmRecorder,
+		Generator:      generator,
+		Wardrobe:       wardrobeRepo,
+		Recent:         recentProvider,
+		UserProfile:    profileProvider,
+		Surfaces:       newSurfaceAdapter(surfaceRepo),
+		UseVision:      useVision,
+		Cache:          outfitCache,
+		LLMRecorder:    llmRecorder,
+		BudgetEnforcer: budgetEnforcer,
 	})
 
 	outfit.NewHandler(a.Logger, outfit.HandlerConfig{

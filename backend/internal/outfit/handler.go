@@ -2,6 +2,7 @@ package outfit
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"math/rand"
@@ -69,6 +70,20 @@ func (h *Handler) Generate(w http.ResponseWriter, r *http.Request) {
 
 	outfits, err := h.service.GenerateOutfits(r.Context(), userID, weather)
 	if err != nil {
+		// Budget gate (P4-02 / mootd-admin#30): map BudgetError to
+		// 429 with the reason in the body so the FE can render
+		// "Daily $2.00 cap reached at $2.13" rather than a generic
+		// "failed to generate outfits."
+		var budgetErr *BudgetError
+		if errors.As(err, &budgetErr) {
+			h.logger.Printf("outfit: budget-denied generate for user %s", userID)
+			body := map[string]any{"error": budgetErr.Error()}
+			if budgetErr.Reason != nil {
+				body["reason"] = budgetErr.Reason
+			}
+			response.WriteJSON(w, http.StatusTooManyRequests, body)
+			return
+		}
 		h.logger.Printf("outfit: generate for user %s: %v", userID, err)
 		response.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to generate outfits"})
 		return
@@ -143,7 +158,14 @@ func (h *Handler) runAsyncGeneration(jobID, userID string, weather Weather) {
 	if err != nil {
 		h.logger.Printf("outfit: async job %s — generation failed: %v", jobID, err)
 		job.Status = JobFailed
-		job.Error = "outfit generation failed"
+		// Surface budget denial as a user-friendly message in the
+		// job state — the polling client renders this directly.
+		var budgetErr *BudgetError
+		if errors.As(err, &budgetErr) {
+			job.Error = budgetErr.Error()
+		} else {
+			job.Error = "outfit generation failed"
+		}
 		if err := h.jobStore.Save(ctx, job); err != nil {
 			h.logger.Printf("outfit: async job %s — failed to save job state: %v", jobID, err)
 		}

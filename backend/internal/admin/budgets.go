@@ -46,6 +46,13 @@ type UserBudget struct {
 	// "0001-01-01T00:00:00Z" — confusing for callers).
 	SetAt  *time.Time `json:"setAt,omitempty"  bson:"setAt,omitempty"`
 	Reason string     `json:"reason,omitempty" bson:"reason,omitempty"`
+
+	// P4-02 (mootd-admin#30) live state, populated at GET-time
+	// from the budget tracker (Redis). Both bson tags are "-"
+	// because these aren't persisted on user_budgets — they're
+	// computed on demand.
+	TodaySpendUSD  float64    `json:"todaySpendUSD" bson:"-"`
+	SuspendedUntil *time.Time `json:"suspendedUntil,omitempty" bson:"-"`
 }
 
 // UserBudgetsRepository owns persistence for user_budgets.

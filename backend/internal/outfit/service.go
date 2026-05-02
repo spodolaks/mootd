@@ -89,15 +89,16 @@ type SurfaceOption struct {
 // Service encapsulates the outfit generation business logic, separated from
 // HTTP concerns which live in Handler.
 type Service struct {
-	generator   Generator
-	wardrobe    wardrobeRepository
-	recent      recentOutfitProvider
-	userProfile userProfileProvider
-	surfaces    surfaceProvider
-	useVision   bool
-	cache       Cache
-	llmRecorder llmRecorder // optional — nil disables LLM call logging
-	logger      *log.Logger
+	generator      Generator
+	wardrobe       wardrobeRepository
+	recent         recentOutfitProvider
+	userProfile    userProfileProvider
+	surfaces       surfaceProvider
+	useVision      bool
+	cache          Cache
+	llmRecorder    llmRecorder    // optional — nil disables LLM call logging
+	budgetEnforcer BudgetEnforcer // optional — nil disables P4-02 budget gate
+	logger         *log.Logger
 }
 
 // llmRecorder is the narrow interface the outfit service needs from
@@ -106,6 +107,48 @@ type Service struct {
 // reuse of the recorder in detection / search doesn't ripple imports.
 type llmRecorder interface {
 	Record(ctx context.Context, cc LLMRecorderContext, obs LLMRecorderObservation)
+}
+
+// BudgetEnforcer is the pre-call gate the service consults before
+// invoking the LLM. Defined as an interface so:
+//
+//   - The budget package owns the type definitions for Decision +
+//     Reason (which travel through this interface) and the outfit
+//     package doesn't pull them in.
+//   - Tests can substitute a fake that always Allows (or always
+//     Denies) without spinning up Redis.
+//
+// A nil enforcer means "no enforcement" — every call goes through.
+// That's the boot mode when Redis is down or the budget feature
+// isn't wired yet (matches the rest of the package's
+// optional-deps-via-nil convention).
+type BudgetEnforcer interface {
+	// Check is called immediately before generator.Generate.
+	// Returns shouldAllow + a reason struct + error. Reason is
+	// untyped (map[string]any) here so the budget package's types
+	// can flow without a one-way dep needing reverse imports —
+	// the handler decodes the map.
+	Check(ctx context.Context, userID string, estimatedUSD float64) (allow bool, reason map[string]any, err error)
+}
+
+// BudgetError is returned by GenerateOutfits when the enforcer
+// denies a call. The handler maps this to HTTP 429 with the
+// Reason map in the body. The map carries the budget package's
+// Reason fields (code, message, dailyCapUSD, todaySpendUSD,
+// estimatedUSD, suspendedUntil) — the outfit package keeps it
+// untyped to avoid pulling in the budget package's types.
+type BudgetError struct {
+	Reason map[string]any
+}
+
+func (e *BudgetError) Error() string {
+	if e == nil || e.Reason == nil {
+		return "outfit: budget exceeded"
+	}
+	if msg, ok := e.Reason["message"].(string); ok && msg != "" {
+		return "outfit: " + msg
+	}
+	return "outfit: budget exceeded"
 }
 
 // LLMRecorderContext mirrors observability.CallContext — defined in this
@@ -138,28 +181,30 @@ type LLMRecorderObservation struct {
 
 // ServiceConfig holds the dependencies needed to construct a Service.
 type ServiceConfig struct {
-	Generator   Generator
-	Wardrobe    wardrobeRepository
-	Recent      recentOutfitProvider
-	UserProfile userProfileProvider
-	Surfaces    surfaceProvider // optional — when nil, outfits ship without panel/background URLs
-	UseVision   bool
-	Cache       Cache
-	LLMRecorder llmRecorder // optional — nil disables LLM call logging
+	Generator      Generator
+	Wardrobe       wardrobeRepository
+	Recent         recentOutfitProvider
+	UserProfile    userProfileProvider
+	Surfaces       surfaceProvider // optional — when nil, outfits ship without panel/background URLs
+	UseVision      bool
+	Cache          Cache
+	LLMRecorder    llmRecorder    // optional — nil disables LLM call logging
+	BudgetEnforcer BudgetEnforcer // optional — nil disables P4-02 budget gate
 }
 
 // NewService creates an outfit Service.
 func NewService(logger *log.Logger, cfg ServiceConfig) *Service {
 	return &Service{
-		generator:   cfg.Generator,
-		wardrobe:    cfg.Wardrobe,
-		recent:      cfg.Recent,
-		userProfile: cfg.UserProfile,
-		surfaces:    cfg.Surfaces,
-		useVision:   cfg.UseVision,
-		cache:       cfg.Cache,
-		llmRecorder: cfg.LLMRecorder,
-		logger:      logger,
+		generator:      cfg.Generator,
+		wardrobe:       cfg.Wardrobe,
+		recent:         cfg.Recent,
+		userProfile:    cfg.UserProfile,
+		surfaces:       cfg.Surfaces,
+		useVision:      cfg.UseVision,
+		cache:          cfg.Cache,
+		llmRecorder:    cfg.LLMRecorder,
+		budgetEnforcer: cfg.BudgetEnforcer,
+		logger:         logger,
 	}
 }
 
@@ -278,6 +323,28 @@ func (s *Service) GenerateOutfits(ctx context.Context, userID string, weather We
 	s.logger.Printf("outfit: %s generator for user %s (%d items, weather=%s/%s, recent=%d, archetype=%s)",
 		s.generator.Name(), userID, len(items), weather.Temperature, weather.Condition, len(recentBoards),
 		formatTopArchetypes(topArchetypes))
+
+	// Budget gate (P4-02 / mootd-admin#30). The estimate is an
+	// upper-bound for one outfit-generation call; chosen to be
+	// conservative without hard-coding to a specific provider's
+	// pricing. ~$0.20 covers the 90th-percentile Sonnet 4 call
+	// (4-5K input tokens × $3/M + 1.5K output × $15/M ≈ $0.04;
+	// vision adds ~$0.10). For Ollama / OpenAI mini this is
+	// over-estimating, but the gate's job is to refuse calls that
+	// *might* breach the cap; over-estimation just makes us
+	// stricter, not unsafe.
+	const estimatedCallUSD = 0.20
+	if s.budgetEnforcer != nil {
+		allow, reason, berr := s.budgetEnforcer.Check(ctx, userID, estimatedCallUSD)
+		if berr != nil {
+			// Treat enforcement-side errors as Allow so a Redis
+			// blip doesn't deny service. Log + continue.
+			s.logger.Printf("outfit: budget check for user %s: %v (allowing through)", userID, berr)
+		} else if !allow {
+			s.logger.Printf("outfit: budget gate denied user %s: %v", userID, reason)
+			return nil, &BudgetError{Reason: reason}
+		}
+	}
 
 	startedAt := time.Now().UTC()
 	parsedOutfits, usage, err := s.generator.Generate(ctx, req)

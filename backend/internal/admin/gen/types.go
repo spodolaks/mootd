@@ -701,8 +701,19 @@ type UserBudget struct {
 	SetAt *time.Time `json:"setAt,omitempty"`
 
 	// SetBy Admin id that last wrote this budget. Empty when isDefault.
-	SetBy  *string `json:"setBy,omitempty"`
-	UserId string  `json:"userId"`
+	SetBy *string `json:"setBy,omitempty"`
+
+	// SuspendedUntil Set when a 200% breach has triggered the 24h auto-suspend.
+	// Empty when the user is in good standing. UI renders a
+	// warning banner with the timestamp.
+	SuspendedUntil *time.Time `json:"suspendedUntil,omitempty"`
+
+	// TodaySpendUSD Spend so far today, in USD. Sourced from the
+	// P4-02 budget tracker (mootd-admin#30). Always present
+	// as a number (0 when no spend recorded). The UI uses
+	// this with dailyUSD to render a progress bar.
+	TodaySpendUSD *float64 `json:"todaySpendUSD,omitempty"`
+	UserId        string   `json:"userId"`
 }
 
 // UserBudgetUpdate Body for PUT /admin/v1/users/{id}/budget. `reason` is

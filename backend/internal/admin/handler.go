@@ -24,10 +24,20 @@ type Handler struct {
 	tracesRepo    TracesRepository
 	detectionRuns DetectionRunRepository  // optional — when nil, /detection-runs returns 503
 	budgets       UserBudgetsRepository   // optional — when nil, /users/{id}/budget returns defaults read-only
+	budgetState   BudgetStateReader       // optional — when nil, /users/{id}/budget GET omits live spend
 	evalsRepo     EvalsRepository         // optional — when nil, /evals/* returns 503
 	evalsLoader   EvalSetLoader           // optional — pairs with evalsRepo
 	evalsRunner   *EvalRunner             // optional — pairs with evalsRepo
 	secret        string
+}
+
+// BudgetStateReader exposes today's per-user spend + suspension
+// state from the budget tracker. Defined as an interface so admin/
+// doesn't import the budget package — same one-way-dep pattern as
+// elsewhere.
+type BudgetStateReader interface {
+	TodaySpend(ctx context.Context, userID string) (float64, error)
+	IsSuspended(ctx context.Context, userID string) (bool, error)
 }
 
 // WithDetectionRuns wires the detection-run archive reader. Optional —
@@ -43,6 +53,16 @@ func (h *Handler) WithDetectionRuns(r DetectionRunRepository) *Handler {
 // PUT returns 503. Production app.go always wires it.
 func (h *Handler) WithUserBudgets(r UserBudgetsRepository) *Handler {
 	h.budgets = r
+	return h
+}
+
+// WithBudgetState wires the live-spend reader (P4-02 /
+// mootd-admin#30). When set, /users/{id}/budget GET includes
+// `todaySpendUSD` and `suspendedUntil`. When unset, those fields
+// are absent — same graceful-degradation pattern as the rest of
+// the optional deps.
+func (h *Handler) WithBudgetState(s BudgetStateReader) *Handler {
+	h.budgetState = s
 	return h
 }
 

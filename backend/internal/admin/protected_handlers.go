@@ -527,6 +527,31 @@ func (h *Handler) getUserBudget(w http.ResponseWriter, r *http.Request, id strin
 		response.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
 		return
 	}
+
+	// Live-state hydration (P4-02 / mootd-admin#30). Best-effort —
+	// a Redis blip when reading these is logged but doesn't fail
+	// the GET. Caller still sees the saved cap, just without
+	// today's spend.
+	if h.budgetState != nil {
+		if today, terr := h.budgetState.TodaySpend(ctx, id); terr != nil {
+			h.logger.Printf("admin /users/%s/budget GET: spend read: %v", id, terr)
+		} else {
+			budget.TodaySpendUSD = today
+		}
+		if suspended, terr := h.budgetState.IsSuspended(ctx, id); terr != nil {
+			h.logger.Printf("admin /users/%s/budget GET: suspend read: %v", id, terr)
+		} else if suspended {
+			// Tracker doesn't surface the exact "until" timestamp
+			// today (Redis just stores the TTL on the key), so we
+			// fall back to "+24h from now" as a soft display.
+			// Tightening the tracker to read the stored value is
+			// a small follow-up — not on the critical path for
+			// "is the user suspended?" which the boolean answers.
+			until := time.Now().UTC().Add(24 * time.Hour)
+			budget.SuspendedUntil = &until
+		}
+	}
+
 	response.WriteJSON(w, http.StatusOK, budget)
 }
 
