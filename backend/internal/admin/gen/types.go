@@ -28,6 +28,29 @@ const (
 	Staging     BuildInfoEnvironment = "staging"
 )
 
+// Defines values for EvalCaseResultStatus.
+const (
+	EvalCaseResultStatusFailed  EvalCaseResultStatus = "failed"
+	EvalCaseResultStatusPending EvalCaseResultStatus = "pending"
+	EvalCaseResultStatusSuccess EvalCaseResultStatus = "success"
+)
+
+// Defines values for EvalRunStatus.
+const (
+	EvalRunStatusCompleted  EvalRunStatus = "completed"
+	EvalRunStatusFailed     EvalRunStatus = "failed"
+	EvalRunStatusPending    EvalRunStatus = "pending"
+	EvalRunStatusProcessing EvalRunStatus = "processing"
+)
+
+// Defines values for EvalRunStartStatus.
+const (
+	EvalRunStartStatusCompleted  EvalRunStartStatus = "completed"
+	EvalRunStartStatusFailed     EvalRunStartStatus = "failed"
+	EvalRunStartStatusPending    EvalRunStartStatus = "pending"
+	EvalRunStartStatusProcessing EvalRunStartStatus = "processing"
+)
+
 // Defines values for LLMCallDetailProvider.
 const (
 	LLMCallDetailProviderAnthropic LLMCallDetailProvider = "anthropic"
@@ -70,10 +93,10 @@ const (
 
 // Defines values for UserOutfitBatchStatus.
 const (
-	Completed  UserOutfitBatchStatus = "completed"
-	Failed     UserOutfitBatchStatus = "failed"
-	Pending    UserOutfitBatchStatus = "pending"
-	Processing UserOutfitBatchStatus = "processing"
+	UserOutfitBatchStatusCompleted  UserOutfitBatchStatus = "completed"
+	UserOutfitBatchStatusFailed     UserOutfitBatchStatus = "failed"
+	UserOutfitBatchStatusPending    UserOutfitBatchStatus = "pending"
+	UserOutfitBatchStatusProcessing UserOutfitBatchStatus = "processing"
 )
 
 // Defines values for UserSummaryTier.
@@ -318,6 +341,128 @@ type DetectionVersionsResponse struct {
 // ErrorResponse defines model for ErrorResponse.
 type ErrorResponse struct {
 	Error string `json:"error"`
+}
+
+// EvalCaseResult One case's outcome. `judgeScore` is 1-5 from an LLM judge
+// with a separate prompt; `judgeRationale` is the judge's
+// explanation. `automatedChecks` carries the regex/structural
+// checks the existing harness already runs (mootd#09e2277) —
+// we surface both because they catch different failures.
+type EvalCaseResult struct {
+	AutomatedChecksPassed *int   `json:"automatedChecksPassed,omitempty"`
+	AutomatedChecksTotal  *int   `json:"automatedChecksTotal,omitempty"`
+	CaseId                string `json:"caseId"`
+
+	// CostUsd LLM cost for this case (outfit gen + judge call).
+	CostUsd        *float64 `json:"costUsd,omitempty"`
+	DurationMs     *int64   `json:"durationMs,omitempty"`
+	Error          *string  `json:"error,omitempty"`
+	JudgeRationale *string  `json:"judgeRationale,omitempty"`
+	JudgeScore     *int     `json:"judgeScore,omitempty"`
+
+	// OutfitJSON Full LLM output, JSON-stringified. Rendered in a collapsible block on the FE.
+	OutfitJSON *string `json:"outfitJSON,omitempty"`
+
+	// OutfitName The first outfit's display name (when generation succeeded). Lets the admin scan results without expanding each row.
+	OutfitName *string              `json:"outfitName,omitempty"`
+	Status     EvalCaseResultStatus `json:"status"`
+}
+
+// EvalCaseResultStatus defines model for EvalCaseResult.Status.
+type EvalCaseResultStatus string
+
+// EvalRun One eval run. Status starts as "pending", transitions to
+// "processing" when the goroutine picks it up, and lands in
+// "completed" or "failed". Cases are written incrementally
+// so the FE can show progress while the run is mid-flight.
+type EvalRun struct {
+	// Aggregate Roll-up across all cases — avoids the FE having to compute
+	// these client-side. Updated as the runner progresses.
+	Aggregate   EvalRunAggregate  `json:"aggregate"`
+	Cases       *[]EvalCaseResult `json:"cases,omitempty"`
+	CompletedAt *time.Time        `json:"completedAt,omitempty"`
+	CreatedAt   time.Time         `json:"createdAt"`
+	CreatedBy   *string           `json:"createdBy,omitempty"`
+
+	// Error Top-level error when status=failed (e.g. eval set not found, all generators down).
+	Error         *string `json:"error,omitempty"`
+	EvalSetId     string  `json:"evalSetId"`
+	EvalSetName   *string `json:"evalSetName,omitempty"`
+	Id            string  `json:"id"`
+	Model         *string `json:"model,omitempty"`
+	PromptVersion *string `json:"promptVersion,omitempty"`
+
+	// Provider claude / openai / ollama — the generator the runner used.
+	Provider  *string       `json:"provider,omitempty"`
+	StartedAt *time.Time    `json:"startedAt,omitempty"`
+	Status    EvalRunStatus `json:"status"`
+}
+
+// EvalRunStatus defines model for EvalRun.Status.
+type EvalRunStatus string
+
+// EvalRunAggregate Roll-up across all cases — avoids the FE having to compute
+// these client-side. Updated as the runner progresses.
+type EvalRunAggregate struct {
+	AvgJudgeScore  *float64 `json:"avgJudgeScore,omitempty"`
+	CompletedCases int      `json:"completedCases"`
+
+	// PassedCases Cases where automatedChecksPassed == automatedChecksTotal AND judgeScore >= 4. The "good enough" definition; tweakable.
+	PassedCases  *int     `json:"passedCases,omitempty"`
+	TotalCases   int      `json:"totalCases"`
+	TotalCostUsd *float64 `json:"totalCostUsd,omitempty"`
+}
+
+// EvalRunRequest Body for POST /admin/v1/evals/runs. `evalSetId` must match
+// a value returned from /admin/v1/evals/sets.
+type EvalRunRequest struct {
+	EvalSetId string `json:"evalSetId"`
+
+	// PromptVersion Which prompt template to test. Empty means "use whatever
+	// outfit.PromptVersion currently is" — the production
+	// prompt at boot. A future ticket adds a prompt-versioning
+	// UI that populates this from a registry.
+	PromptVersion *string `json:"promptVersion,omitempty"`
+}
+
+// EvalRunStart Echo from POST /admin/v1/evals/runs.
+type EvalRunStart struct {
+	RunId  string             `json:"runId"`
+	Status EvalRunStartStatus `json:"status"`
+}
+
+// EvalRunStartStatus defines model for EvalRunStart.Status.
+type EvalRunStartStatus string
+
+// EvalRunsPage Paginated list of runs, reverse chrono. Cases are omitted
+// from the list view for compactness — fetch the detail
+// endpoint to see them.
+type EvalRunsPage struct {
+	NextCursor *string   `json:"nextCursor,omitempty"`
+	Runs       []EvalRun `json:"runs"`
+}
+
+// EvalSetSummary Header for one eval set on disk (P3-04 / mootd-admin#27).
+// `caseCount` is computed at discovery time. Cases themselves
+// are not embedded — to inspect them, the admin opens the
+// run detail after kicking off a run against the set.
+type EvalSetSummary struct {
+	CaseCount int `json:"caseCount"`
+
+	// Description Free-text from a top-level `_meta.json` in the set directory, when present.
+	Description *string `json:"description,omitempty"`
+
+	// Id The directory name on disk under `backend/eval/golden/`.
+	// Stable across restarts; safe to embed in URLs.
+	Id string `json:"id"`
+
+	// Name Same as id today; kept distinct so a future "display name" override doesn't break URLs.
+	Name string `json:"name"`
+}
+
+// EvalSetsList All discovered eval sets.
+type EvalSetsList struct {
+	Sets []EvalSetSummary `json:"sets"`
 }
 
 // LLMCallDetail Full llm_calls row including the inline-archived prompt, user
@@ -782,6 +927,12 @@ type AdminListAuditParams struct {
 	Limit  *int       `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// AdminListEvalRunsParams defines parameters for AdminListEvalRuns.
+type AdminListEvalRunsParams struct {
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit  *int    `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
 // AdminOverviewParams defines parameters for AdminOverview.
 type AdminOverviewParams struct {
 	// Period Period selector for the headline metrics. Defaults to
@@ -890,6 +1041,9 @@ type AdminRefreshJSONRequestBody = RefreshRequest
 
 // AdminRerunDetectionRunJSONRequestBody defines body for AdminRerunDetectionRun for application/json ContentType.
 type AdminRerunDetectionRunJSONRequestBody = DetectionRunRerunRequest
+
+// AdminStartEvalRunJSONRequestBody defines body for AdminStartEvalRun for application/json ContentType.
+type AdminStartEvalRunJSONRequestBody = EvalRunRequest
 
 // AdminUpdateUserBudgetJSONRequestBody defines body for AdminUpdateUserBudget for application/json ContentType.
 type AdminUpdateUserBudgetJSONRequestBody = UserBudgetUpdate

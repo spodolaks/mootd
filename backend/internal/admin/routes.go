@@ -47,4 +47,9 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, authLimit Middleware, requi
 	// /users/ — handler dispatches on the trailing path segment
 	// (input-image vs the bare detail).
 	mux.Handle("/admin/v1/detection-runs/", requireAdmin(http.HandlerFunc(h.GetDetectionRun)))
+
+	// Eval suite (P3-04 / mootd-admin#27). Prefix-routed, same
+	// pattern: /sets, /runs, /runs/{id} all dispatched in
+	// EvalsRouter.
+	mux.Handle("/admin/v1/evals/", requireAdmin(http.HandlerFunc(h.EvalsRouter)))
 }

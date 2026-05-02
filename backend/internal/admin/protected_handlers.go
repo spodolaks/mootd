@@ -650,6 +650,166 @@ func (h *Handler) updateUserBudget(w http.ResponseWriter, r *http.Request, id st
 	response.WriteJSON(w, http.StatusOK, updated)
 }
 
+// EvalsRouter is the prefix dispatcher for /admin/v1/evals/*.
+// Cases:
+//
+//   - GET  /admin/v1/evals/sets       → list discovered sets
+//   - GET  /admin/v1/evals/runs       → paginated runs (no cases)
+//   - POST /admin/v1/evals/runs       → kick off async run, returns 202
+//   - GET  /admin/v1/evals/runs/{id}  → full run with cases
+//
+// (P3-04 / mootd-admin#27.)
+func (h *Handler) EvalsRouter(w http.ResponseWriter, r *http.Request) {
+	if h.evalsRepo == nil || h.evalsLoader == nil || h.evalsRunner == nil {
+		response.WriteJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "eval suite not wired"})
+		return
+	}
+
+	rest := strings.TrimPrefix(r.URL.Path, "/admin/v1/evals/")
+	first, runID := rest, ""
+	if idx := strings.Index(rest, "/"); idx > 0 {
+		first, runID = rest[:idx], rest[idx+1:]
+	}
+
+	switch {
+	case first == "sets" && runID == "":
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		h.listEvalSets(w, r)
+	case first == "runs" && runID == "":
+		switch r.Method {
+		case http.MethodGet:
+			h.listEvalRuns(w, r)
+		case http.MethodPost:
+			h.startEvalRun(w, r)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	case first == "runs" && runID != "":
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		h.getEvalRun(w, r, runID)
+	default:
+		response.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "unknown evals sub-resource"})
+	}
+}
+
+func (h *Handler) listEvalSets(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	sets, err := h.evalsLoader.List(ctx)
+	if err != nil {
+		h.logger.Printf("admin /evals/sets: loader: %v", err)
+		response.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	response.WriteJSON(w, http.StatusOK, map[string]any{"sets": sets})
+}
+
+func (h *Handler) listEvalRuns(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	cursor := r.URL.Query().Get("cursor")
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	rows, next, err := h.evalsRepo.List(ctx, cursor, limit)
+	if err != nil {
+		h.logger.Printf("admin /evals/runs list: %v", err)
+		response.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	if rows == nil {
+		rows = []EvalRun{}
+	}
+	response.WriteJSON(w, http.StatusOK, map[string]any{
+		"runs":       rows,
+		"nextCursor": next,
+	})
+}
+
+func (h *Handler) startEvalRun(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		EvalSetID     string `json:"evalSetId"`
+		PromptVersion string `json:"promptVersion"`
+	}
+	if err := response.DecodeJSONBody(w, r, &body); err != nil {
+		response.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if strings.TrimSpace(body.EvalSetID) == "" {
+		response.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "evalSetId is required"})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	adminID, _ := AdminIDFromContext(r.Context())
+
+	runID, err := h.evalsRunner.Start(ctx, body.EvalSetID, body.PromptVersion, adminID)
+	if err != nil {
+		// Loader errors (set not found, no cases) translate to 400;
+		// Mongo errors (create failed) translate to 500. Crude
+		// substring match because the runner returns wrapped errors
+		// with stable prefixes.
+		if strings.Contains(err.Error(), "load tuples") || strings.Contains(err.Error(), "no cases") || strings.Contains(err.Error(), "invalid eval set id") {
+			response.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		h.logger.Printf("admin /evals/runs POST: %v", err)
+		response.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+
+	// Audit: who kicked off which run against which set. The
+	// metadata helps later when correlating regressions to who
+	// was experimenting that day.
+	if h.repo != nil {
+		var adminEmail string
+		if a, _ := h.repo.FindByID(ctx, adminID); a != nil {
+			adminEmail = a.Email
+		}
+		Audit(ctx, h.repo, h.logger, AuditEntry{
+			ID:         generateAuditID(),
+			AdminID:    adminID,
+			AdminEmail: adminEmail,
+			Action:     "eval.start",
+			At:         time.Now().UTC(),
+			IP:         clientIP(r),
+			UserAgent:  r.Header.Get("User-Agent"),
+			Metadata: map[string]any{
+				"runId":         runID,
+				"evalSetId":     body.EvalSetID,
+				"promptVersion": body.PromptVersion,
+			},
+		})
+	}
+
+	response.WriteJSON(w, http.StatusAccepted, map[string]any{
+		"runId":  runID,
+		"status": EvalStatusPending,
+	})
+}
+
+func (h *Handler) getEvalRun(w http.ResponseWriter, r *http.Request, id string) {
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	run, err := h.evalsRepo.Get(ctx, id)
+	if err != nil {
+		h.logger.Printf("admin /evals/runs/%s: %v", id, err)
+		response.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	if run == nil {
+		response.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "run not found"})
+		return
+	}
+	response.WriteJSON(w, http.StatusOK, run)
+}
+
 // ListTraces handles GET /admin/v1/traces.
 //
 // Cursor pagination, filters by userId / model / feature / status /

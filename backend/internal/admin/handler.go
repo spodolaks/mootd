@@ -24,6 +24,9 @@ type Handler struct {
 	tracesRepo    TracesRepository
 	detectionRuns DetectionRunRepository  // optional — when nil, /detection-runs returns 503
 	budgets       UserBudgetsRepository   // optional — when nil, /users/{id}/budget returns defaults read-only
+	evalsRepo     EvalsRepository         // optional — when nil, /evals/* returns 503
+	evalsLoader   EvalSetLoader           // optional — pairs with evalsRepo
+	evalsRunner   *EvalRunner             // optional — pairs with evalsRepo
 	secret        string
 }
 
@@ -40,6 +43,17 @@ func (h *Handler) WithDetectionRuns(r DetectionRunRepository) *Handler {
 // PUT returns 503. Production app.go always wires it.
 func (h *Handler) WithUserBudgets(r UserBudgetsRepository) *Handler {
 	h.budgets = r
+	return h
+}
+
+// WithEvalSuite wires the eval suite (P3-04 / mootd-admin#27).
+// All three pieces (repo, loader, runner) move together — there's
+// no useful partial state. When unset, /admin/v1/evals/* returns
+// 503 and the FE shows "eval suite not wired in this build."
+func (h *Handler) WithEvalSuite(repo EvalsRepository, loader EvalSetLoader, runner *EvalRunner) *Handler {
+	h.evalsRepo = repo
+	h.evalsLoader = loader
+	h.evalsRunner = runner
 	return h
 }
 

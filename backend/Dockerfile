@@ -18,6 +18,11 @@ WORKDIR /app
 
 COPY --from=builder /out/mootd-api /app/mootd-api
 
+# Eval suite (P3-04 / mootd-admin#27): the runner reads cases from
+# this directory at request time. Bake the checked-in golden set
+# into the image so the admin can run regressions out of the box.
+COPY --from=builder /src/eval/golden /app/eval/golden
+
 USER appuser
 
 EXPOSE 8080

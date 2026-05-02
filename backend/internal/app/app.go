@@ -5,6 +5,7 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -355,6 +356,44 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 	// no request has been served yet, so the closure will always read a
 	// populated value by the time it fires.
 	generatorName = generator.Name()
+
+	// P3-04 / mootd-admin#27: Eval suite. Wires the repo + loader
+	// + runner into the already-registered admin handler; the
+	// EvalsRouter handler reads these fields at request time, so
+	// late-binding here (after RegisterRoutes) is safe — by the
+	// time a request comes in, the fields are populated.
+	//
+	// All-or-nothing: if any of the three fail to init the
+	// /evals/* endpoints return 503 with a clear message.
+	if evalsRepo, err := admin.NewEvalsMongoRepository(context.Background(), a.MongoClient, a.MongoDB); err == nil {
+		// EVAL_GOLDEN_DIR overrides the default for deployments
+		// where the binary lives somewhere other than /app
+		// (development off-Docker, custom runtime images, etc.).
+		// Default matches the Dockerfile's COPY destination.
+		goldenDir := os.Getenv("EVAL_GOLDEN_DIR")
+		if goldenDir == "" {
+			goldenDir = "eval/golden"
+		}
+		evalsLoader := admin.NewFilesystemSetLoader(goldenDir)
+		evalGenerator := newEvalGeneratorAdapter(generator)
+		// Avoid the typed-nil-in-interface gotcha: explicitly leave
+		// the EvalJudge interface nil when no API key is set, so
+		// `runner.judge != nil` checks behave the way the runner's
+		// author expects.
+		var evalJudge admin.EvalJudge
+		if j := admin.NewAnthropicJudge(); j != nil {
+			evalJudge = j
+		}
+		evalRunner := admin.NewEvalRunner(evalsRepo, evalsLoader, evalGenerator, evalJudge, a.Logger)
+		adminHandler.WithEvalSuite(evalsRepo, evalsLoader, evalRunner)
+		if evalJudge == nil {
+			a.Logger.Print("admin: eval suite wired without LLM judge (ANTHROPIC_API_KEY unset). Cases run + record automated checks; judgeScore is 0.")
+		} else {
+			a.Logger.Print("admin: eval suite wired with Anthropic judge.")
+		}
+	} else {
+		a.Logger.Printf("admin: eval_runs repo init failed: %v (continuing without /evals)", err)
+	}
 
 	var outfitCache outfit.Cache
 	if redisClient != nil {

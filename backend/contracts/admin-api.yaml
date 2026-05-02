@@ -571,6 +571,190 @@ components:
             type: string
           description: Distinct feature labels in the response, in display order (highest spend first).
 
+    EvalSetSummary:
+      description: |
+        Header for one eval set on disk (P3-04 / mootd-admin#27).
+        `caseCount` is computed at discovery time. Cases themselves
+        are not embedded — to inspect them, the admin opens the
+        run detail after kicking off a run against the set.
+      type: object
+      required: [id, name, caseCount]
+      properties:
+        id:
+          type: string
+          description: |
+            The directory name on disk under `backend/eval/golden/`.
+            Stable across restarts; safe to embed in URLs.
+        name:
+          type: string
+          description: Same as id today; kept distinct so a future "display name" override doesn't break URLs.
+        caseCount:
+          type: integer
+        description:
+          type: string
+          description: Free-text from a top-level `_meta.json` in the set directory, when present.
+
+    EvalSetsList:
+      description: All discovered eval sets.
+      type: object
+      required: [sets]
+      properties:
+        sets:
+          type: array
+          items:
+            $ref: "#/components/schemas/EvalSetSummary"
+
+    EvalRunRequest:
+      description: |
+        Body for POST /admin/v1/evals/runs. `evalSetId` must match
+        a value returned from /admin/v1/evals/sets.
+      type: object
+      required: [evalSetId]
+      properties:
+        evalSetId:
+          type: string
+        promptVersion:
+          type: string
+          description: |
+            Which prompt template to test. Empty means "use whatever
+            outfit.PromptVersion currently is" — the production
+            prompt at boot. A future ticket adds a prompt-versioning
+            UI that populates this from a registry.
+
+    EvalRunStart:
+      description: Echo from POST /admin/v1/evals/runs.
+      type: object
+      required: [runId, status]
+      properties:
+        runId:
+          type: string
+        status:
+          type: string
+          enum: [pending, processing, completed, failed]
+
+    EvalCaseResult:
+      description: |
+        One case's outcome. `judgeScore` is 1-5 from an LLM judge
+        with a separate prompt; `judgeRationale` is the judge's
+        explanation. `automatedChecks` carries the regex/structural
+        checks the existing harness already runs (mootd#09e2277) —
+        we surface both because they catch different failures.
+      type: object
+      required: [caseId, status]
+      properties:
+        caseId:
+          type: string
+        status:
+          type: string
+          enum: [pending, success, failed]
+        judgeScore:
+          type: integer
+          minimum: 1
+          maximum: 5
+        judgeRationale:
+          type: string
+        automatedChecksPassed:
+          type: integer
+        automatedChecksTotal:
+          type: integer
+        outfitName:
+          type: string
+          description: The first outfit's display name (when generation succeeded). Lets the admin scan results without expanding each row.
+        outfitJSON:
+          type: string
+          description: Full LLM output, JSON-stringified. Rendered in a collapsible block on the FE.
+        error:
+          type: string
+        durationMs:
+          type: integer
+          format: int64
+        costUsd:
+          type: number
+          format: double
+          description: LLM cost for this case (outfit gen + judge call).
+
+    EvalRunAggregate:
+      description: |
+        Roll-up across all cases — avoids the FE having to compute
+        these client-side. Updated as the runner progresses.
+      type: object
+      required: [totalCases, completedCases]
+      properties:
+        totalCases:
+          type: integer
+        completedCases:
+          type: integer
+        passedCases:
+          type: integer
+          description: Cases where automatedChecksPassed == automatedChecksTotal AND judgeScore >= 4. The "good enough" definition; tweakable.
+        avgJudgeScore:
+          type: number
+          format: double
+        totalCostUsd:
+          type: number
+          format: double
+
+    EvalRun:
+      description: |
+        One eval run. Status starts as "pending", transitions to
+        "processing" when the goroutine picks it up, and lands in
+        "completed" or "failed". Cases are written incrementally
+        so the FE can show progress while the run is mid-flight.
+      type: object
+      required: [id, evalSetId, status, createdAt, aggregate]
+      properties:
+        id:
+          type: string
+        evalSetId:
+          type: string
+        evalSetName:
+          type: string
+        status:
+          type: string
+          enum: [pending, processing, completed, failed]
+        provider:
+          type: string
+          description: claude / openai / ollama — the generator the runner used.
+        model:
+          type: string
+        promptVersion:
+          type: string
+        createdBy:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        startedAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+        cases:
+          type: array
+          items:
+            $ref: "#/components/schemas/EvalCaseResult"
+        aggregate:
+          $ref: "#/components/schemas/EvalRunAggregate"
+        error:
+          type: string
+          description: Top-level error when status=failed (e.g. eval set not found, all generators down).
+
+    EvalRunsPage:
+      description: |
+        Paginated list of runs, reverse chrono. Cases are omitted
+        from the list view for compactness — fetch the detail
+        endpoint to see them.
+      type: object
+      required: [runs]
+      properties:
+        runs:
+          type: array
+          items:
+            $ref: "#/components/schemas/EvalRun"
+        nextCursor:
+          type: string
+
     UserBudget:
       description: |
         Per-user spend caps (P4-01 / mootd-admin#29). When the user
@@ -1727,6 +1911,116 @@ paths:
                 $ref: "#/components/schemas/SearchResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
+
+  /admin/v1/evals/sets:
+    get:
+      operationId: adminListEvalSets
+      summary: |
+        List available eval sets (P3-04 / mootd-admin#27).
+        Sets are discovered from `backend/eval/golden/<name>/`
+        directories on disk — admins can add new sets by checking
+        in JSON files and restarting the backend. A future ticket
+        adds an upload UI; today this is intentionally read-only.
+      tags: [evals]
+      responses:
+        "200":
+          description: Available eval sets.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EvalSetsList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /admin/v1/evals/runs:
+    get:
+      operationId: adminListEvalRuns
+      summary: |
+        List eval runs in reverse chronological order. Each row
+        carries the aggregate (pass rate, avg judge score, total
+        cost) so the list is useful as a regression dashboard
+        without drilling into per-case results.
+      tags: [evals]
+      parameters:
+        - name: cursor
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 25
+      responses:
+        "200":
+          description: Paginated runs.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EvalRunsPage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      operationId: adminStartEvalRun
+      summary: |
+        Kick off a new eval run against the active generator (the
+        provider configured by OUTFIT_PROVIDER; per-run model
+        selection is a follow-up ticket). Returns 202 immediately
+        with a runId; the goroutine runs cases concurrently and
+        writes progress to /evals/runs/{id} as it goes.
+      tags: [evals]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EvalRunRequest"
+      responses:
+        "202":
+          description: Run accepted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EvalRunStart"
+        "400":
+          description: Unknown eval set or bad body.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /admin/v1/evals/runs/{id}:
+    get:
+      operationId: adminGetEvalRun
+      summary: |
+        Full run detail — case-by-case results with judge score +
+        rationale + generated outfit + cost. The list endpoint
+        omits the cases array for compactness; this is where the
+        admin drills in.
+      tags: [evals]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Run.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EvalRun"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Run not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /admin/v1/audit:
     get:
