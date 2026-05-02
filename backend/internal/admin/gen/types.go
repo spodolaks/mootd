@@ -727,6 +727,35 @@ type UserBudgetUpdate struct {
 	Reason     string  `json:"reason"`
 }
 
+// UserCacheDaily 30-day cache trend block on UserSpendBreakdown. Rolled-up
+// ratios + savings + per-day buckets. Hit ratio definition:
+// cacheRead / (cacheRead + cacheWrite + uncachedInput) where
+// uncachedInput = inputTokens - cacheReadTokens. Computed
+// FE-side from the totals to keep the bucket shape stable.
+type UserCacheDaily struct {
+	// ApproxSavingsUSD Approximate dollar savings from cache reads, using $3/M list - $0.30/M cached for Anthropic. Same approximation as the global /overview cache metrics.
+	ApproxSavingsUSD *float64               `json:"approxSavingsUSD,omitempty"`
+	Buckets          []UserCacheDailyBucket `json:"buckets"`
+	TotalInputTokens int64                  `json:"totalInputTokens"`
+	TotalReadTokens  int64                  `json:"totalReadTokens"`
+	TotalWriteTokens int64                  `json:"totalWriteTokens"`
+}
+
+// UserCacheDailyBucket One day of Anthropic prompt-cache aggregates for a user
+// (P4-03 / mootd-admin#31). Empty days are zero-filled at the
+// backend so the chart spacing stays uniform.
+type UserCacheDailyBucket struct {
+	CacheReadTokens  int64  `json:"cacheReadTokens"`
+	CacheWriteTokens int64  `json:"cacheWriteTokens"`
+	CallCount        *int64 `json:"callCount,omitempty"`
+
+	// Date YYYY-MM-DD (UTC).
+	Date string `json:"date"`
+
+	// InputTokens Total input tokens (cache reads are already counted in this number per the v3 schema).
+	InputTokens int64 `json:"inputTokens"`
+}
+
 // UserDetail Drill-through payload for the admin user-detail page (P1-06).
 // Combines the existing UserSummary scalar facts with 30-day
 // spend + recent LLM calls. Future tabs (Wardrobe / Outfits /
@@ -824,6 +853,13 @@ type UserOutfitsPage struct {
 // backend so the chart spacing stays uniform.
 type UserSpendBreakdown struct {
 	Buckets []UserSpendBucket `json:"buckets"`
+
+	// CacheDaily 30-day cache trend block on UserSpendBreakdown. Rolled-up
+	// ratios + savings + per-day buckets. Hit ratio definition:
+	// cacheRead / (cacheRead + cacheWrite + uncachedInput) where
+	// uncachedInput = inputTokens - cacheReadTokens. Computed
+	// FE-side from the totals to keep the bucket shape stable.
+	CacheDaily *UserCacheDaily `json:"cacheDaily,omitempty"`
 
 	// Features Distinct feature labels in the response, in display order (highest spend first).
 	Features *[]string `json:"features,omitempty"`

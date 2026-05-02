@@ -548,6 +548,59 @@ components:
           type: integer
           format: int64
 
+    UserCacheDailyBucket:
+      description: |
+        One day of Anthropic prompt-cache aggregates for a user
+        (P4-03 / mootd-admin#31). Empty days are zero-filled at the
+        backend so the chart spacing stays uniform.
+      type: object
+      required: [date, cacheReadTokens, cacheWriteTokens, inputTokens]
+      properties:
+        date:
+          type: string
+          description: YYYY-MM-DD (UTC).
+        cacheReadTokens:
+          type: integer
+          format: int64
+        cacheWriteTokens:
+          type: integer
+          format: int64
+        inputTokens:
+          type: integer
+          format: int64
+          description: Total input tokens (cache reads are already counted in this number per the v3 schema).
+        callCount:
+          type: integer
+          format: int64
+
+    UserCacheDaily:
+      description: |
+        30-day cache trend block on UserSpendBreakdown. Rolled-up
+        ratios + savings + per-day buckets. Hit ratio definition:
+        cacheRead / (cacheRead + cacheWrite + uncachedInput) where
+        uncachedInput = inputTokens - cacheReadTokens. Computed
+        FE-side from the totals to keep the bucket shape stable.
+      type: object
+      required: [buckets, totalReadTokens, totalWriteTokens, totalInputTokens]
+      properties:
+        buckets:
+          type: array
+          items:
+            $ref: "#/components/schemas/UserCacheDailyBucket"
+        totalReadTokens:
+          type: integer
+          format: int64
+        totalWriteTokens:
+          type: integer
+          format: int64
+        totalInputTokens:
+          type: integer
+          format: int64
+        approxSavingsUSD:
+          type: number
+          format: double
+          description: Approximate dollar savings from cache reads, using $3/M list - $0.30/M cached for Anthropic. Same approximation as the global /overview cache metrics.
+
     UserSpendBreakdown:
       description: |
         30-day per-feature spend timeline for one user. The chart
@@ -570,6 +623,12 @@ components:
           items:
             type: string
           description: Distinct feature labels in the response, in display order (highest spend first).
+        cacheDaily:
+          $ref: "#/components/schemas/UserCacheDaily"
+          description: |
+            Per-day Anthropic prompt-cache aggregates over the same
+            30-day window (P4-03 / mootd-admin#31). Empty when no
+            Anthropic calls hit the window.
 
     EvalSetSummary:
       description: |

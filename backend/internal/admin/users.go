@@ -95,6 +95,28 @@ type UserSpendBucket struct {
 	CallCount int64   `json:"callCount"`
 }
 
+// UserCacheDailyBucket is one day's Anthropic prompt-cache totals
+// for a user. Empty days are zero-filled at the backend so the FE
+// sparkline renders without merge logic. (P4-03 / mootd-admin#31.)
+type UserCacheDailyBucket struct {
+	Date             string `json:"date"`
+	CacheReadTokens  int64  `json:"cacheReadTokens"`
+	CacheWriteTokens int64  `json:"cacheWriteTokens"`
+	InputTokens      int64  `json:"inputTokens"`
+	CallCount        int64  `json:"callCount,omitempty"`
+}
+
+// UserCacheDaily wraps the per-day buckets with rolled-up totals.
+// Hit ratio is computed FE-side from the totals to keep the bucket
+// shape stable across the per-user and global views.
+type UserCacheDaily struct {
+	Buckets          []UserCacheDailyBucket `json:"buckets"`
+	TotalReadTokens  int64                  `json:"totalReadTokens"`
+	TotalWriteTokens int64                  `json:"totalWriteTokens"`
+	TotalInputTokens int64                  `json:"totalInputTokens"`
+	ApproxSavingsUSD float64                `json:"approxSavingsUSD,omitempty"`
+}
+
 // UserSpendBreakdown is a 30-day per-feature stacked-spend payload.
 // Pre-zero-filled at the backend so the FE chart can render
 // directly without bucket-merging logic.
@@ -102,6 +124,7 @@ type UserSpendBreakdown struct {
 	Buckets      []UserSpendBucket `json:"buckets"`
 	TotalCostUSD float64           `json:"totalCostUsd"`
 	Features     []string          `json:"features"`
+	CacheDaily   *UserCacheDaily   `json:"cacheDaily,omitempty"`
 }
 
 // UserWardrobeItem is one clothing item surfaced on the admin
@@ -756,10 +779,113 @@ func (r *UsersMongoRepository) SpendBreakdown(ctx context.Context, userID string
 		}
 	}
 
+	// Cache trend (P4-03 / mootd-admin#31). Best-effort — if the
+	// cache aggregation errors we still return spend; the FE
+	// renders the cache panel as "no data" when the field is nil.
+	cacheDaily, cerr := r.cacheBreakdown(ctx, userID, startOfWindow)
+	if cerr != nil {
+		// Don't bubble: spend is the primary product of this
+		// endpoint, cache is an additional analytic surface.
+		// A query failure here would silently hide the panel,
+		// which beats failing the whole spend tab.
+		cacheDaily = nil
+	}
+
 	return &UserSpendBreakdown{
 		Buckets:      buckets,
 		TotalCostUSD: totalCost,
 		Features:     features,
+		CacheDaily:   cacheDaily,
+	}, nil
+}
+
+// cacheBreakdown aggregates per-day Anthropic prompt-cache usage
+// for a user across the same 30-day window the spend chart uses
+// (P4-03 / mootd-admin#31). Single $group keyed on day-bucket;
+// rest is in-memory zero-fill.
+//
+// Filtered to provider=anthropic since cache reads/writes are
+// Anthropic-specific. OpenAI and Ollama callsalso store
+// cacheReadTokens=0 / cacheWriteTokens=0, so leaving them in the
+// match would skew the ratios.
+//
+// Approx savings uses the same Sonnet-4.5 list price as the global
+// /overview endpoint ($3/Mtok input - $0.30/Mtok cached). A future
+// refinement can join model_prices for exact pricing per row.
+func (r *UsersMongoRepository) cacheBreakdown(ctx context.Context, userID string, startOfWindow time.Time) (*UserCacheDaily, error) {
+	pipeline := mongo.Pipeline{
+		{{Key: "$match", Value: bson.M{
+			"userId":    userID,
+			"provider":  "anthropic",
+			"createdAt": bson.M{"$gte": startOfWindow},
+		}}},
+		{{Key: "$group", Value: bson.M{
+			"_id":         bson.M{"$dateToString": bson.M{"format": "%Y-%m-%d", "date": "$createdAt", "timezone": "UTC"}},
+			"readTokens":  bson.M{"$sum": "$cacheReadTokens"},
+			"writeTokens": bson.M{"$sum": "$cacheWriteTokens"},
+			"inputTokens": bson.M{"$sum": "$inputTokens"},
+			"callCount":   bson.M{"$sum": 1},
+		}}},
+	}
+	cur, err := r.llmCallsCol().Aggregate(ctx, pipeline)
+	if err != nil {
+		return nil, err
+	}
+	defer cur.Close(ctx)
+
+	type cacheRow struct {
+		Day         string `bson:"_id"`
+		ReadTokens  int64  `bson:"readTokens"`
+		WriteTokens int64  `bson:"writeTokens"`
+		InputTokens int64  `bson:"inputTokens"`
+		CallCount   int64  `bson:"callCount"`
+	}
+	var rows []cacheRow
+	if err := cur.All(ctx, &rows); err != nil {
+		return nil, err
+	}
+
+	// Skip the panel entirely if the user has no Anthropic calls in
+	// the window — avoids rendering an empty "0% hit ratio" chart
+	// that's actually "no data."
+	if len(rows) == 0 {
+		return nil, nil
+	}
+
+	byDay := make(map[string]cacheRow, len(rows))
+	var totalRead, totalWrite, totalInput int64
+	for _, r := range rows {
+		byDay[r.Day] = r
+		totalRead += r.ReadTokens
+		totalWrite += r.WriteTokens
+		totalInput += r.InputTokens
+	}
+
+	buckets := make([]UserCacheDailyBucket, 0, 30)
+	for i := 0; i < 30; i++ {
+		d := startOfWindow.Add(time.Duration(i) * 24 * time.Hour)
+		day := d.Format("2006-01-02")
+		b := byDay[day]
+		buckets = append(buckets, UserCacheDailyBucket{
+			Date:             day,
+			CacheReadTokens:  b.ReadTokens,
+			CacheWriteTokens: b.WriteTokens,
+			InputTokens:      b.InputTokens,
+			CallCount:        b.CallCount,
+		})
+	}
+
+	// Approx savings: cacheRead × ($3/M list - $0.30/M cached).
+	const fullInputPerToken = 3.0 / 1_000_000
+	const cachedReadPerToken = 0.30 / 1_000_000
+	savings := float64(totalRead) * (fullInputPerToken - cachedReadPerToken)
+
+	return &UserCacheDaily{
+		Buckets:          buckets,
+		TotalReadTokens:  totalRead,
+		TotalWriteTokens: totalWrite,
+		TotalInputTokens: totalInput,
+		ApproxSavingsUSD: savings,
 	}, nil
 }
 
