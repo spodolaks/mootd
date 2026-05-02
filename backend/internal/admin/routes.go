@@ -42,6 +42,9 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, authLimit Middleware, requi
 	// real ids (anything after /traces/ that isn't "summary").
 	mux.Handle("/admin/v1/traces/", requireAdmin(http.HandlerFunc(h.GetTrace)))
 	mux.Handle("/admin/v1/audit", requireAdmin(http.HandlerFunc(h.ListAudit)))
+	// Model routing config (P4-05 / mootd-admin#33). Single doc,
+	// GET + PUT routed via method dispatch in the handler.
+	mux.Handle("/admin/v1/model-routing", requireAdmin(http.HandlerFunc(h.ModelRouting)))
 	mux.Handle("/admin/v1/search", requireAdmin(http.HandlerFunc(h.Search)))
 	// Detection-run archive (P1-04). Same prefix-route trick as
 	// /users/ — handler dispatches on the trailing path segment

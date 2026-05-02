@@ -675,6 +675,127 @@ func (h *Handler) updateUserBudget(w http.ResponseWriter, r *http.Request, id st
 	response.WriteJSON(w, http.StatusOK, updated)
 }
 
+// ModelRouting handles GET + PUT /admin/v1/model-routing
+// (P4-05 / mootd-admin#33). The PUT body must list all four
+// tiers exactly once with valid provider names; partial updates
+// are rejected to keep the routing config explicit.
+func (h *Handler) ModelRouting(w http.ResponseWriter, r *http.Request) {
+	if h.routingRepo == nil {
+		response.WriteJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "model-routing not wired"})
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		h.getModelRouting(w, r)
+	case http.MethodPut:
+		h.updateModelRouting(w, r)
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (h *Handler) getModelRouting(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	doc, err := h.routingRepo.Get(ctx)
+	if err != nil {
+		h.logger.Printf("admin /model-routing GET: %v", err)
+		response.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	doc.Providers = append([]string{}, h.routingProviders...)
+	response.WriteJSON(w, http.StatusOK, doc)
+}
+
+func (h *Handler) updateModelRouting(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Tiers []ModelRoutingTier `json:"tiers"`
+		Notes string             `json:"notes"`
+	}
+	if err := response.DecodeJSONBody(w, r, &body); err != nil {
+		response.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
+	notes := strings.TrimSpace(body.Notes)
+	if notes == "" {
+		response.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "notes is required"})
+		return
+	}
+	if len(notes) > 500 {
+		response.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "notes exceeds 500 characters"})
+		return
+	}
+	if err := ValidateRoutingUpdate(body.Tiers, h.routingProviders); err != nil {
+		response.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	adminID, _ := AdminIDFromContext(r.Context())
+	prior, _ := h.routingRepo.Get(ctx)
+
+	updated := ModelRouting{
+		Tiers:     body.Tiers,
+		UpdatedBy: adminID,
+		Notes:     notes,
+	}
+	if err := h.routingRepo.Replace(ctx, updated); err != nil {
+		h.logger.Printf("admin /model-routing PUT: %v", err)
+		response.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+
+	// Invalidate the in-process cache so the next outfit-gen call
+	// reads the new mapping immediately.
+	if h.routingCache != nil {
+		h.routingCache.Invalidate()
+	}
+
+	// Audit. Same fire-and-forget pattern as budget edits — admin
+	// routing changes affect the active provider for an entire
+	// tier of users.
+	if h.repo != nil {
+		var adminEmail string
+		if a, _ := h.repo.FindByID(ctx, adminID); a != nil {
+			adminEmail = a.Email
+		}
+		priorMap := map[string]string{}
+		if prior != nil {
+			for _, t := range prior.Tiers {
+				priorMap[t.Tier] = t.Provider
+			}
+		}
+		newMap := map[string]string{}
+		for _, t := range body.Tiers {
+			newMap[t.Tier] = t.Provider
+		}
+		Audit(ctx, h.repo, h.logger, AuditEntry{
+			ID:         generateAuditID(),
+			AdminID:    adminID,
+			AdminEmail: adminEmail,
+			Action:     "model_routing.update",
+			At:         time.Now().UTC(),
+			IP:         clientIP(r),
+			UserAgent:  r.Header.Get("User-Agent"),
+			Metadata: map[string]any{
+				"notes":    notes,
+				"prior":    priorMap,
+				"new":      newMap,
+			},
+		})
+	}
+
+	// Echo the new state with providers populated.
+	echoed, _ := h.routingRepo.Get(ctx)
+	if echoed != nil {
+		echoed.Providers = append([]string{}, h.routingProviders...)
+	}
+	response.WriteJSON(w, http.StatusOK, echoed)
+}
+
 // EvalsRouter is the prefix dispatcher for /admin/v1/evals/*.
 // Cases:
 //

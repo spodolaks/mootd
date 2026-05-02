@@ -79,6 +79,14 @@ const (
 	LLMCallSnapshotStatusTimeout LLMCallSnapshotStatus = "timeout"
 )
 
+// Defines values for ModelRoutingTierTier.
+const (
+	ModelRoutingTierTierBeta    ModelRoutingTierTier = "beta"
+	ModelRoutingTierTierFounder ModelRoutingTierTier = "founder"
+	ModelRoutingTierTierFree    ModelRoutingTierTier = "free"
+	ModelRoutingTierTierPaid    ModelRoutingTierTier = "paid"
+)
+
 // Defines values for OverviewPeriod.
 const (
 	N30d  OverviewPeriod = "30d"
@@ -129,10 +137,10 @@ const (
 
 // Defines values for AdminListUsersParamsTier.
 const (
-	AdminListUsersParamsTierBeta    AdminListUsersParamsTier = "beta"
-	AdminListUsersParamsTierFounder AdminListUsersParamsTier = "founder"
-	AdminListUsersParamsTierFree    AdminListUsersParamsTier = "free"
-	AdminListUsersParamsTierPaid    AdminListUsersParamsTier = "paid"
+	Beta    AdminListUsersParamsTier = "beta"
+	Founder AdminListUsersParamsTier = "founder"
+	Free    AdminListUsersParamsTier = "free"
+	Paid    AdminListUsersParamsTier = "paid"
 )
 
 // Defines values for AdminListUsersParamsSort.
@@ -576,6 +584,45 @@ type LoginResponse struct {
 
 	// RefreshToken 7-day refresh token, single-use (rotated on every refresh).
 	RefreshToken string `json:"refreshToken"`
+}
+
+// ModelRouting Per-tier routing config (P4-05 / mootd-admin#33).
+// Returned by GET /admin/v1/model-routing. The mapping is
+// stored as a single Mongo doc with the four tier keys and
+// is read at every outfit-generation call (with a small
+// in-process cache to avoid per-call DB reads).
+type ModelRouting struct {
+	Notes *string `json:"notes,omitempty"`
+
+	// Providers Provider names available at server boot. Frontend uses this to populate the dropdown — admins can only pick providers the binary has been built and configured to use.
+	Providers []string           `json:"providers"`
+	Tiers     []ModelRoutingTier `json:"tiers"`
+	UpdatedAt *time.Time         `json:"updatedAt,omitempty"`
+	UpdatedBy *string            `json:"updatedBy,omitempty"`
+}
+
+// ModelRoutingTier One row of the per-tier routing table. `provider` must
+// match a Generator implementation registered at server
+// boot — today: anthropic, openai, ollama.
+type ModelRoutingTier struct {
+	// Notes Free-text rationale captured at PUT time.
+	Notes *string `json:"notes,omitempty"`
+
+	// Provider anthropic / openai / ollama
+	Provider string               `json:"provider"`
+	Tier     ModelRoutingTierTier `json:"tier"`
+}
+
+// ModelRoutingTierTier defines model for ModelRoutingTier.Tier.
+type ModelRoutingTierTier string
+
+// ModelRoutingUpdate Body for PUT /admin/v1/model-routing. `tiers` must list
+// all four tiers; missing entries reject with 400 (no
+// partial updates today — keeps the config explicit).
+type ModelRoutingUpdate struct {
+	// Notes Audit-log rationale. Required.
+	Notes string             `json:"notes"`
+	Tiers []ModelRoutingTier `json:"tiers"`
 }
 
 // OverviewMetrics defines model for OverviewMetrics.
@@ -1091,6 +1138,9 @@ type AdminRerunDetectionRunJSONRequestBody = DetectionRunRerunRequest
 
 // AdminStartEvalRunJSONRequestBody defines body for AdminStartEvalRun for application/json ContentType.
 type AdminStartEvalRunJSONRequestBody = EvalRunRequest
+
+// AdminUpdateModelRoutingJSONRequestBody defines body for AdminUpdateModelRouting for application/json ContentType.
+type AdminUpdateModelRoutingJSONRequestBody = ModelRoutingUpdate
 
 // AdminUpdateUserBudgetJSONRequestBody defines body for AdminUpdateUserBudget for application/json ContentType.
 type AdminUpdateUserBudgetJSONRequestBody = UserBudgetUpdate

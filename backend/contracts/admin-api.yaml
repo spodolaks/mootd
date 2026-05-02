@@ -814,6 +814,69 @@ components:
         nextCursor:
           type: string
 
+    ModelRoutingTier:
+      description: |
+        One row of the per-tier routing table. `provider` must
+        match a Generator implementation registered at server
+        boot — today: anthropic, openai, ollama.
+      type: object
+      required: [tier, provider]
+      properties:
+        tier:
+          type: string
+          enum: [free, paid, founder, beta]
+        provider:
+          type: string
+          description: anthropic / openai / ollama
+        notes:
+          type: string
+          description: Free-text rationale captured at PUT time.
+
+    ModelRouting:
+      description: |
+        Per-tier routing config (P4-05 / mootd-admin#33).
+        Returned by GET /admin/v1/model-routing. The mapping is
+        stored as a single Mongo doc with the four tier keys and
+        is read at every outfit-generation call (with a small
+        in-process cache to avoid per-call DB reads).
+      type: object
+      required: [tiers, providers]
+      properties:
+        tiers:
+          type: array
+          items:
+            $ref: "#/components/schemas/ModelRoutingTier"
+        providers:
+          type: array
+          items:
+            type: string
+          description: Provider names available at server boot. Frontend uses this to populate the dropdown — admins can only pick providers the binary has been built and configured to use.
+        updatedBy:
+          type: string
+        updatedAt:
+          type: string
+          format: date-time
+        notes:
+          type: string
+
+    ModelRoutingUpdate:
+      description: |
+        Body for PUT /admin/v1/model-routing. `tiers` must list
+        all four tiers; missing entries reject with 400 (no
+        partial updates today — keeps the config explicit).
+      type: object
+      required: [tiers, notes]
+      properties:
+        tiers:
+          type: array
+          items:
+            $ref: "#/components/schemas/ModelRoutingTier"
+        notes:
+          type: string
+          minLength: 1
+          maxLength: 500
+          description: Audit-log rationale. Required.
+
     UserBudget:
       description: |
         Per-user spend caps (P4-01 / mootd-admin#29). When the user
@@ -2095,6 +2158,52 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+
+  /admin/v1/model-routing:
+    get:
+      operationId: adminGetModelRouting
+      summary: |
+        Read the per-tier model routing config (P4-05 /
+        mootd-admin#33). Ships seeded defaults at boot:
+        free→ollama, paid/beta→anthropic, founder→anthropic.
+        Admins edit via PUT.
+      tags: [routing]
+      responses:
+        "200":
+          description: Routing config.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelRouting"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    put:
+      operationId: adminUpdateModelRouting
+      summary: |
+        Replace the routing config. Writes an audit row with the
+        old + new mapping + admin-supplied reason.
+      tags: [routing]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ModelRoutingUpdate"
+      responses:
+        "200":
+          description: Updated routing config.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelRouting"
+        "400":
+          description: Invalid tier or unknown provider.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /admin/v1/audit:
     get:

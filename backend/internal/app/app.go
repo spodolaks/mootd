@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -353,6 +354,47 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 		generator = outfit.NewCascadeGenerator(a.Logger, chain...)
 		a.Logger.Printf("outfit: cascade chain %v", cleaned)
 	}
+
+	// P4-05 / mootd-admin#33: Wrap with the tier-routing layer so
+	// admins can pick a provider per user tier without redeploy.
+	//
+	//   - Build the name→generator map from the chain.
+	//   - When more than one provider is configured, wrap the
+	//     existing cascade with TierRoutingGenerator. The cascade
+	//     is the fallback so any misconfigured tier mapping
+	//     degrades to "previous behaviour."
+	//   - When only one provider is configured, skip the wrapper —
+	//     the routing decision is moot but we *still* expose the
+	//     admin endpoint so the surface is present and the UI
+	//     reflects what's currently happening (free tier → that
+	//     one provider).
+	//   - Routing repo init is best-effort; failure logs and the
+	//     admin endpoint returns 503.
+	//
+	// Tier resolver is FreeTierResolver in v1 — see the close
+	// comment on mootd-admin#33 for the deferral rationale.
+	byProvider := make(map[string]outfit.Generator, len(chain))
+	for i, name := range cleaned {
+		switch name {
+		case "claude":
+			byProvider["anthropic"] = chain[i]
+		default:
+			byProvider[name] = chain[i]
+		}
+	}
+	if routingRepo, err := admin.NewRoutingMongoRepository(context.Background(), a.MongoClient, a.MongoDB); err == nil {
+		routingCache := admin.NewCachedRoutingReader(routingRepo, 0)
+		if len(chain) > 1 {
+			generator = outfit.NewTierRoutingGenerator(a.Logger, byProvider, routingCache, outfit.FreeTierResolver{}, generator)
+			a.Logger.Printf("outfit: tier routing wired with providers %v", providerNamesFor(byProvider))
+		} else {
+			a.Logger.Printf("outfit: tier routing config exposed but not enforced (single provider %v)", cleaned)
+		}
+		adminHandler.WithRouting(routingRepo, routingCache, providerNamesFor(byProvider))
+	} else {
+		a.Logger.Printf("admin: model_routing repo init failed: %v (continuing without /model-routing)", err)
+	}
+
 	// Populate the name variable captured by moodboardOnSave. At this point
 	// no request has been served yet, so the closure will always read a
 	// populated value by the time it fires.
@@ -646,4 +688,17 @@ func toFeedbackContext(chosen moodboard.Outfit) feedback.Context {
 		ctx.Archetype = topName
 	}
 	return ctx
+}
+
+
+// providerNamesFor returns sorted provider names from a generator
+// map. Used for the routing UI dropdown + the validator on PUT.
+// Sorting makes the order deterministic across boots.
+func providerNamesFor(byProvider map[string]outfit.Generator) []string {
+	names := make([]string, 0, len(byProvider))
+	for k := range byProvider {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	return names
 }

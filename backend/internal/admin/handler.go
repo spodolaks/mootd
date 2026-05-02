@@ -28,6 +28,9 @@ type Handler struct {
 	evalsRepo     EvalsRepository         // optional — when nil, /evals/* returns 503
 	evalsLoader   EvalSetLoader           // optional — pairs with evalsRepo
 	evalsRunner   *EvalRunner             // optional — pairs with evalsRepo
+	routingRepo   RoutingRepository       // optional — when nil, /model-routing returns 503
+	routingCache  *CachedRoutingReader    // optional — cleared on PUT to invalidate
+	routingProviders []string             // boot-time provider names; populated alongside routingRepo
 	secret        string
 }
 
@@ -63,6 +66,20 @@ func (h *Handler) WithUserBudgets(r UserBudgetsRepository) *Handler {
 // the optional deps.
 func (h *Handler) WithBudgetState(s BudgetStateReader) *Handler {
 	h.budgetState = s
+	return h
+}
+
+// WithRouting wires the model-routing repo + cache + the
+// boot-time list of available providers (P4-05 / mootd-admin#33).
+// All three travel together — `providers` populates the dropdown
+// in the admin UI and the validator on PUT. `cache` is the same
+// reader instance the outfit service uses; the PUT handler
+// invalidates it on writes so admins see their edit reflected
+// immediately.
+func (h *Handler) WithRouting(repo RoutingRepository, cache *CachedRoutingReader, providers []string) *Handler {
+	h.routingRepo = repo
+	h.routingCache = cache
+	h.routingProviders = append([]string{}, providers...)
 	return h
 }
 
