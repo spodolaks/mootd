@@ -22,7 +22,8 @@ type Handler struct {
 	usersRepo     UsersRepository
 	overviewRepo  OverviewRepository
 	tracesRepo    TracesRepository
-	detectionRuns DetectionRunRepository // optional — when nil, /detection-runs returns 503
+	detectionRuns DetectionRunRepository  // optional — when nil, /detection-runs returns 503
+	budgets       UserBudgetsRepository   // optional — when nil, /users/{id}/budget returns defaults read-only
 	secret        string
 }
 
@@ -31,6 +32,14 @@ type Handler struct {
 // opts in once the wardrobe-side repo is up.
 func (h *Handler) WithDetectionRuns(r DetectionRunRepository) *Handler {
 	h.detectionRuns = r
+	return h
+}
+
+// WithUserBudgets wires the per-user budget repo. Optional —
+// when not wired, GET returns the system defaults (read-only) and
+// PUT returns 503. Production app.go always wires it.
+func (h *Handler) WithUserBudgets(r UserBudgetsRepository) *Handler {
+	h.budgets = r
 	return h
 }
 

@@ -123,6 +123,16 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 	adminTracesRepo := admin.NewTracesMongoRepository(a.MongoClient, a.MongoDB)
 	requireAdmin := middleware.RequireAdminAuth(a.AdminJWTSecret)
 	adminHandler := admin.NewHandler(a.Logger, adminRepo, adminUsersRepo, adminOverviewRepo, adminTracesRepo, a.AdminJWTSecret)
+
+	// Per-user budget caps (P4-01 / mootd-admin#29). Best-effort wiring:
+	// startup logs but doesn't gate if the index ensure fails — the
+	// /budget endpoint then serves the static defaults read-only.
+	if budgetsRepo, err := admin.NewUserBudgetsMongoRepository(context.Background(), a.MongoClient, a.MongoDB); err == nil {
+		adminHandler.WithUserBudgets(budgetsRepo)
+	} else {
+		a.Logger.Printf("admin: user_budgets repo init failed: %v (continuing read-only on /budget)", err)
+	}
+
 	adminHandler.RegisterRoutes(mux, authLimit, requireAdmin)
 
 	userRepo := user.NewMongoRepository(a.MongoClient, a.MongoDB)

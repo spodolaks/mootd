@@ -571,6 +571,68 @@ components:
             type: string
           description: Distinct feature labels in the response, in display order (highest spend first).
 
+    UserBudget:
+      description: |
+        Per-user spend caps (P4-01 / mootd-admin#29). When the user
+        has no `user_budgets` row, the backend returns the system
+        defaults with `isDefault: true` so the UI knows to render
+        them as placeholders rather than as a saved override.
+        Enforcement (auto-downgrade / hard-stop on overrun) is a
+        separate concern shipped as P4-02 (mootd-admin#30).
+      type: object
+      required: [userId, dailyUSD, monthlyUSD, isDefault]
+      properties:
+        userId:
+          type: string
+        dailyUSD:
+          type: number
+          format: double
+          description: Daily LLM-spend cap in USD.
+        monthlyUSD:
+          type: number
+          format: double
+          description: Monthly LLM-spend cap in USD.
+        isDefault:
+          type: boolean
+          description: |
+            True when the user has no override and the response
+            carries the system defaults ($2/day, $30/month).
+        setBy:
+          type: string
+          description: Admin id that last wrote this budget. Empty when isDefault.
+        setAt:
+          type: string
+          format: date-time
+          description: When the override was last written. Empty when isDefault.
+        reason:
+          type: string
+          description: Free-text rationale captured at write time.
+
+    UserBudgetUpdate:
+      description: |
+        Body for PUT /admin/v1/users/{id}/budget. `reason` is
+        required — every budget edit ends up in the audit log with
+        the rationale, since "raised the cap on this user from $2 to
+        $200" is the kind of change a future support engineer or
+        auditor wants context for.
+      type: object
+      required: [dailyUSD, monthlyUSD, reason]
+      properties:
+        dailyUSD:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1000
+        monthlyUSD:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 10000
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+
     UserWardrobeItem:
       description: |
         One clothing item from a user's wardrobe, surfaced to the
@@ -1373,6 +1435,72 @@ paths:
                 $ref: "#/components/schemas/UserSpendBreakdown"
         "401":
           $ref: "#/components/responses/Unauthorized"
+
+  /admin/v1/users/{id}/budget:
+    get:
+      operationId: adminGetUserBudget
+      summary: |
+        Current per-user budget caps (P4-01 / mootd-admin#29).
+        When the user has no override, returns the system defaults
+        with `isDefault: true` so the UI can render them differently
+        (italic, muted) and the admin knows whether they're
+        editing-from-scratch or modifying an existing override.
+      tags: [users]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Budget for the user (override or default).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserBudget"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    put:
+      operationId: adminUpdateUserBudget
+      summary: |
+        Replace the per-user budget caps. Writes to the
+        `user_budgets` collection (upsert by userId) and writes an
+        audit row with action=`budget.update` and metadata carrying
+        the old + new values + admin-supplied reason. Enforcement
+        of these caps is a separate concern (mootd-admin#30 / P4-02).
+      tags: [users]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserBudgetUpdate"
+      responses:
+        "200":
+          description: New budget after the update.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserBudget"
+        "400":
+          description: Invalid budget values or missing reason.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: User not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /admin/v1/users/{id}/wardrobe:
     get:

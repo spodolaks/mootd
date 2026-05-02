@@ -532,6 +532,45 @@ type TracesSummary struct {
 	TotalCount int64 `json:"totalCount"`
 }
 
+// UserBudget Per-user spend caps (P4-01 / mootd-admin#29). When the user
+// has no `user_budgets` row, the backend returns the system
+// defaults with `isDefault: true` so the UI knows to render
+// them as placeholders rather than as a saved override.
+// Enforcement (auto-downgrade / hard-stop on overrun) is a
+// separate concern shipped as P4-02 (mootd-admin#30).
+type UserBudget struct {
+	// DailyUSD Daily LLM-spend cap in USD.
+	DailyUSD float64 `json:"dailyUSD"`
+
+	// IsDefault True when the user has no override and the response
+	// carries the system defaults ($2/day, $30/month).
+	IsDefault bool `json:"isDefault"`
+
+	// MonthlyUSD Monthly LLM-spend cap in USD.
+	MonthlyUSD float64 `json:"monthlyUSD"`
+
+	// Reason Free-text rationale captured at write time.
+	Reason *string `json:"reason,omitempty"`
+
+	// SetAt When the override was last written. Empty when isDefault.
+	SetAt *time.Time `json:"setAt,omitempty"`
+
+	// SetBy Admin id that last wrote this budget. Empty when isDefault.
+	SetBy  *string `json:"setBy,omitempty"`
+	UserId string  `json:"userId"`
+}
+
+// UserBudgetUpdate Body for PUT /admin/v1/users/{id}/budget. `reason` is
+// required — every budget edit ends up in the audit log with
+// the rationale, since "raised the cap on this user from $2 to
+// $200" is the kind of change a future support engineer or
+// auditor wants context for.
+type UserBudgetUpdate struct {
+	DailyUSD   float64 `json:"dailyUSD"`
+	MonthlyUSD float64 `json:"monthlyUSD"`
+	Reason     string  `json:"reason"`
+}
+
 // UserDetail Drill-through payload for the admin user-detail page (P1-06).
 // Combines the existing UserSummary scalar facts with 30-day
 // spend + recent LLM calls. Future tabs (Wardrobe / Outfits /
@@ -851,3 +890,6 @@ type AdminRefreshJSONRequestBody = RefreshRequest
 
 // AdminRerunDetectionRunJSONRequestBody defines body for AdminRerunDetectionRun for application/json ContentType.
 type AdminRerunDetectionRunJSONRequestBody = DetectionRunRerunRequest
+
+// AdminUpdateUserBudgetJSONRequestBody defines body for AdminUpdateUserBudget for application/json ContentType.
+type AdminUpdateUserBudgetJSONRequestBody = UserBudgetUpdate

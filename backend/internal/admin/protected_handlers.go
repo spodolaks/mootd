@@ -288,10 +288,6 @@ func (h *Handler) Overview(w http.ResponseWriter, r *http.Request) {
 // handler instead of the mux. Adding new sub-paths (outfits /
 // moodboards / etc.) drops one more case into the switch below.
 func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
 	if h.usersRepo == nil {
 		response.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "users repository not configured"})
 		return
@@ -308,17 +304,49 @@ func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
 		id, sub = rest[:idx], rest[idx+1:]
 	}
 
+	// Per-case method dispatch — the GET-only handlers gate
+	// inline so /budget can also accept PUT without splitting into
+	// a separate top-level mux registration.
 	switch sub {
 	case "":
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
 		h.getUserDetail(w, r, id)
 	case "wardrobe":
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
 		h.getUserWardrobe(w, r, id)
 	case "moodboards":
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
 		h.getUserMoodboards(w, r, id)
 	case "outfits":
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
 		h.getUserOutfits(w, r, id)
 	case "spend":
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
 		h.getUserSpend(w, r, id)
+	case "budget":
+		switch r.Method {
+		case http.MethodGet:
+			h.getUserBudget(w, r, id)
+		case http.MethodPut:
+			h.updateUserBudget(w, r, id)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
 	default:
 		response.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "unknown user sub-resource"})
 	}
@@ -466,6 +494,160 @@ func (h *Handler) getUserSpend(w http.ResponseWriter, r *http.Request, id string
 		return
 	}
 	response.WriteJSON(w, http.StatusOK, breakdown)
+}
+
+// getUserBudget handles GET /admin/v1/users/{id}/budget.
+// Falls back to system defaults when the user has no override —
+// the response carries `isDefault: true` so the FE can render
+// the values as placeholders rather than as a saved override.
+func (h *Handler) getUserBudget(w http.ResponseWriter, r *http.Request, id string) {
+	if id == "" {
+		response.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "missing user id"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	// When the budgets repo isn't wired, return the static defaults
+	// read-only. The FE detects this via isDefault + the absence of
+	// a setBy/setAt and disables the edit button accordingly.
+	if h.budgets == nil {
+		response.WriteJSON(w, http.StatusOK, UserBudget{
+			UserID:     id,
+			DailyUSD:   DefaultDailyBudgetUSD,
+			MonthlyUSD: DefaultMonthlyBudgetUSD,
+			IsDefault:  true,
+		})
+		return
+	}
+
+	budget, _, err := h.budgets.GetForUser(ctx, id)
+	if err != nil {
+		h.logger.Printf("admin /users/%s/budget GET: repo failed: %v", id, err)
+		response.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	response.WriteJSON(w, http.StatusOK, budget)
+}
+
+// updateUserBudget handles PUT /admin/v1/users/{id}/budget.
+// Validates body, upserts the row, writes an audit entry, and
+// echoes the resulting UserBudget. Reason is required — every
+// budget edit ends up in the audit log with rationale.
+func (h *Handler) updateUserBudget(w http.ResponseWriter, r *http.Request, id string) {
+	if id == "" {
+		response.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "missing user id"})
+		return
+	}
+	if h.budgets == nil {
+		response.WriteJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "budgets repository not configured"})
+		return
+	}
+
+	var body struct {
+		DailyUSD   float64 `json:"dailyUSD"`
+		MonthlyUSD float64 `json:"monthlyUSD"`
+		Reason     string  `json:"reason"`
+	}
+	if err := response.DecodeJSONBody(w, r, &body); err != nil {
+		response.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
+	// Validation. Spec mins/maxes are mirrored here defensively —
+	// the spec is documentation; the wire is the truth.
+	switch {
+	case body.DailyUSD < 0 || body.DailyUSD > 1000:
+		response.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "dailyUSD must be between 0 and 1000"})
+		return
+	case body.MonthlyUSD < 0 || body.MonthlyUSD > 10000:
+		response.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "monthlyUSD must be between 0 and 10000"})
+		return
+	case body.MonthlyUSD < body.DailyUSD:
+		// A monthly cap below the daily cap is almost always a
+		// fat-finger — daily would never bind. Reject with a
+		// pointed message so the admin knows why.
+		response.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "monthlyUSD must be >= dailyUSD"})
+		return
+	}
+	reason := strings.TrimSpace(body.Reason)
+	if reason == "" {
+		response.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "reason is required"})
+		return
+	}
+	if len(reason) > 500 {
+		response.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "reason exceeds 500 characters"})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	// Verify the user exists. UsersRepo's FindDetail does this for
+	// us; reusing it here keeps the not-found path consistent with
+	// the rest of /users/{id}/* handlers.
+	detail, err := h.usersRepo.FindDetail(ctx, id)
+	if err != nil {
+		h.logger.Printf("admin /users/%s/budget PUT: user lookup: %v", id, err)
+		response.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	if detail == nil {
+		response.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "user not found"})
+		return
+	}
+
+	// Read prior to capture diff for the audit log.
+	prior, _, _ := h.budgets.GetForUser(ctx, id)
+
+	adminID, _ := AdminIDFromContext(r.Context())
+	now := time.Now().UTC()
+
+	updated := UserBudget{
+		UserID:     id,
+		DailyUSD:   body.DailyUSD,
+		MonthlyUSD: body.MonthlyUSD,
+		SetBy:      adminID,
+		SetAt:      &now,
+		Reason:     reason,
+	}
+	if err := h.budgets.Upsert(ctx, updated); err != nil {
+		h.logger.Printf("admin /users/%s/budget PUT: upsert: %v", id, err)
+		response.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+
+	// Audit. Same fire-and-forget pattern as elsewhere — admin
+	// budget changes are sensitive (raising a cap is essentially
+	// authorising spend) so a missing audit row is a real cost,
+	// but blocking the write on Mongo wobbles is worse for ops.
+	if h.repo != nil {
+		var adminEmail string
+		if a, _ := h.repo.FindByID(ctx, adminID); a != nil {
+			adminEmail = a.Email
+		}
+		Audit(ctx, h.repo, h.logger, AuditEntry{
+			ID:           generateAuditID(),
+			AdminID:      adminID,
+			AdminEmail:   adminEmail,
+			Action:       "budget.update",
+			TargetUserID: id,
+			TargetEntity: "user_budget",
+			At:           now,
+			IP:           clientIP(r),
+			UserAgent:    r.Header.Get("User-Agent"),
+			Metadata: map[string]any{
+				"reason":         reason,
+				"priorDailyUSD":  prior.DailyUSD,
+				"priorMonthlyUSD": prior.MonthlyUSD,
+				"priorIsDefault": prior.IsDefault,
+				"newDailyUSD":    body.DailyUSD,
+				"newMonthlyUSD":  body.MonthlyUSD,
+			},
+		})
+	}
+
+	response.WriteJSON(w, http.StatusOK, updated)
 }
 
 // ListTraces handles GET /admin/v1/traces.
