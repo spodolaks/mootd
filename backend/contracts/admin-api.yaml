@@ -983,6 +983,26 @@ components:
         weekLabel:
           type: string
 
+    PIIRevealRequest:
+      description: |
+        Body for POST /admin/v1/audit/pii-reveal (P5-04).
+        Surface where the reveal happened — UI is the source of
+        truth for what the admin actually saw.
+      type: object
+      required: [targetUserId, kind]
+      properties:
+        targetUserId:
+          type: string
+        kind:
+          type: string
+          enum: [email, wardrobe_image, outfit_label, detection_image]
+        entityId:
+          type: string
+          description: |
+            Optional — populated when the reveal is per-row (e.g.
+            a specific wardrobe item id). Empty for whole-page
+            reveals (e.g. the "reveal email" button on user detail).
+
     UserBudget:
       description: |
         Per-user spend caps (P4-01 / mootd-admin#29). When the user
@@ -2356,6 +2376,40 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "503":
           description: SMTP not configured.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /admin/v1/audit/pii-reveal:
+    post:
+      operationId: adminAuditPIIReveal
+      summary: |
+        Record an admin's PII reveal action (P5-04 / mootd-admin#37).
+        Called by the FE every time the admin clicks to unblur a
+        photo, reveal an email, or read an outfit-item label.
+        Returns 204 (no body) on success; 403 when the admin
+        lacks users:pii permission.
+      tags: [audit]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PIIRevealRequest"
+      responses:
+        "204":
+          description: Audited.
+        "400":
+          description: Bad body.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Missing users:pii permission.
           content:
             application/json:
               schema:

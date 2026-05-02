@@ -94,6 +94,14 @@ const (
 	Today OverviewPeriod = "today"
 )
 
+// Defines values for PIIRevealRequestKind.
+const (
+	DetectionImage PIIRevealRequestKind = "detection_image"
+	Email          PIIRevealRequestKind = "email"
+	OutfitLabel    PIIRevealRequestKind = "outfit_label"
+	WardrobeImage  PIIRevealRequestKind = "wardrobe_image"
+)
+
 // Defines values for SearchHitKind.
 const (
 	User SearchHitKind = "user"
@@ -672,6 +680,21 @@ type OverviewMetrics struct {
 // UTC day so far; `7d`/`30d` are rolling windows ending now.
 type OverviewPeriod string
 
+// PIIRevealRequest Body for POST /admin/v1/audit/pii-reveal (P5-04).
+// Surface where the reveal happened — UI is the source of
+// truth for what the admin actually saw.
+type PIIRevealRequest struct {
+	// EntityId Optional — populated when the reveal is per-row (e.g.
+	// a specific wardrobe item id). Empty for whole-page
+	// reveals (e.g. the "reveal email" button on user detail).
+	EntityId     *string              `json:"entityId,omitempty"`
+	Kind         PIIRevealRequestKind `json:"kind"`
+	TargetUserId string               `json:"targetUserId"`
+}
+
+// PIIRevealRequestKind defines model for PIIRevealRequest.Kind.
+type PIIRevealRequestKind string
+
 // RefreshRequest defines model for RefreshRequest.
 type RefreshRequest struct {
 	RefreshToken string `json:"refreshToken"`
@@ -1197,6 +1220,9 @@ type AdminListUserWardrobeParams struct {
 	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
 	Limit  *int    `form:"limit,omitempty" json:"limit,omitempty"`
 }
+
+// AdminAuditPIIRevealJSONRequestBody defines body for AdminAuditPIIReveal for application/json ContentType.
+type AdminAuditPIIRevealJSONRequestBody = PIIRevealRequest
 
 // AdminLoginJSONRequestBody defines body for AdminLogin for application/json ContentType.
 type AdminLoginJSONRequestBody = LoginRequest

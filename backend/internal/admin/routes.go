@@ -41,6 +41,10 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, authLimit Middleware, requi
 	mux.Handle("/admin/v1/build-info", requireAdmin(http.HandlerFunc(h.BuildInfoHandler)))
 	mux.Handle("/admin/v1/search", requireAdmin(http.HandlerFunc(h.Search)))
 	mux.Handle("/admin/v1/audit", requireAdmin(http.HandlerFunc(h.ListAudit)))
+	// PII reveal audit (P5-04 / mootd-admin#37). Internal perm
+	// gate inside the handler so a missing perm returns the
+	// uniform {error, missingPermission} body the FE expects.
+	mux.Handle("/admin/v1/audit/pii-reveal", requireAdmin(http.HandlerFunc(h.AuditPIIReveal)))
 
 	// User surfaces — readable by anyone with users:read; PII
 	// fields gated *inside* the handler with HasPermissionFromContext

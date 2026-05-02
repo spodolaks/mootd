@@ -684,6 +684,80 @@ func (h *Handler) updateUserBudget(w http.ResponseWriter, r *http.Request, id st
 	response.WriteJSON(w, http.StatusOK, updated)
 }
 
+// AuditPIIReveal handles POST /admin/v1/audit/pii-reveal
+// (P5-04 / mootd-admin#37). The FE calls this when an admin
+// reveals a redacted-by-default field (email, photo, outfit
+// label). Body: {targetUserId, kind, entityId?}.
+//
+// Permission gate: requires `users:pii`. Admins without it
+// shouldn't see the reveal button in the FE; this is the
+// belt-and-braces check on the wire.
+//
+// Returns 204 (no body) on success — the action is purely
+// audit, no data echoed.
+func (h *Handler) AuditPIIReveal(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !HasPermissionFromContext(r, PermUsersPII) {
+		response.WriteJSON(w, http.StatusForbidden, map[string]any{
+			"error":             "permission denied",
+			"missingPermission": PermUsersPII,
+		})
+		return
+	}
+
+	var body struct {
+		TargetUserID string `json:"targetUserId"`
+		Kind         string `json:"kind"`
+		EntityID     string `json:"entityId"`
+	}
+	if err := response.DecodeJSONBody(w, r, &body); err != nil {
+		response.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if body.TargetUserID == "" {
+		response.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "targetUserId required"})
+		return
+	}
+	switch body.Kind {
+	case "email", "wardrobe_image", "outfit_label", "detection_image":
+		// ok
+	default:
+		response.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid kind"})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	if h.repo != nil {
+		adminID, _ := AdminIDFromContext(r.Context())
+		var adminEmail string
+		if a, _ := h.repo.FindByID(ctx, adminID); a != nil {
+			adminEmail = a.Email
+		}
+		Audit(ctx, h.repo, h.logger, AuditEntry{
+			ID:           generateAuditID(),
+			AdminID:      adminID,
+			AdminEmail:   adminEmail,
+			Action:       "pii.reveal",
+			TargetUserID: body.TargetUserID,
+			TargetEntity: body.Kind,
+			At:           time.Now().UTC(),
+			IP:           clientIP(r),
+			UserAgent:    r.Header.Get("User-Agent"),
+			Metadata: map[string]any{
+				"kind":     body.Kind,
+				"entityId": body.EntityID,
+			},
+		})
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // WeeklyReport handles GET /admin/v1/reports/weekly +
 // POST /admin/v1/reports/weekly/send (P4-04 / mootd-admin#32).
 // Same handler dispatches both based on path suffix + method.
