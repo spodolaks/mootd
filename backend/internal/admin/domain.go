@@ -113,7 +113,8 @@ type RefreshRequest struct {
 // AdminInfo is the serialisable public view of an admin — no password
 // hash, no MFA secret, no recovery codes.
 type AdminInfo struct {
-	ID    string   `json:"id"`
-	Email string   `json:"email"`
-	Roles []string `json:"roles"`
+	ID          string   `json:"id"`
+	Email       string   `json:"email"`
+	Roles       []string `json:"roles"`
+	Permissions []string `json:"permissions,omitempty"` // P5-01 / mootd-admin#34
 }

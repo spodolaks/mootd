@@ -156,7 +156,13 @@ const (
 type Admin struct {
 	Email openapi_types.Email `json:"email"`
 	Id    string              `json:"id"`
-	Roles []AdminRoles        `json:"roles"`
+
+	// Permissions Per-permission checks the FE uses to hide nav items
+	// and buttons (P5-01 / mootd-admin#34). Computed from
+	// the admin's roles. Stable order across requests for
+	// cache-friendly snapshotting.
+	Permissions *[]string    `json:"permissions,omitempty"`
+	Roles       []AdminRoles `json:"roles"`
 }
 
 // AdminRoles defines model for Admin.Roles.

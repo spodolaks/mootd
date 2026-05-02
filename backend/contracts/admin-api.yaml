@@ -78,6 +78,14 @@ components:
           items:
             type: string
             enum: [admin, engineer, support, readonly]
+        permissions:
+          type: array
+          items: { type: string }
+          description: |
+            Per-permission checks the FE uses to hide nav items
+            and buttons (P5-01 / mootd-admin#34). Computed from
+            the admin's roles. Stable order across requests for
+            cache-friendly snapshotting.
 
     LoginRequest:
       type: object

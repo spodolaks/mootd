@@ -98,10 +98,12 @@ func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
 		h.logger.Printf("admin /me: update last-active: %v", err)
 	}
 
+	roles := a.RolesAsStrings()
 	response.WriteJSON(w, http.StatusOK, AdminInfo{
-		ID:    a.ID,
-		Email: a.Email,
-		Roles: a.RolesAsStrings(),
+		ID:          a.ID,
+		Email:       a.Email,
+		Roles:       roles,
+		Permissions: PermissionsFor(roles),
 	})
 }
 
@@ -560,6 +562,13 @@ func (h *Handler) getUserBudget(w http.ResponseWriter, r *http.Request, id strin
 // echoes the resulting UserBudget. Reason is required — every
 // budget edit ends up in the audit log with rationale.
 func (h *Handler) updateUserBudget(w http.ResponseWriter, r *http.Request, id string) {
+	if !HasPermissionFromContext(r, PermBudgetsWrite) {
+		response.WriteJSON(w, http.StatusForbidden, map[string]any{
+			"error":             "permission denied",
+			"missingPermission": PermBudgetsWrite,
+		})
+		return
+	}
 	if id == "" {
 		response.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "missing user id"})
 		return
@@ -810,6 +819,13 @@ func (h *Handler) getModelRouting(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) updateModelRouting(w http.ResponseWriter, r *http.Request) {
+	if !HasPermissionFromContext(r, PermRoutingWrite) {
+		response.WriteJSON(w, http.StatusForbidden, map[string]any{
+			"error":             "permission denied",
+			"missingPermission": PermRoutingWrite,
+		})
+		return
+	}
 	var body struct {
 		Tiers []ModelRoutingTier `json:"tiers"`
 		Notes string             `json:"notes"`
@@ -979,6 +995,13 @@ func (h *Handler) listEvalRuns(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) startEvalRun(w http.ResponseWriter, r *http.Request) {
+	if !HasPermissionFromContext(r, PermPromptsWrite) {
+		response.WriteJSON(w, http.StatusForbidden, map[string]any{
+			"error":             "permission denied",
+			"missingPermission": PermPromptsWrite,
+		})
+		return
+	}
 	var body struct {
 		EvalSetID     string `json:"evalSetId"`
 		PromptVersion string `json:"promptVersion"`
@@ -1450,6 +1473,13 @@ func (h *Handler) listDetectionVersions(w http.ResponseWriter, r *http.Request) 
 // ~60 seconds we'll switch to the same async-job pattern as
 // /v1/outfits/generate.
 func (h *Handler) rerunDetectionRun(w http.ResponseWriter, r *http.Request, id string) {
+	if !HasPermissionFromContext(r, PermDetectionsRerun) {
+		response.WriteJSON(w, http.StatusForbidden, map[string]any{
+			"error":             "permission denied",
+			"missingPermission": PermDetectionsRerun,
+		})
+		return
+	}
 	if id == "" {
 		response.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "missing detection-run id"})
 		return
