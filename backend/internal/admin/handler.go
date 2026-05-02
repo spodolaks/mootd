@@ -31,6 +31,8 @@ type Handler struct {
 	routingRepo   RoutingRepository       // optional — when nil, /model-routing returns 503
 	routingCache  *CachedRoutingReader    // optional — cleared on PUT to invalidate
 	routingProviders []string             // boot-time provider names; populated alongside routingRepo
+	reportsRepo   ReportsRepository       // optional — when nil, /reports/weekly returns 503
+	smtpCfg       *SMTPConfig             // optional — when nil, /reports/weekly/send returns 503
 	secret        string
 }
 
@@ -66,6 +68,18 @@ func (h *Handler) WithUserBudgets(r UserBudgetsRepository) *Handler {
 // the optional deps.
 func (h *Handler) WithBudgetState(s BudgetStateReader) *Handler {
 	h.budgetState = s
+	return h
+}
+
+// WithReports wires the weekly-report repo + (optional) SMTP
+// config (P4-04 / mootd-admin#32). The repo is required for the
+// preview endpoint; the SMTP config is required for the send
+// endpoint. Either-or wiring is supported — admins can preview
+// reports even when SMTP isn't configured, and the cron scheduler
+// only fires when both are set.
+func (h *Handler) WithReports(repo ReportsRepository, smtp *SMTPConfig) *Handler {
+	h.reportsRepo = repo
+	h.smtpCfg = smtp
 	return h
 }
 

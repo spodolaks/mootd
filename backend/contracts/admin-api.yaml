@@ -877,6 +877,104 @@ components:
           maxLength: 500
           description: Audit-log rationale. Required.
 
+    WeeklyReport:
+      description: |
+        Aggregated cost + activity report for one ISO week. The
+        endpoint is the source of truth; the SMTP email is just a
+        rendering of this same shape. Admins can preview via the
+        admin UI at any time without triggering a send.
+      type: object
+      required: [weekLabel, weekStart, weekEnd, totalCostUsd, dau, costPerDauUsd, topUsers, byModel, byFeature]
+      properties:
+        weekLabel:
+          type: string
+          description: ISO week label, e.g. "2026-W18".
+        weekStart:
+          type: string
+          format: date-time
+          description: Monday 00:00 UTC.
+        weekEnd:
+          type: string
+          format: date-time
+          description: Following Monday 00:00 UTC (exclusive).
+        totalCostUsd:
+          type: number
+          format: double
+        priorWeekCostUsd:
+          type: number
+          format: double
+          description: For the WoW delta. Empty when no data for the prior week.
+        dau:
+          type: integer
+          description: Distinct users with at least one llm_call in the window.
+        costPerDauUsd:
+          type: number
+          format: double
+        topUsers:
+          type: array
+          items:
+            $ref: "#/components/schemas/WeeklyReportUserRow"
+        byModel:
+          type: array
+          items:
+            $ref: "#/components/schemas/WeeklyReportFacet"
+        byFeature:
+          type: array
+          items:
+            $ref: "#/components/schemas/WeeklyReportFacet"
+        incidents:
+          type: array
+          items:
+            type: string
+          description: Notable events spotted during aggregation (budget cap hits, cache-rate drops, prompt-version regressions). Free-text per item.
+        recommendations:
+          type: array
+          items:
+            type: string
+          description: Short next-action suggestions derived from the data.
+
+    WeeklyReportUserRow:
+      type: object
+      required: [userId, costUsd, callCount]
+      properties:
+        userId: { type: string }
+        userEmail: { type: string }
+        costUsd:
+          type: number
+          format: double
+        callCount:
+          type: integer
+          format: int64
+
+    WeeklyReportFacet:
+      description: One row of a "by X" table — used for both byModel and byFeature breakdowns.
+      type: object
+      required: [label, costUsd, callCount]
+      properties:
+        label: { type: string }
+        costUsd:
+          type: number
+          format: double
+        callCount:
+          type: integer
+          format: int64
+        share:
+          type: number
+          format: double
+          description: Fraction of total cost (0-1).
+
+    WeeklyReportSendResponse:
+      type: object
+      required: [sent]
+      properties:
+        sent:
+          type: boolean
+        recipient:
+          type: string
+          description: Empty when sent=false.
+        weekLabel:
+          type: string
+
     UserBudget:
       description: |
         Per-user spend caps (P4-01 / mootd-admin#29). When the user
@@ -2204,6 +2302,56 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
+
+  /admin/v1/reports/weekly:
+    get:
+      operationId: adminGetWeeklyReport
+      summary: |
+        Render the weekly cost report (P4-04 / mootd-admin#32).
+        Defaults to the most recently completed UTC week (Mon-Sun);
+        the `week` query parameter overrides to a specific ISO week
+        like "2026-W18" for backfill.
+      tags: [reports]
+      parameters:
+        - name: week
+          in: query
+          schema: { type: string }
+          description: ISO week label (YYYY-Www). Defaults to last completed week.
+      responses:
+        "200":
+          description: Report payload.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WeeklyReport"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /admin/v1/reports/weekly/send:
+    post:
+      operationId: adminSendWeeklyReport
+      summary: |
+        Manually trigger the weekly report email. Idempotent on
+        retries — the report is recomputed from llm_calls each
+        time. Returns 200 with the recipient + status; 503 when
+        SMTP isn't configured (the rendered report is still
+        viewable via GET).
+      tags: [reports]
+      responses:
+        "200":
+          description: Sent.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WeeklyReportSendResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "503":
+          description: SMTP not configured.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /admin/v1/audit:
     get:

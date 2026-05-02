@@ -996,6 +996,65 @@ type UsersListResponse struct {
 	Users      []UserSummary `json:"users"`
 }
 
+// WeeklyReport Aggregated cost + activity report for one ISO week. The
+// endpoint is the source of truth; the SMTP email is just a
+// rendering of this same shape. Admins can preview via the
+// admin UI at any time without triggering a send.
+type WeeklyReport struct {
+	ByFeature     []WeeklyReportFacet `json:"byFeature"`
+	ByModel       []WeeklyReportFacet `json:"byModel"`
+	CostPerDauUsd float64             `json:"costPerDauUsd"`
+
+	// Dau Distinct users with at least one llm_call in the window.
+	Dau int `json:"dau"`
+
+	// Incidents Notable events spotted during aggregation (budget cap hits, cache-rate drops, prompt-version regressions). Free-text per item.
+	Incidents *[]string `json:"incidents,omitempty"`
+
+	// PriorWeekCostUsd For the WoW delta. Empty when no data for the prior week.
+	PriorWeekCostUsd *float64 `json:"priorWeekCostUsd,omitempty"`
+
+	// Recommendations Short next-action suggestions derived from the data.
+	Recommendations *[]string             `json:"recommendations,omitempty"`
+	TopUsers        []WeeklyReportUserRow `json:"topUsers"`
+	TotalCostUsd    float64               `json:"totalCostUsd"`
+
+	// WeekEnd Following Monday 00:00 UTC (exclusive).
+	WeekEnd time.Time `json:"weekEnd"`
+
+	// WeekLabel ISO week label, e.g. "2026-W18".
+	WeekLabel string `json:"weekLabel"`
+
+	// WeekStart Monday 00:00 UTC.
+	WeekStart time.Time `json:"weekStart"`
+}
+
+// WeeklyReportFacet One row of a "by X" table — used for both byModel and byFeature breakdowns.
+type WeeklyReportFacet struct {
+	CallCount int64   `json:"callCount"`
+	CostUsd   float64 `json:"costUsd"`
+	Label     string  `json:"label"`
+
+	// Share Fraction of total cost (0-1).
+	Share *float64 `json:"share,omitempty"`
+}
+
+// WeeklyReportSendResponse defines model for WeeklyReportSendResponse.
+type WeeklyReportSendResponse struct {
+	// Recipient Empty when sent=false.
+	Recipient *string `json:"recipient,omitempty"`
+	Sent      bool    `json:"sent"`
+	WeekLabel *string `json:"weekLabel,omitempty"`
+}
+
+// WeeklyReportUserRow defines model for WeeklyReportUserRow.
+type WeeklyReportUserRow struct {
+	CallCount int64   `json:"callCount"`
+	CostUsd   float64 `json:"costUsd"`
+	UserEmail *string `json:"userEmail,omitempty"`
+	UserId    string  `json:"userId"`
+}
+
 // BadRequest defines model for BadRequest.
 type BadRequest = ErrorResponse
 
@@ -1034,6 +1093,12 @@ type AdminOverviewParams struct {
 	// regardless of period — they're the trend, not the
 	// headline.
 	Period *OverviewPeriod `form:"period,omitempty" json:"period,omitempty"`
+}
+
+// AdminGetWeeklyReportParams defines parameters for AdminGetWeeklyReport.
+type AdminGetWeeklyReportParams struct {
+	// Week ISO week label (YYYY-Www). Defaults to last completed week.
+	Week *string `form:"week,omitempty" json:"week,omitempty"`
 }
 
 // AdminSearchParams defines parameters for AdminSearch.

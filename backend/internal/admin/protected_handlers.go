@@ -675,6 +675,108 @@ func (h *Handler) updateUserBudget(w http.ResponseWriter, r *http.Request, id st
 	response.WriteJSON(w, http.StatusOK, updated)
 }
 
+// WeeklyReport handles GET /admin/v1/reports/weekly +
+// POST /admin/v1/reports/weekly/send (P4-04 / mootd-admin#32).
+// Same handler dispatches both based on path suffix + method.
+func (h *Handler) WeeklyReport(w http.ResponseWriter, r *http.Request) {
+	if h.reportsRepo == nil {
+		response.WriteJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "reports not wired"})
+		return
+	}
+	if strings.HasSuffix(r.URL.Path, "/send") {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		h.sendWeeklyReport(w, r)
+		return
+	}
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	h.getWeeklyReport(w, r)
+}
+
+func (h *Handler) getWeeklyReport(w http.ResponseWriter, r *http.Request) {
+	weekParam := strings.TrimSpace(r.URL.Query().Get("week"))
+	var (
+		start, end time.Time
+		err        error
+	)
+	if weekParam == "" {
+		start, end = LastCompletedISOWeek(time.Now().UTC())
+	} else {
+		start, err = ParseISOWeekLabel(weekParam)
+		if err != nil {
+			response.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		end = start.Add(7 * 24 * time.Hour)
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	report, err := h.reportsRepo.Build(ctx, start, end)
+	if err != nil {
+		h.logger.Printf("admin /reports/weekly: %v", err)
+		response.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	response.WriteJSON(w, http.StatusOK, report)
+}
+
+func (h *Handler) sendWeeklyReport(w http.ResponseWriter, r *http.Request) {
+	if h.smtpCfg == nil || h.smtpCfg.Host == "" {
+		response.WriteJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "SMTP not configured"})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	start, end := LastCompletedISOWeek(time.Now().UTC())
+	report, err := h.reportsRepo.Build(ctx, start, end)
+	if err != nil {
+		h.logger.Printf("admin /reports/weekly/send build: %v", err)
+		response.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "build failed"})
+		return
+	}
+	if err := SendWeeklyReport(*h.smtpCfg, report); err != nil {
+		h.logger.Printf("admin /reports/weekly/send smtp: %v", err)
+		response.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "send failed: " + err.Error()})
+		return
+	}
+
+	// Audit. Reports go to the founder's inbox — that's a privileged
+	// action worth recording.
+	if h.repo != nil {
+		adminID, _ := AdminIDFromContext(r.Context())
+		var adminEmail string
+		if a, _ := h.repo.FindByID(ctx, adminID); a != nil {
+			adminEmail = a.Email
+		}
+		Audit(ctx, h.repo, h.logger, AuditEntry{
+			ID:         generateAuditID(),
+			AdminID:    adminID,
+			AdminEmail: adminEmail,
+			Action:     "report.weekly.send",
+			At:         time.Now().UTC(),
+			IP:         clientIP(r),
+			UserAgent:  r.Header.Get("User-Agent"),
+			Metadata: map[string]any{
+				"weekLabel": report.WeekLabel,
+				"recipient": h.smtpCfg.ToAddr,
+			},
+		})
+	}
+
+	response.WriteJSON(w, http.StatusOK, map[string]any{
+		"sent":      true,
+		"recipient": h.smtpCfg.ToAddr,
+		"weekLabel": report.WeekLabel,
+	})
+}
+
 // ModelRouting handles GET + PUT /admin/v1/model-routing
 // (P4-05 / mootd-admin#33). The PUT body must list all four
 // tiers exactly once with valid provider names; partial updates

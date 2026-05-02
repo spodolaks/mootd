@@ -45,6 +45,11 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, authLimit Middleware, requi
 	// Model routing config (P4-05 / mootd-admin#33). Single doc,
 	// GET + PUT routed via method dispatch in the handler.
 	mux.Handle("/admin/v1/model-routing", requireAdmin(http.HandlerFunc(h.ModelRouting)))
+	// Weekly cost report (P4-04 / mootd-admin#32). One handler
+	// for both GET (preview) and POST (send via SMTP) — dispatched
+	// by path suffix in WeeklyReport.
+	mux.Handle("/admin/v1/reports/weekly", requireAdmin(http.HandlerFunc(h.WeeklyReport)))
+	mux.Handle("/admin/v1/reports/weekly/send", requireAdmin(http.HandlerFunc(h.WeeklyReport)))
 	mux.Handle("/admin/v1/search", requireAdmin(http.HandlerFunc(h.Search)))
 	// Detection-run archive (P1-04). Same prefix-route trick as
 	// /users/ — handler dispatches on the trailing path segment

@@ -3,6 +3,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -126,6 +127,43 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 	adminTracesRepo := admin.NewTracesMongoRepository(a.MongoClient, a.MongoDB)
 	requireAdmin := middleware.RequireAdminAuth(a.AdminJWTSecret)
 	adminHandler := admin.NewHandler(a.Logger, adminRepo, adminUsersRepo, adminOverviewRepo, adminTracesRepo, a.AdminJWTSecret)
+
+	// Weekly cost report (P4-04 / mootd-admin#32). The repo runs
+	// aggregations against llm_calls + users; SMTP config is
+	// optional. When SMTP_HOST is unset, /reports/weekly still
+	// works (admin previews on demand) but /send returns 503.
+	reportsRepo := admin.NewReportsMongoRepository(a.MongoClient, a.MongoDB)
+	var smtpCfg *admin.SMTPConfig
+	if host := os.Getenv("SMTP_HOST"); host != "" {
+		smtpCfg = &admin.SMTPConfig{
+			Host:     host,
+			Port:     os.Getenv("SMTP_PORT"),
+			Username: os.Getenv("SMTP_USERNAME"),
+			Password: os.Getenv("SMTP_PASSWORD"),
+			FromAddr: os.Getenv("SMTP_FROM"),
+			ToAddr:   os.Getenv("SMTP_TO"),
+		}
+		if smtpCfg.FromAddr == "" || smtpCfg.ToAddr == "" {
+			a.Logger.Print("admin: SMTP_HOST set but SMTP_FROM / SMTP_TO missing; weekly report send disabled")
+			smtpCfg = nil
+		}
+	}
+	adminHandler.WithReports(reportsRepo, smtpCfg)
+	if smtpCfg != nil {
+		// Cron only fires when SMTP is configured. Without SMTP
+		// the cron's send call would always 503; better to not
+		// schedule it at all than to log a "send failed" every
+		// Monday at 08:00.
+		admin.StartWeeklyReportCron(workerCtx, a.Logger, nil, func(ctx context.Context) error {
+			start, end := admin.LastCompletedISOWeek(time.Now().UTC())
+			report, err := reportsRepo.Build(ctx, start, end)
+			if err != nil {
+				return fmt.Errorf("build: %w", err)
+			}
+			return admin.SendWeeklyReport(*smtpCfg, report)
+		})
+		a.Logger.Printf("admin: weekly report cron armed (SMTP %s → %s)", smtpCfg.Host, smtpCfg.ToAddr)
+	}
 
 	// Per-user budget caps (P4-01 / mootd-admin#29). Best-effort wiring:
 	// startup logs but doesn't gate if the index ensure fails — the
