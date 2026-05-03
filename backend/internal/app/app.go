@@ -181,7 +181,17 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 			a.Logger.Printf("admin: prompt template seed failed: %v (falling back to hardcoded constants)", err)
 		} else {
 			cache := admin.NewCachedPromptTemplates(templatesRepo, fallbacks, a.Logger)
-			outfit.SetPromptTemplateProvider(newPromptTemplateAdapter(cache))
+			// A/B testing (P3-05 / mootd-admin#28). Best-effort:
+			// if the AB-test repo init fails the templates still
+			// work, just without traffic splitting.
+			var abCache *admin.CachedABTests
+			if abRepo, abErr := admin.NewABTestMongoRepository(context.Background(), a.MongoClient, a.MongoDB); abErr == nil {
+				abCache = admin.NewCachedABTests(abRepo, 0)
+				adminHandler.WithABTests(abRepo, abCache)
+			} else {
+				a.Logger.Printf("admin: prompt_ab_tests repo init failed: %v (continuing without A/B testing)", abErr)
+			}
+			outfit.SetPromptTemplateProvider(newPromptTemplateAdapter(cache, abCache, templatesRepo))
 			adminHandler.WithPromptTemplates(templatesRepo, cache)
 			a.Logger.Print("admin: prompt templates wired (outfit_system_base + outfit_safety seeded)")
 		}

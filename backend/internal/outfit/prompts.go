@@ -30,11 +30,13 @@ const PromptVersion = "v3"
 // mootd-admin#24). Defined here so outfit/ doesn't import
 // admin/ — same one-way-dep pattern as elsewhere.
 //
-// Returns the production template body for `name`, or "" when
-// no production version is set (caller falls back to the
-// hardcoded constant).
+// Returns the template body for `name` to serve to `userID`,
+// or "" when no production version is set (caller falls back
+// to the hardcoded constant). The userID gates A/B testing
+// (P3-05 / mootd-admin#28) — same user always hits the same
+// arm; empty userID always serves production.
 type PromptTemplateProvider interface {
-	BodyOrFallbackForName(name string) string
+	BodyForUser(name, userID string) string
 }
 
 // promptTemplates is the package-level provider. nil = use
@@ -60,25 +62,28 @@ func DefaultSystemBaseTemplate() string { return baseSystemPrompt }
 // the seeding code in app/.
 func DefaultSafetyTemplate() string { return defaultSafetyPrompt }
 
-// getSystemBaseTemplate returns the production template body
-// for "outfit_system_base", or the baked-in baseSystemPrompt
-// when no provider is wired / the template hasn't been
-// promoted. Acceptance criterion for #24: byte-identical to
-// the pre-migration constant for the same inputs.
-func getSystemBaseTemplate() string {
+// getSystemBaseTemplate returns the template body for
+// "outfit_system_base" — the production version, or the
+// candidate when a P3-05 A/B test is active and userID falls
+// in the candidate cohort. Falls back to the baked-in
+// baseSystemPrompt when no provider is wired / the template
+// hasn't been promoted. Acceptance criterion for #24:
+// byte-identical to the pre-migration constant when no
+// provider is wired.
+func getSystemBaseTemplate(userID string) string {
 	if promptTemplates != nil {
-		if body := promptTemplates.BodyOrFallbackForName("outfit_system_base"); body != "" {
+		if body := promptTemplates.BodyForUser("outfit_system_base", userID); body != "" {
 			return body
 		}
 	}
 	return baseSystemPrompt
 }
 
-// getSafetyTemplate returns the production template body for
-// "outfit_safety". Same fallback semantics.
-func getSafetyTemplate() string {
+// getSafetyTemplate returns the template body for
+// "outfit_safety". Same fallback + A/B-routing semantics.
+func getSafetyTemplate(userID string) string {
 	if promptTemplates != nil {
-		if body := promptTemplates.BodyOrFallbackForName("outfit_safety"); body != "" {
+		if body := promptTemplates.BodyForUser("outfit_safety", userID); body != "" {
 			return body
 		}
 	}
@@ -243,14 +248,14 @@ OUTPUT:
 //     not just archetype scores. This is the largest non-infra quality bump
 //     available: it replaces a generic prompt with one that carries the
 //     user's actual taste trail.
-func buildSystemPrompt(weather Weather, recentBoards []RecentBoard, topArchetypes []archetype.ScoredArchetype, panels, backgrounds []SurfaceOption) string {
+func buildSystemPrompt(userID string, weather Weather, recentBoards []RecentBoard, topArchetypes []archetype.ScoredArchetype, panels, backgrounds []SurfaceOption) string {
 	var sb strings.Builder
-	sb.WriteString(getSystemBaseTemplate())
+	sb.WriteString(getSystemBaseTemplate(userID))
 
 	// Tell the LLM how to treat the data block. Defence-in-depth alongside
 	// per-string sanitisation in sanitiseUserText. v3.
 	sb.WriteString("\n\n")
-	sb.WriteString(strings.ReplaceAll(strings.ReplaceAll(getSafetyTemplate(),
+	sb.WriteString(strings.ReplaceAll(strings.ReplaceAll(getSafetyTemplate(userID),
 		"{{userDataOpen}}", userDataOpen),
 		"{{userDataClose}}", userDataClose))
 
@@ -403,7 +408,12 @@ EXAMPLE OUTPUT (uses placeholder IDs — do NOT reuse them; notice description a
 // for the rest of the package; this one exists solely so eval can
 // see what the LLM would see.
 func BuildSystemPromptForEval(weather Weather, recentBoards []RecentBoard, topArchetypes []archetype.ScoredArchetype, panels, backgrounds []SurfaceOption) string {
-	return buildSystemPrompt(weather, recentBoards, topArchetypes, panels, backgrounds)
+	// Eval runs without a user — empty userID always serves
+	// the production version (A/B routing returns false for
+	// empty userID; see admin.UserBucketPct). This keeps eval
+	// scores comparable across runs even when an A/B test is
+	// active in production.
+	return buildSystemPrompt("", weather, recentBoards, topArchetypes, panels, backgrounds)
 }
 
 // BuildUserMessage produces a single compact representation of the wardrobe

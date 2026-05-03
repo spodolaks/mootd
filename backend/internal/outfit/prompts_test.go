@@ -6,7 +6,7 @@ import (
 )
 
 func TestBuildSystemPrompt_NoHistory(t *testing.T) {
-	p := buildSystemPrompt(Weather{}, nil, nil, nil, nil)
+	p := buildSystemPrompt("", Weather{}, nil, nil, nil, nil)
 
 	if strings.Contains(p, "RECENTLY WORN") {
 		t.Error("prompt should not contain RECENTLY WORN when history is empty")
@@ -24,7 +24,7 @@ func TestBuildSystemPrompt_NameOnlyRecent_EmitsAvoidListOnly(t *testing.T) {
 		{OutfitName: "Monday Mood"},
 		{OutfitName: "Tuesday Bloom"},
 	}
-	p := buildSystemPrompt(Weather{}, boards, nil, nil, nil)
+	p := buildSystemPrompt("", Weather{}, boards, nil, nil, nil)
 
 	if !strings.Contains(p, "RECENTLY WORN") {
 		t.Error("expected RECENTLY WORN section for name-only boards")
@@ -50,7 +50,7 @@ func TestBuildSystemPrompt_RichRecent_EmitsBothSections(t *testing.T) {
 		// but be elided from "chosen".
 		{OutfitName: "Name Only"},
 	}
-	p := buildSystemPrompt(Weather{}, boards, nil, nil, nil)
+	p := buildSystemPrompt("", Weather{}, boards, nil, nil, nil)
 
 	// Anti-list includes both
 	if !strings.Contains(p, "Saturday Quiet") || !strings.Contains(p, "Name Only") {
@@ -86,7 +86,7 @@ func TestBuildSystemPrompt_EmptyOutfitNameIsSkipped(t *testing.T) {
 	boards := []RecentBoard{
 		{OutfitName: "", Description: "something"},
 	}
-	p := buildSystemPrompt(Weather{}, boards, nil, nil, nil)
+	p := buildSystemPrompt("", Weather{}, boards, nil, nil, nil)
 
 	// Anti-list doesn't render empty names as "" entries.
 	if strings.Contains(p, `- ""`) {
@@ -268,7 +268,7 @@ func TestBuildSystemPrompt_WrapsRecentBoardsInUserDataTags(t *testing.T) {
 			Description: "Structured wool jacket sharpens the tonal trouser.",
 		},
 	}
-	p := buildSystemPrompt(Weather{}, boards, nil, nil, nil)
+	p := buildSystemPrompt("", Weather{}, boards, nil, nil, nil)
 
 	// Both anti-list and positive-example sections wrap their user data.
 	if c := strings.Count(p, userDataOpen); c < 2 {

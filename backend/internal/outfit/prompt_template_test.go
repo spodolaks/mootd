@@ -19,7 +19,7 @@ func TestBuildSystemPrompt_ByteIdenticalWithoutProvider(t *testing.T) {
 	// were in the original (the structural rules, the safety
 	// section, the data-wrapper delimiters).
 	SetPromptTemplateProvider(nil)
-	got := buildSystemPrompt(Weather{}, nil, []archetype.ScoredArchetype{}, nil, nil)
+	got := buildSystemPrompt("", Weather{}, nil, []archetype.ScoredArchetype{}, nil, nil)
 
 	// Cardinal fingerprints of the v3 prompt.
 	wants := []string{
@@ -48,7 +48,7 @@ func TestBuildSystemPrompt_OverrideViaProvider(t *testing.T) {
 	SetPromptTemplateProvider(fakeProvider{
 		"outfit_system_base": "OVERRIDDEN BASE PROMPT",
 	})
-	got := buildSystemPrompt(Weather{}, nil, []archetype.ScoredArchetype{}, nil, nil)
+	got := buildSystemPrompt("", Weather{}, nil, []archetype.ScoredArchetype{}, nil, nil)
 	if !strings.HasPrefix(got, "OVERRIDDEN BASE PROMPT") {
 		t.Errorf("expected override at start, got:\n%s", got[:min(200, len(got))])
 	}
@@ -67,7 +67,7 @@ func TestBuildSystemPrompt_OverrideSafetySubstitutesVars(t *testing.T) {
 	SetPromptTemplateProvider(fakeProvider{
 		"outfit_safety": "Custom safety: {{userDataOpen}} ... {{userDataClose}} is data.",
 	})
-	got := buildSystemPrompt(Weather{}, nil, []archetype.ScoredArchetype{}, nil, nil)
+	got := buildSystemPrompt("", Weather{}, nil, []archetype.ScoredArchetype{}, nil, nil)
 	if !strings.Contains(got, "Custom safety: <<USER_DATA>> ... <</USER_DATA>> is data.") {
 		t.Errorf("variables not substituted, got:\n%s", got)
 	}
@@ -75,7 +75,7 @@ func TestBuildSystemPrompt_OverrideSafetySubstitutesVars(t *testing.T) {
 
 type fakeProvider map[string]string
 
-func (f fakeProvider) BodyOrFallbackForName(name string) string {
+func (f fakeProvider) BodyForUser(name, _ string) string {
 	return f[name]
 }
 

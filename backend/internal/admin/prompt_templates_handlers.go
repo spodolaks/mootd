@@ -62,12 +62,31 @@ func (h *Handler) PromptTemplatesRouter(w http.ResponseWriter, r *http.Request) 
 				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			}
 		case 2:
+			if parts[1] == "ab-tests" {
+				switch r.Method {
+				case http.MethodGet:
+					h.listABTests(w, r, name)
+				case http.MethodPost:
+					h.startABTest(w, r, name)
+				default:
+					http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				}
+				return
+			}
 			if r.Method != http.MethodGet {
 				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 				return
 			}
 			h.getPromptVersion(w, r, name, parts[1])
 		case 3:
+			if parts[1] == "ab-tests" && parts[2] == "end" {
+				if r.Method != http.MethodPost {
+					http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+					return
+				}
+				h.endABTest(w, r, name)
+				return
+			}
 			if parts[2] != "promote" {
 				response.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "unknown sub-resource"})
 				return

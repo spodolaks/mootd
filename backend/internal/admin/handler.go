@@ -36,6 +36,8 @@ type Handler struct {
 	sessionsRepo  SessionsRepository      // optional — when nil, /sessions returns 503
 	templatesRepo PromptTemplatesRepository // optional — when nil, /prompts returns 503
 	templatesCache *CachedPromptTemplates    // optional — invalidated on Promote
+	abTestsRepo   ABTestRepository          // optional — when nil, /prompts/{name}/ab-tests returns 503
+	abTestsCache  *CachedABTests            // optional — invalidated on Start/End
 	secret        string
 }
 
@@ -80,6 +82,15 @@ func (h *Handler) WithBudgetState(s BudgetStateReader) *Handler {
 func (h *Handler) WithPromptTemplates(repo PromptTemplatesRepository, cache *CachedPromptTemplates) *Handler {
 	h.templatesRepo = repo
 	h.templatesCache = cache
+	return h
+}
+
+// WithABTests wires the prompt A/B test repo + cache (P3-05 /
+// mootd-admin#28). Start/End invalidate the cache so the next
+// outfit-gen call sees the change immediately.
+func (h *Handler) WithABTests(repo ABTestRepository, cache *CachedABTests) *Handler {
+	h.abTestsRepo = repo
+	h.abTestsCache = cache
 	return h
 }
 

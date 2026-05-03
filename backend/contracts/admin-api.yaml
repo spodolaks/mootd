@@ -54,6 +54,20 @@ components:
       content:
         application/json:
           schema: { $ref: "#/components/schemas/ErrorResponse" }
+    MfaChallengeRequired:
+      description: |
+        Privileged-action gate (P5-02 follow-up). The session is
+        authenticated, but the last successful MFA verification falls
+        outside the freshness window (default 10 minutes). The FE must
+        pop the challenge modal, call POST /admin/v1/auth/mfa/challenge
+        with a fresh TOTP/recovery code, and retry the original action
+        with the new access token. Distinguishable from a generic
+        Unauthorized response by the `requiresFreshMfa: true` flag in
+        the body.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/MfaChallengeRequiredResponse"
 
   schemas:
     ErrorResponse:
@@ -127,6 +141,75 @@ components:
       properties:
         refreshToken:
           type: string
+
+    MfaChallengeRequest:
+      type: object
+      required: [code, refreshToken]
+      properties:
+        code:
+          type: string
+          description: |
+            6-digit TOTP from the admin's authenticator app, OR an
+            unused recovery code (4-4 hex grouping like `abc1-d4fg`).
+            Recovery codes are one-time — consuming one removes it
+            from the admin's stored list.
+        refreshToken:
+          type: string
+          description: |
+            The refresh token of the current session. Used to identify
+            *which* session row to bump the MFA-verified-at timestamp
+            on, so a stolen refresh token from another device can't
+            piggyback on this challenge. The token itself is not
+            rotated by this endpoint.
+      description: |
+        Re-prove MFA without consuming the current refresh token.
+        Called by the FE when a privileged-action request returns
+        the `requiresFreshMfa: true` 401 response.
+
+    MfaChallengeResponse:
+      type: object
+      required: [accessToken, expiresAt]
+      properties:
+        accessToken:
+          type: string
+          description: |
+            New admin JWT with `mfa_at` set to the current time. Same
+            lifetime as a login-issued access token. Replaces (does
+            not augment) the previous access token.
+        expiresAt:
+          type: string
+          format: date-time
+
+    MfaChallengeRequiredResponse:
+      type: object
+      required: [error, requiresFreshMfa]
+      properties:
+        error:
+          type: string
+          example: fresh MFA required
+        requiresFreshMfa:
+          type: boolean
+          enum: [true]
+          description: |
+            Sentinel flag the FE keys off to distinguish a stale-MFA
+            response from a generic 401. Always `true` on this
+            response shape.
+
+    MfaEnrollmentRequiredResponse:
+      type: object
+      required: [error, mfaEnrollmentNeeded]
+      properties:
+        error:
+          type: string
+          example: MFA enrollment required
+        mfaEnrollmentNeeded:
+          type: boolean
+          enum: [true]
+          description: |
+            Sentinel flag the FE keys off when the challenge endpoint
+            is hit by an admin who hasn't enrolled MFA. The FE routes
+            them to /settings to enroll before retrying the original
+            privileged action.
 
     UserSummary:
       type: object
@@ -1088,6 +1171,64 @@ components:
           items:
             $ref: "#/components/schemas/SessionDetailEvent"
 
+    ABTest:
+      description: |
+        One stored row in `prompt_ab_tests` (P3-05 /
+        mootd-admin#28). At most one active per templateName.
+      type: object
+      required: [id, templateName, productionVersion, candidateVersion, trafficPct, status, startedAt]
+      properties:
+        id: { type: string }
+        templateName: { type: string }
+        productionVersion: { type: integer }
+        candidateVersion: { type: integer }
+        trafficPct:
+          type: integer
+          description: 1-99 inclusive. 50 = balanced split.
+        status:
+          type: string
+          enum: [active, ended]
+        startedBy: { type: string }
+        startedAt:
+          type: string
+          format: date-time
+        endedAt:
+          type: string
+          format: date-time
+        endedBy: { type: string }
+        notes: { type: string }
+
+    ABTestsList:
+      type: object
+      required: [tests]
+      properties:
+        tests:
+          type: array
+          items:
+            $ref: "#/components/schemas/ABTest"
+
+    ABTestStart:
+      type: object
+      required: [candidateVersion, trafficPct, notes]
+      properties:
+        candidateVersion:
+          type: integer
+        trafficPct:
+          type: integer
+          minimum: 1
+          maximum: 99
+        notes:
+          type: string
+          minLength: 1
+          maxLength: 500
+
+    ABTestEnd:
+      type: object
+      properties:
+        notes:
+          type: string
+          maxLength: 500
+
     PromptTemplate:
       description: |
         One stored version of one named template (P3-01 /
@@ -1940,6 +2081,57 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorResponse" }
 
+  /admin/v1/auth/mfa/challenge:
+    post:
+      operationId: adminMfaChallenge
+      summary: Re-prove MFA on an authenticated session.
+      tags: [auth]
+      description: |
+        Called by the FE when a privileged-action request (PII reveal,
+        budget edit, model-routing PUT, detection rerun, …) returns
+        a 401 with `requiresFreshMfa: true`. The handler verifies the
+        TOTP/recovery code against the admin's MFA secret, bumps the
+        session's mfa_at timestamp on both the new access token and
+        the corresponding refresh-token row, and returns a fresh
+        access token. The current refresh token is **not** rotated;
+        the FE keeps it and pairs it with the new access token.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MfaChallengeRequest"
+      responses:
+        "200":
+          description: |
+            MFA verified. Replace the in-memory access token with the
+            value in the response and retry the original privileged
+            action. The refresh token from the request remains valid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MfaChallengeResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          description: |
+            Wrong TOTP / recovery code, or the refresh token doesn't
+            belong to the calling admin. Same opaque body as a
+            generic 401 — the endpoint is intentionally not a
+            credential oracle.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "412":
+          description: |
+            The admin has not enrolled MFA. No code can satisfy the
+            challenge. The FE routes them to /settings to enroll
+            before they retry the original privileged action.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MfaEnrollmentRequiredResponse"
+
   /admin/v1/me:
     get:
       operationId: adminMe
@@ -2135,6 +2327,11 @@ paths:
         `parent_run_id` set. Records an audit entry. The new run is
         observation-only — no wardrobe items are created from its
         output (see acceptance criteria on mootd-admin#15).
+      description: |
+        Privileged action. Gated by RequireFreshMFA — burns external
+        API spend and writes a new detection_runs row. A 401 with
+        `requiresFreshMfa: true` indicates the FE should pop the
+        challenge modal before retrying.
       tags: [traces]
       parameters:
         - name: id
@@ -2155,7 +2352,15 @@ paths:
               schema:
                 $ref: "#/components/schemas/DetectionRunRerunResponse"
         "401":
-          $ref: "#/components/responses/Unauthorized"
+          description: |
+            Either a generic auth failure or the privileged-action
+            MFA freshness gate. Distinguish by `requiresFreshMfa: true`.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/ErrorResponse"
+                  - $ref: "#/components/schemas/MfaChallengeRequiredResponse"
         "404":
           description: Original run or its archived photo not found.
           content:
@@ -2317,6 +2522,11 @@ paths:
         audit row with action=`budget.update` and metadata carrying
         the old + new values + admin-supplied reason. Enforcement
         of these caps is a separate concern (mootd-admin#30 / P4-02).
+      description: |
+        Privileged action. Gated by RequireFreshMFA — raising a cap
+        is essentially authorising spend. A 401 with
+        `requiresFreshMfa: true` indicates the FE should pop the
+        challenge modal before retrying.
       tags: [users]
       parameters:
         - name: id
@@ -2343,7 +2553,15 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "401":
-          $ref: "#/components/responses/Unauthorized"
+          description: |
+            Either a generic auth failure or the privileged-action
+            MFA freshness gate. Distinguish by `requiresFreshMfa: true`.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/ErrorResponse"
+                  - $ref: "#/components/schemas/MfaChallengeRequiredResponse"
         "404":
           description: User not found.
           content:
@@ -2784,6 +3002,11 @@ paths:
       summary: |
         Replace the routing config. Writes an audit row with the
         old + new mapping + admin-supplied reason.
+      description: |
+        Privileged action. Gated by RequireFreshMFA — routing
+        changes affect the active provider for an entire tier of
+        users. A 401 with `requiresFreshMfa: true` indicates the FE
+        should pop the challenge modal before retrying.
       tags: [routing]
       requestBody:
         required: true
@@ -2805,7 +3028,15 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "401":
-          $ref: "#/components/responses/Unauthorized"
+          description: |
+            Either a generic auth failure or the privileged-action
+            MFA freshness gate. Distinguish by `requiresFreshMfa: true`.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/ErrorResponse"
+                  - $ref: "#/components/schemas/MfaChallengeRequiredResponse"
 
   /admin/v1/reports/weekly:
     get:
@@ -3110,6 +3341,104 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /admin/v1/prompts/{name}/ab-tests:
+    get:
+      operationId: adminListPromptABTests
+      summary: List A/B tests on a template. Permission prompts:read.
+      tags: [prompts]
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Tests list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ABTestsList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      operationId: adminStartPromptABTest
+      summary: |
+        Start an A/B test (P3-05 / mootd-admin#28). At most one
+        active test per template name. Permission prompts:write.
+      tags: [prompts]
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ABTestStart"
+      responses:
+        "201":
+          description: Started.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ABTest"
+        "400":
+          description: Bad body.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Missing prompts:write.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: A test is already active on this template.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /admin/v1/prompts/{name}/ab-tests/end:
+    post:
+      operationId: adminEndPromptABTest
+      summary: End the active test on a template. Permission prompts:write.
+      tags: [prompts]
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ABTestEnd"
+      responses:
+        "204":
+          description: Ended.
+        "400":
+          description: No active test on this template.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Missing prompts:write.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /admin/v1/traces/{id}/replay:
     post:
       operationId: adminReplayTrace
@@ -3175,6 +3504,11 @@ paths:
         photo, reveal an email, or read an outfit-item label.
         Returns 204 (no body) on success; 403 when the admin
         lacks users:pii permission.
+      description: |
+        Privileged action. Gated by RequireFreshMFA — the session
+        must have proven MFA in the last 10 minutes. A 401 with
+        `requiresFreshMfa: true` indicates the FE should pop the
+        challenge modal before retrying.
       tags: [audit]
       requestBody:
         required: true
@@ -3192,7 +3526,16 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "401":
-          $ref: "#/components/responses/Unauthorized"
+          description: |
+            Either a generic auth failure (missing/expired token) or
+            the privileged-action MFA freshness gate. Distinguish by
+            the presence of `requiresFreshMfa: true` in the body.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/ErrorResponse"
+                  - $ref: "#/components/schemas/MfaChallengeRequiredResponse"
         "403":
           description: Missing users:pii permission.
           content:

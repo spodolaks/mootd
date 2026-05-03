@@ -13,6 +13,12 @@ const (
 	AdminBearerAuthScopes = "adminBearerAuth.Scopes"
 )
 
+// Defines values for ABTestStatus.
+const (
+	Active ABTestStatus = "active"
+	Ended  ABTestStatus = "ended"
+)
+
 // Defines values for AdminRoles.
 const (
 	AdminRolesAdmin    AdminRoles = "admin"
@@ -77,6 +83,16 @@ const (
 	LLMCallSnapshotStatusError   LLMCallSnapshotStatus = "error"
 	LLMCallSnapshotStatusSuccess LLMCallSnapshotStatus = "success"
 	LLMCallSnapshotStatusTimeout LLMCallSnapshotStatus = "timeout"
+)
+
+// Defines values for MfaChallengeRequiredResponseRequiresFreshMfa.
+const (
+	MfaChallengeRequiredResponseRequiresFreshMfaTrue MfaChallengeRequiredResponseRequiresFreshMfa = true
+)
+
+// Defines values for MfaEnrollmentRequiredResponseMfaEnrollmentNeeded.
+const (
+	MfaEnrollmentRequiredResponseMfaEnrollmentNeededTrue MfaEnrollmentRequiredResponseMfaEnrollmentNeeded = true
 )
 
 // Defines values for ModelRoutingTierTier.
@@ -175,6 +191,44 @@ const (
 	MinusSpend7d    AdminListUsersParamsSort = "-spend_7d"
 	MinusUploads    AdminListUsersParamsSort = "-uploads"
 )
+
+// ABTest One stored row in `prompt_ab_tests` (P3-05 /
+// mootd-admin#28). At most one active per templateName.
+type ABTest struct {
+	CandidateVersion  int          `json:"candidateVersion"`
+	EndedAt           *time.Time   `json:"endedAt,omitempty"`
+	EndedBy           *string      `json:"endedBy,omitempty"`
+	Id                string       `json:"id"`
+	Notes             *string      `json:"notes,omitempty"`
+	ProductionVersion int          `json:"productionVersion"`
+	StartedAt         time.Time    `json:"startedAt"`
+	StartedBy         *string      `json:"startedBy,omitempty"`
+	Status            ABTestStatus `json:"status"`
+	TemplateName      string       `json:"templateName"`
+
+	// TrafficPct 1-99 inclusive. 50 = balanced split.
+	TrafficPct int `json:"trafficPct"`
+}
+
+// ABTestStatus defines model for ABTest.Status.
+type ABTestStatus string
+
+// ABTestEnd defines model for ABTestEnd.
+type ABTestEnd struct {
+	Notes *string `json:"notes,omitempty"`
+}
+
+// ABTestStart defines model for ABTestStart.
+type ABTestStart struct {
+	CandidateVersion int    `json:"candidateVersion"`
+	Notes            string `json:"notes"`
+	TrafficPct       int    `json:"trafficPct"`
+}
+
+// ABTestsList defines model for ABTestsList.
+type ABTestsList struct {
+	Tests []ABTest `json:"tests"`
+}
 
 // Admin defines model for Admin.
 type Admin struct {
@@ -620,6 +674,65 @@ type LoginResponse struct {
 	// RefreshToken 7-day refresh token, single-use (rotated on every refresh).
 	RefreshToken string `json:"refreshToken"`
 }
+
+// MfaChallengeRequest Re-prove MFA without consuming the current refresh token.
+// Called by the FE when a privileged-action request returns
+// the `requiresFreshMfa: true` 401 response.
+type MfaChallengeRequest struct {
+	// Code 6-digit TOTP from the admin's authenticator app, OR an
+	// unused recovery code (4-4 hex grouping like `abc1-d4fg`).
+	// Recovery codes are one-time — consuming one removes it
+	// from the admin's stored list.
+	Code string `json:"code"`
+
+	// RefreshToken The refresh token of the current session. Used to identify
+	// *which* session row to bump the MFA-verified-at timestamp
+	// on, so a stolen refresh token from another device can't
+	// piggyback on this challenge. The token itself is not
+	// rotated by this endpoint.
+	RefreshToken string `json:"refreshToken"`
+}
+
+// MfaChallengeRequiredResponse defines model for MfaChallengeRequiredResponse.
+type MfaChallengeRequiredResponse struct {
+	Error string `json:"error"`
+
+	// RequiresFreshMfa Sentinel flag the FE keys off to distinguish a stale-MFA
+	// response from a generic 401. Always `true` on this
+	// response shape.
+	RequiresFreshMfa MfaChallengeRequiredResponseRequiresFreshMfa `json:"requiresFreshMfa"`
+}
+
+// MfaChallengeRequiredResponseRequiresFreshMfa Sentinel flag the FE keys off to distinguish a stale-MFA
+// response from a generic 401. Always `true` on this
+// response shape.
+type MfaChallengeRequiredResponseRequiresFreshMfa bool
+
+// MfaChallengeResponse defines model for MfaChallengeResponse.
+type MfaChallengeResponse struct {
+	// AccessToken New admin JWT with `mfa_at` set to the current time. Same
+	// lifetime as a login-issued access token. Replaces (does
+	// not augment) the previous access token.
+	AccessToken string    `json:"accessToken"`
+	ExpiresAt   time.Time `json:"expiresAt"`
+}
+
+// MfaEnrollmentRequiredResponse defines model for MfaEnrollmentRequiredResponse.
+type MfaEnrollmentRequiredResponse struct {
+	Error string `json:"error"`
+
+	// MfaEnrollmentNeeded Sentinel flag the FE keys off when the challenge endpoint
+	// is hit by an admin who hasn't enrolled MFA. The FE routes
+	// them to /settings to enroll before retrying the original
+	// privileged action.
+	MfaEnrollmentNeeded MfaEnrollmentRequiredResponseMfaEnrollmentNeeded `json:"mfaEnrollmentNeeded"`
+}
+
+// MfaEnrollmentRequiredResponseMfaEnrollmentNeeded Sentinel flag the FE keys off when the challenge endpoint
+// is hit by an admin who hasn't enrolled MFA. The FE routes
+// them to /settings to enroll before retrying the original
+// privileged action.
+type MfaEnrollmentRequiredResponseMfaEnrollmentNeeded bool
 
 // ModelRouting Per-tier routing config (P4-05 / mootd-admin#33).
 // Returned by GET /admin/v1/model-routing. The mapping is
@@ -1412,6 +1525,9 @@ type AdminAuditPIIRevealJSONRequestBody = PIIRevealRequest
 // AdminLoginJSONRequestBody defines body for AdminLogin for application/json ContentType.
 type AdminLoginJSONRequestBody = LoginRequest
 
+// AdminMfaChallengeJSONRequestBody defines body for AdminMfaChallenge for application/json ContentType.
+type AdminMfaChallengeJSONRequestBody = MfaChallengeRequest
+
 // AdminRefreshJSONRequestBody defines body for AdminRefresh for application/json ContentType.
 type AdminRefreshJSONRequestBody = RefreshRequest
 
@@ -1426,6 +1542,12 @@ type AdminUpdateModelRoutingJSONRequestBody = ModelRoutingUpdate
 
 // AdminCreatePromptVersionJSONRequestBody defines body for AdminCreatePromptVersion for application/json ContentType.
 type AdminCreatePromptVersionJSONRequestBody = PromptVersionCreate
+
+// AdminStartPromptABTestJSONRequestBody defines body for AdminStartPromptABTest for application/json ContentType.
+type AdminStartPromptABTestJSONRequestBody = ABTestStart
+
+// AdminEndPromptABTestJSONRequestBody defines body for AdminEndPromptABTest for application/json ContentType.
+type AdminEndPromptABTestJSONRequestBody = ABTestEnd
 
 // AdminPromotePromptVersionJSONRequestBody defines body for AdminPromotePromptVersion for application/json ContentType.
 type AdminPromotePromptVersionJSONRequestBody = PromptPromoteRequest
