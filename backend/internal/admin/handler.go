@@ -197,10 +197,48 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// MFA: verified=false always at Phase 0. Phase 5 (P5-02) will
-	// validate req.TOTP against admin.MFASecret here and set this to
-	// true only on success.
+	// MFA validation (P5-02 / mootd-admin#35).
+	//
+	// Three regimes:
+	//   1. Admin hasn't enrolled MFA yet (MFAEnforced=false): TOTP
+	//      ignored, mfaVerified=false. Login proceeds.
+	//   2. Admin has MFA, presents a TOTP code: validate against
+	//      MFASecret with ±1 step skew tolerance. mfaVerified=true.
+	//   3. Admin has MFA, presents a recovery code instead: hash
+	//      it, match against MFARecoveryCodes, consume on success.
+	//      mfaVerified=true. The list is rewritten with the
+	//      consumed code removed.
+	//
+	// On 2/3 failure → 401 with the same opaque message; we don't
+	// distinguish "wrong TOTP" from "wrong password" so an
+	// attacker mid-credential-spray can't tell whether they
+	// guessed the password but missed the second factor.
 	mfaVerified := false
+	if admin.MFAEnforced && admin.MFASecret != "" {
+		presented := strings.TrimSpace(req.TOTP)
+		if presented == "" {
+			response.WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid email or password"})
+			return
+		}
+		// Try TOTP first. Recovery codes have dashes / mixed case;
+		// TOTP is always 6 digits — cheap discriminator.
+		if len(presented) == totpDigits && VerifyTOTP(admin.MFASecret, presented, time.Now()) {
+			mfaVerified = true
+		} else if ok, remaining := ConsumeRecoveryCode(admin.MFARecoveryCodes, presented); ok {
+			mfaVerified = true
+			// Persist the consumed-list update before issuing the
+			// token so a token-issuance failure doesn't double-spend
+			// the code. Best-effort logged + we still proceed —
+			// re-using a code will fail on the next login because
+			// we're rewriting it now.
+			if err := h.repo.SetMFARecoveryCodes(ctx, admin.ID, remaining); err != nil {
+				h.logger.Printf("admin login: persist recovery-code consumption: %v", err)
+			}
+		} else {
+			response.WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid email or password"})
+			return
+		}
+	}
 
 	access, err := GenerateToken(admin.ID, admin.RolesAsStrings(), mfaVerified, h.secret, config.DefaultAdminJWTExpiry)
 	if err != nil {

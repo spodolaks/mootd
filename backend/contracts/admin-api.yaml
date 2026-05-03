@@ -983,6 +983,37 @@ components:
         weekLabel:
           type: string
 
+    MFASetupResponse:
+      type: object
+      required: [secret, otpauthUri]
+      properties:
+        secret:
+          type: string
+          description: Base32-encoded TOTP secret. Echo back on /verify.
+        otpauthUri:
+          type: string
+          description: otpauth://totp/... URI for QR rendering.
+
+    MFAVerifyRequest:
+      type: object
+      required: [secret, code]
+      properties:
+        secret:
+          type: string
+        code:
+          type: string
+
+    MFAVerifyResponse:
+      type: object
+      required: [recoveryCodes]
+      properties:
+        recoveryCodes:
+          type: array
+          items: { type: string }
+          description: |
+            8 plaintext one-time recovery codes. The admin sees
+            them ONCE — the server only stores hashes from here on.
+
     PIIRevealRequest:
       description: |
         Body for POST /admin/v1/audit/pii-reveal (P5-04).
@@ -2380,6 +2411,57 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+
+  /admin/v1/auth/mfa/setup:
+    post:
+      operationId: adminMFASetup
+      summary: |
+        Generate a fresh TOTP secret + otpauth URI for QR
+        rendering (P5-02 / mootd-admin#35). Stateless — does NOT
+        save the secret to the admin's record. The FE echoes the
+        secret back on /verify alongside a proof code; only then
+        is enrollment persisted.
+      tags: [auth]
+      responses:
+        "200":
+          description: Setup payload.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MFASetupResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /admin/v1/auth/mfa/verify:
+    post:
+      operationId: adminMFAVerify
+      summary: |
+        Verify a TOTP code against the supplied secret. On
+        success: persists the secret + flips MFAEnforced=true +
+        issues 8 single-use recovery codes returned in plaintext
+        (the only time they are visible — store them now).
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MFAVerifyRequest"
+      responses:
+        "200":
+          description: Enrolled. Body carries recovery codes.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MFAVerifyResponse"
+        "400":
+          description: Code didn't verify.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /admin/v1/audit/pii-reveal:
     post:

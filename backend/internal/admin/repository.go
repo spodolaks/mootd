@@ -21,6 +21,18 @@ type Repository interface {
 	UpdateLastActive(ctx context.Context, adminID string, at time.Time) error
 	CountAdmins(ctx context.Context) (int64, error)
 
+	// MFA — P5-02 / mootd-admin#35.
+	// SetMFAEnrollment records secret + recovery hashes + flips
+	// MFAEnforced=true atomically. Used by the verify endpoint.
+	SetMFAEnrollment(ctx context.Context, adminID, secret string, recoveryHashes []string) error
+	// SetMFARecoveryCodes replaces the recovery-code list (used
+	// when ConsumeRecoveryCode burns one on login). Atomic.
+	SetMFARecoveryCodes(ctx context.Context, adminID string, hashes []string) error
+	// DisableMFA clears secret + recovery codes + flips
+	// MFAEnforced=false. Reserved for "lost device" flows; not
+	// exposed via HTTP in v1.
+	DisableMFA(ctx context.Context, adminID string) error
+
 	// Refresh tokens
 	SaveRefreshToken(ctx context.Context, t RefreshToken) error
 	FindRefreshToken(ctx context.Context, tokenHash string) (*RefreshToken, error)
@@ -154,6 +166,50 @@ func (r *MongoRepository) UpdateLastActive(ctx context.Context, adminID string, 
 // restart can't accidentally replace the first admin).
 func (r *MongoRepository) CountAdmins(ctx context.Context) (int64, error) {
 	return r.adminsCol().CountDocuments(ctx, bson.M{})
+}
+
+// SetMFAEnrollment is the atomic verify-and-enable step
+// (P5-02 / mootd-admin#35). Stores secret + hashed recovery
+// codes + flips MFAEnforced=true in one update so a partial
+// failure can't leave the admin in a "secret saved but not
+// enforced" half-state.
+func (r *MongoRepository) SetMFAEnrollment(ctx context.Context, adminID, secret string, recoveryHashes []string) error {
+	if adminID == "" || secret == "" {
+		return errors.New("admin: SetMFAEnrollment requires id + secret")
+	}
+	_, err := r.adminsCol().UpdateOne(ctx, bson.M{"_id": adminID}, bson.M{
+		"$set": bson.M{
+			"mfaSecret":        secret,
+			"mfaRecoveryCodes": recoveryHashes,
+			"mfaEnforced":      true,
+			"updatedAt":        time.Now().UTC(),
+		},
+	})
+	return err
+}
+
+// SetMFARecoveryCodes replaces the recovery-code list — used
+// after ConsumeRecoveryCode burns a code on login. Atomic.
+func (r *MongoRepository) SetMFARecoveryCodes(ctx context.Context, adminID string, hashes []string) error {
+	_, err := r.adminsCol().UpdateOne(ctx, bson.M{"_id": adminID}, bson.M{
+		"$set": bson.M{"mfaRecoveryCodes": hashes},
+	})
+	return err
+}
+
+// DisableMFA clears MFA state. Not exposed via HTTP today —
+// reserved for the "lost device" emergency procedure documented
+// in the runbook. Operator runs this directly against the DB
+// after verifying identity out-of-band.
+func (r *MongoRepository) DisableMFA(ctx context.Context, adminID string) error {
+	_, err := r.adminsCol().UpdateOne(ctx, bson.M{"_id": adminID}, bson.M{
+		"$set": bson.M{"mfaEnforced": false},
+		"$unset": bson.M{
+			"mfaSecret":        "",
+			"mfaRecoveryCodes": "",
+		},
+	})
+	return err
 }
 
 // SaveRefreshToken inserts a new refresh token record. The _id is the

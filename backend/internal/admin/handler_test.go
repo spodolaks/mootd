@@ -124,6 +124,52 @@ func (m *memoryRepo) ListAudit(ctx context.Context, q AuditQuery) ([]AuditEntry,
 	return nil, "", nil
 }
 
+// MFA repo methods — minimal stubs so the in-memory repo
+// satisfies the post-P5-02 Repository interface. Tests that
+// exercise MFA flows can assert against the in-place mutation.
+func (m *memoryRepo) SetMFAEnrollment(ctx context.Context, adminID, secret string, hashes []string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for k, a := range m.admins {
+		if a.ID == adminID {
+			a.MFASecret = secret
+			a.MFARecoveryCodes = append([]string{}, hashes...)
+			a.MFAEnforced = true
+			m.admins[k] = a
+			return nil
+		}
+	}
+	return nil
+}
+
+func (m *memoryRepo) SetMFARecoveryCodes(ctx context.Context, adminID string, hashes []string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for k, a := range m.admins {
+		if a.ID == adminID {
+			a.MFARecoveryCodes = append([]string{}, hashes...)
+			m.admins[k] = a
+			return nil
+		}
+	}
+	return nil
+}
+
+func (m *memoryRepo) DisableMFA(ctx context.Context, adminID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for k, a := range m.admins {
+		if a.ID == adminID {
+			a.MFAEnforced = false
+			a.MFASecret = ""
+			a.MFARecoveryCodes = nil
+			m.admins[k] = a
+			return nil
+		}
+	}
+	return nil
+}
+
 // ── helpers ─────────────────────────────────────────────────────────────
 
 func newTestHandler(t *testing.T) (*Handler, *memoryRepo) {

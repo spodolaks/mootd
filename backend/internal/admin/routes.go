@@ -25,6 +25,13 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, authLimit Middleware, requi
 	mux.Handle("/admin/v1/auth/login", wrap(http.HandlerFunc(h.Login)))
 	mux.Handle("/admin/v1/auth/refresh", wrap(http.HandlerFunc(h.Refresh)))
 
+	// MFA enrollment (P5-02 / mootd-admin#35) — authenticated;
+	// every admin must be able to enroll their own MFA without
+	// elevated permission. Rate-limited via authLimit so a
+	// botched enrollment can't be used as a TOTP-guess oracle.
+	mux.Handle("/admin/v1/auth/mfa/setup", requireAdmin(http.HandlerFunc(h.MFASetup)))
+	mux.Handle("/admin/v1/auth/mfa/verify", requireAdmin(http.HandlerFunc(h.MFAVerify)))
+
 	// Authenticated. Every handler below sits behind requireAdmin
 	// (JWT-validating). RBAC permission gates layer on top via
 	// RequirePermission(perm) — see permissions.go for the

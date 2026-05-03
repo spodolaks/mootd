@@ -600,6 +600,28 @@ type LoginResponse struct {
 	RefreshToken string `json:"refreshToken"`
 }
 
+// MFASetupResponse defines model for MFASetupResponse.
+type MFASetupResponse struct {
+	// OtpauthUri otpauth://totp/... URI for QR rendering.
+	OtpauthUri string `json:"otpauthUri"`
+
+	// Secret Base32-encoded TOTP secret. Echo back on /verify.
+	Secret string `json:"secret"`
+}
+
+// MFAVerifyRequest defines model for MFAVerifyRequest.
+type MFAVerifyRequest struct {
+	Code   string `json:"code"`
+	Secret string `json:"secret"`
+}
+
+// MFAVerifyResponse defines model for MFAVerifyResponse.
+type MFAVerifyResponse struct {
+	// RecoveryCodes 8 plaintext one-time recovery codes. The admin sees
+	// them ONCE — the server only stores hashes from here on.
+	RecoveryCodes []string `json:"recoveryCodes"`
+}
+
 // ModelRouting Per-tier routing config (P4-05 / mootd-admin#33).
 // Returned by GET /admin/v1/model-routing. The mapping is
 // stored as a single Mongo doc with the four tier keys and
@@ -1226,6 +1248,9 @@ type AdminAuditPIIRevealJSONRequestBody = PIIRevealRequest
 
 // AdminLoginJSONRequestBody defines body for AdminLogin for application/json ContentType.
 type AdminLoginJSONRequestBody = LoginRequest
+
+// AdminMFAVerifyJSONRequestBody defines body for AdminMFAVerify for application/json ContentType.
+type AdminMFAVerifyJSONRequestBody = MFAVerifyRequest
 
 // AdminRefreshJSONRequestBody defines body for AdminRefresh for application/json ContentType.
 type AdminRefreshJSONRequestBody = RefreshRequest
