@@ -39,6 +39,7 @@ type Handler struct {
 	abTestsRepo   ABTestRepository          // optional — when nil, /prompts/{name}/ab-tests returns 503
 	abTestsCache  *CachedABTests            // optional — invalidated on Start/End
 	funnelsRepo   FunnelsRepository         // optional — when nil, /funnels returns 503
+	retentionRepo RetentionRepository       // optional — when nil, /retention returns 503
 	secret        string
 }
 
@@ -90,6 +91,13 @@ func (h *Handler) WithPromptTemplates(repo PromptTemplatesRepository, cache *Cac
 // Optional; when unset the /funnels endpoints return 503.
 func (h *Handler) WithFunnels(repo FunnelsRepository) *Handler {
 	h.funnelsRepo = repo
+	return h
+}
+
+// WithRetention wires the retention-cohort reader (P2-05 /
+// mootd-admin#22). Optional — when unset, /retention returns 503.
+func (h *Handler) WithRetention(repo RetentionRepository) *Handler {
+	h.retentionRepo = repo
 	return h
 }
 

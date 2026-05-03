@@ -107,4 +107,10 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, authLimit Middleware, requi
 	// POST gated inline.
 	mux.Handle("/admin/v1/funnels", requireAdmin(RequirePermission(PermTracesRead)(http.HandlerFunc(h.FunnelsRouter))))
 	mux.Handle("/admin/v1/funnels/", requireAdmin(RequirePermission(PermTracesRead)(http.HandlerFunc(h.FunnelsRouter))))
+
+	// Retention cohorts (P2-05 / mootd-admin#22). Read-only,
+	// computed live from the events collection. traces:read
+	// matches the funnels gate — both are pass-through analyses
+	// of the events stream.
+	mux.Handle("/admin/v1/retention", requireAdmin(RequirePermission(PermTracesRead)(http.HandlerFunc(h.GetCohortRetention))))
 }

@@ -216,6 +216,12 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 		a.Logger.Printf("admin: admin_funnels repo init failed: %v (continuing without /funnels)", err)
 	}
 
+	// Retention cohorts (P2-05 / mootd-admin#22). No init work
+	// required — the repo is a thin client wrapper; we just
+	// hand it the same MongoClient + dbName. No 503 path
+	// outside of the wiring itself.
+	adminHandler.WithRetention(admin.NewRetentionMongoRepository(a.MongoClient, a.MongoDB))
+
 	// Session replay (P5-05 / mootd-admin#38). Best-effort:
 	// init failure (e.g. TTL index ensure failed) just means the
 	// FE silently no-ops on /events and the read endpoints

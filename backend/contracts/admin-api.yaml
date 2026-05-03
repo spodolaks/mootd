@@ -1335,6 +1335,68 @@ components:
           type: string
           format: date-time
 
+    CohortRetentionCell:
+      description: |
+        One cell in the retention heatmap (P2-05 /
+        mootd-admin#22). offsetN=0 is the cohort bucket itself
+        (always 100% retention by definition).
+      type: object
+      required: [offsetN, users, retention]
+      properties:
+        offsetN: { type: integer }
+        users:
+          type: integer
+          format: int64
+          description: Distinct users from the cohort active in this bucket.
+        retention:
+          type: number
+          format: double
+          description: 0-1; users / cohortSize.
+
+    CohortRow:
+      description: One cohort row in the retention heatmap.
+      type: object
+      required: [bucketStart, label, cohortSize, cells]
+      properties:
+        bucketStart:
+          type: string
+          format: date-time
+        label:
+          type: string
+          description: |
+            Human-readable bucket label. Day → "2026-04-01";
+            week → "2026-W17".
+        cohortSize:
+          type: integer
+          format: int64
+        cells:
+          type: array
+          items:
+            $ref: "#/components/schemas/CohortRetentionCell"
+
+    CohortRetentionResponse:
+      description: |
+        Wire shape for GET /admin/v1/retention (P2-05 /
+        mootd-admin#22). Up to 30 cohort rows ordered oldest →
+        newest. Empty when no signed_up events exist in the
+        trailing-30-bucket window.
+      type: object
+      required: [cohortUnit, n, cohorts, generatedAt]
+      properties:
+        cohortUnit:
+          type: string
+          enum: [day, week]
+        n:
+          type: integer
+          description: Number of retention columns.
+        cohorts:
+          type: array
+          items:
+            $ref: "#/components/schemas/CohortRow"
+        generatedAt:
+          type: string
+          format: date-time
+
     PromptTemplate:
       description: |
         One stored version of one named template (P3-01 /
@@ -3393,6 +3455,53 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /admin/v1/retention:
+    get:
+      operationId: adminGetCohortRetention
+      summary: |
+        Cohort retention heatmap, computed live from the events
+        collection (P2-05 / mootd-admin#22). 30 trailing buckets
+        (days OR ISO weeks per cohortUnit) × n retention columns.
+        Permission: traces:read.
+      tags: [analytics]
+      parameters:
+        - name: cohortUnit
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [day, week]
+            default: day
+        - name: n
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 30
+            default: 7
+      responses:
+        "200":
+          description: Heatmap.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CohortRetentionResponse"
+        "400":
+          description: Invalid params.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "503":
+          description: Retention reader not wired in this build.
           content:
             application/json:
               schema:

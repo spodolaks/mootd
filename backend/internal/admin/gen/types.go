@@ -34,6 +34,12 @@ const (
 	Staging     BuildInfoEnvironment = "staging"
 )
 
+// Defines values for CohortRetentionResponseCohortUnit.
+const (
+	CohortRetentionResponseCohortUnitDay  CohortRetentionResponseCohortUnit = "day"
+	CohortRetentionResponseCohortUnitWeek CohortRetentionResponseCohortUnit = "week"
+)
+
 // Defines values for EvalCaseResultStatus.
 const (
 	EvalCaseResultStatusFailed  EvalCaseResultStatus = "failed"
@@ -153,6 +159,12 @@ const (
 	UserTierUpdateTierFounder UserTierUpdateTier = "founder"
 	UserTierUpdateTierFree    UserTierUpdateTier = "free"
 	UserTierUpdateTierPaid    UserTierUpdateTier = "paid"
+)
+
+// Defines values for AdminGetCohortRetentionParamsCohortUnit.
+const (
+	AdminGetCohortRetentionParamsCohortUnitDay  AdminGetCohortRetentionParamsCohortUnit = "day"
+	AdminGetCohortRetentionParamsCohortUnitWeek AdminGetCohortRetentionParamsCohortUnit = "week"
 )
 
 // Defines values for AdminListTracesParamsStatus.
@@ -321,6 +333,46 @@ type CacheMetrics struct {
 
 	// WriteTokens Sum of cache_creation_input_tokens (cache seeding).
 	WriteTokens int64 `json:"writeTokens"`
+}
+
+// CohortRetentionCell One cell in the retention heatmap (P2-05 /
+// mootd-admin#22). offsetN=0 is the cohort bucket itself
+// (always 100% retention by definition).
+type CohortRetentionCell struct {
+	OffsetN int `json:"offsetN"`
+
+	// Retention 0-1; users / cohortSize.
+	Retention float64 `json:"retention"`
+
+	// Users Distinct users from the cohort active in this bucket.
+	Users int64 `json:"users"`
+}
+
+// CohortRetentionResponse Wire shape for GET /admin/v1/retention (P2-05 /
+// mootd-admin#22). Up to 30 cohort rows ordered oldest →
+// newest. Empty when no signed_up events exist in the
+// trailing-30-bucket window.
+type CohortRetentionResponse struct {
+	CohortUnit  CohortRetentionResponseCohortUnit `json:"cohortUnit"`
+	Cohorts     []CohortRow                       `json:"cohorts"`
+	GeneratedAt time.Time                         `json:"generatedAt"`
+
+	// N Number of retention columns.
+	N int `json:"n"`
+}
+
+// CohortRetentionResponseCohortUnit defines model for CohortRetentionResponse.CohortUnit.
+type CohortRetentionResponseCohortUnit string
+
+// CohortRow One cohort row in the retention heatmap.
+type CohortRow struct {
+	BucketStart time.Time             `json:"bucketStart"`
+	Cells       []CohortRetentionCell `json:"cells"`
+	CohortSize  int64                 `json:"cohortSize"`
+
+	// Label Human-readable bucket label. Day → "2026-04-01";
+	// week → "2026-W17".
+	Label string `json:"label"`
 }
 
 // DailyMetric One day's value for a sparkline series. Date is YYYY-MM-DD
@@ -1488,6 +1540,15 @@ type AdminGetWeeklyReportParams struct {
 	// Week ISO week label (YYYY-Www). Defaults to last completed week.
 	Week *string `form:"week,omitempty" json:"week,omitempty"`
 }
+
+// AdminGetCohortRetentionParams defines parameters for AdminGetCohortRetention.
+type AdminGetCohortRetentionParams struct {
+	CohortUnit *AdminGetCohortRetentionParamsCohortUnit `form:"cohortUnit,omitempty" json:"cohortUnit,omitempty"`
+	N          *int                                     `form:"n,omitempty" json:"n,omitempty"`
+}
+
+// AdminGetCohortRetentionParamsCohortUnit defines parameters for AdminGetCohortRetention.
+type AdminGetCohortRetentionParamsCohortUnit string
 
 // AdminSearchParams defines parameters for AdminSearch.
 type AdminSearchParams struct {
