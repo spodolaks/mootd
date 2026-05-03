@@ -1374,6 +1374,39 @@ components:
           items:
             $ref: "#/components/schemas/CohortRetentionCell"
 
+    PurgeRequest:
+      description: |
+        Body for DELETE /admin/v1/users/{id}/purge. `notes`
+        captures the rationale (ticket link or free text) so the
+        audit row carries a "why" alongside the "who/what/when".
+      type: object
+      required: [notes]
+      properties:
+        notes:
+          type: string
+          description: Audit-trail rationale; required.
+
+    PurgeReport:
+      description: |
+        Result of a successful purge (P2-06 / mootd-admin#23).
+        `collections` maps each affected collection name to the
+        number of documents deleted; `total` is the sum.
+      type: object
+      required: [userId, purgedAt, collections, total]
+      properties:
+        userId: { type: string }
+        purgedAt:
+          type: string
+          format: date-time
+        collections:
+          type: object
+          additionalProperties:
+            type: integer
+            format: int64
+        total:
+          type: integer
+          format: int64
+
     CohortRetentionResponse:
       description: |
         Wire shape for GET /admin/v1/retention (P2-05 /
@@ -2732,6 +2765,73 @@ paths:
                   - $ref: "#/components/schemas/MfaChallengeRequiredResponse"
         "404":
           description: User not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /admin/v1/users/{id}/purge:
+    delete:
+      operationId: adminPurgeUser
+      summary: |
+        GDPR-style erasure performed on behalf of a user
+        (P2-06 / mootd-admin#23). Wipes every per-user document
+        across the events / outfits / wardrobe / moodboards /
+        feedback / outfit_jobs / llm_calls / detection_runs /
+        user_budgets / users collections. Writes an audit row
+        recording who triggered the purge and the per-collection
+        counts.
+      description: |
+        Privileged action. Two gates:
+          - `users:purge` permission (admin role only).
+          - MFA-verified token: the access token must carry
+            `mfaVerified=true`. Returns 403 with
+            `requireMfa: true` when the gate fails so the FE
+            can prompt for re-authentication.
+
+        Idempotent: running twice returns 404 the second time
+        because the user record is gone.
+      tags: [users]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PurgeRequest"
+      responses:
+        "200":
+          description: Purge succeeded; report carries per-collection counts.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PurgeReport"
+        "400":
+          description: Missing `notes`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Permission denied or MFA re-verification required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: User already purged or never existed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Purge service not wired in this build.
           content:
             application/json:
               schema:

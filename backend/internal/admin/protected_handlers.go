@@ -349,6 +349,10 @@ func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
+	case "purge":
+		// P2-06 / mootd-admin#23. DELETE only — admin-driven
+		// GDPR-style erasure.
+		h.PurgeUser(w, r, id)
 	default:
 		response.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "unknown user sub-resource"})
 	}

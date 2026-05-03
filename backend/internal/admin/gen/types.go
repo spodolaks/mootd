@@ -983,6 +983,24 @@ type PromptVersionsList struct {
 	Versions []PromptTemplate `json:"versions"`
 }
 
+// PurgeReport Result of a successful purge (P2-06 / mootd-admin#23).
+// `collections` maps each affected collection name to the
+// number of documents deleted; `total` is the sum.
+type PurgeReport struct {
+	Collections map[string]int64 `json:"collections"`
+	PurgedAt    time.Time        `json:"purgedAt"`
+	Total       int64            `json:"total"`
+	UserId      string           `json:"userId"`
+}
+
+// PurgeRequest Body for DELETE /admin/v1/users/{id}/purge. `notes`
+// captures the rationale (ticket link or free text) so the
+// audit row carries a "why" alongside the "who/what/when".
+type PurgeRequest struct {
+	// Notes Audit-trail rationale; required.
+	Notes string `json:"notes"`
+}
+
 // RefreshRequest defines model for RefreshRequest.
 type RefreshRequest struct {
 	RefreshToken string `json:"refreshToken"`
@@ -1688,6 +1706,9 @@ type AdminRecordSessionEventJSONRequestBody = SessionEventRequest
 
 // AdminUpdateUserBudgetJSONRequestBody defines body for AdminUpdateUserBudget for application/json ContentType.
 type AdminUpdateUserBudgetJSONRequestBody = UserBudgetUpdate
+
+// AdminPurgeUserJSONRequestBody defines body for AdminPurgeUser for application/json ContentType.
+type AdminPurgeUserJSONRequestBody = PurgeRequest
 
 // AdminUpdateUserTierJSONRequestBody defines body for AdminUpdateUserTier for application/json ContentType.
 type AdminUpdateUserTierJSONRequestBody = UserTierUpdate

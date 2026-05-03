@@ -25,6 +25,7 @@ import (
 	"mootd/backend/internal/moodboard"
 	"mootd/backend/internal/observability"
 	"mootd/backend/internal/outfit"
+	"mootd/backend/internal/privacy"
 	"mootd/backend/internal/shared/middleware"
 	"mootd/backend/internal/surface"
 	"mootd/backend/internal/user"
@@ -242,6 +243,15 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 		a.Logger.Printf("admin: user_budgets repo init failed: %v (continuing read-only on /budget)", err)
 	}
 
+	// Privacy compliance (P2-06 / mootd-admin#23). One Service
+	// powers both /v1/privacy/* (self-serve) and the admin
+	// /admin/v1/users/{id}/purge surface. Adapter wraps the
+	// privacy.ErrUserNotFound sentinel into the admin-side
+	// ErrUserAlreadyPurged so admin's handler stays free of a
+	// privacy import.
+	privacySvc := privacy.NewService(a.MongoClient, a.MongoDB)
+	adminHandler.WithUserPurger(adminPurgerAdapter{svc: privacySvc})
+
 	adminHandler.RegisterRoutes(mux, authLimit, requireAdmin)
 
 	userRepo := user.NewMongoRepository(a.MongoClient, a.MongoDB)
@@ -371,6 +381,12 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 		return userRepo.DeleteByID(ctx, userID)
 	})
 	user.NewHandler(a.Logger, userRepo, userCascade).RegisterRoutes(mux, authMiddleware)
+
+	// Privacy compliance — self-serve purge + export
+	// (P2-06 / mootd-admin#23). Reuses the privacySvc instance
+	// already wired into the admin handler so both flows share
+	// the same allowlist of collections.
+	privacy.NewHandler(a.Logger, privacySvc).RegisterRoutes(mux, authMiddleware)
 
 	// Surfaces (panel + background textures) — public image endpoint, no auth.
 	surfaceRepo := surface.NewMongoRepository(a.MongoClient, a.MongoDB)
@@ -694,6 +710,31 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 // surfaceAdapter bridges surface.Repository to outfit's surfaceProvider
 // interface. Keeping the adapter here means the outfit package never imports
 // surface — the dependency direction stays one-way (app → outfit, app → surface).
+// adminPurgerAdapter satisfies admin.UserPurger by delegating
+// to the privacy.Service while translating the privacy
+// sentinel + report types into the admin-facing equivalents.
+// Lives in app.go (the wiring layer) so admin/ stays free of a
+// privacy/ import — same one-way-dep pattern used elsewhere.
+type adminPurgerAdapter struct {
+	svc *privacy.Service
+}
+
+func (a adminPurgerAdapter) Purge(ctx context.Context, userID string) (*admin.PurgeReport, error) {
+	rep, err := a.svc.Purge(ctx, userID)
+	if err != nil {
+		if err == privacy.ErrUserNotFound {
+			return nil, admin.ErrUserAlreadyPurged
+		}
+		return nil, err
+	}
+	return &admin.PurgeReport{
+		UserID:      rep.UserID,
+		PurgedAt:    rep.PurgedAt,
+		Collections: rep.Collections,
+		Total:       rep.Total,
+	}, nil
+}
+
 type surfaceAdapter struct {
 	repo surface.Repository
 }

@@ -141,6 +141,16 @@ export const ProfileScreen: React.FC = () => {
             }}
           />
           <MenuItem
+            icon="privacy"
+            label="Privacy & Data"
+            textColor={textColor}
+            dividerColor={dividerColor}
+            showDivider
+            onPress={() => {
+              router.push('/privacy');
+            }}
+          />
+          <MenuItem
             icon="info"
             label="About MooTD"
             textColor={textColor}
@@ -166,7 +176,7 @@ export const ProfileScreen: React.FC = () => {
 };
 
 interface MenuItemProps {
-  icon: 'settings' | 'info' | 'user' | 'sync' | 'camera' | 'star';
+  icon: 'settings' | 'info' | 'user' | 'sync' | 'camera' | 'star' | 'privacy';
   label: string;
   textColor: string;
   dividerColor: string;
