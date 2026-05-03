@@ -1207,7 +1207,8 @@ func (h *Handler) ListTraces(w http.ResponseWriter, r *http.Request) {
 	response.WriteJSON(w, http.StatusOK, page)
 }
 
-// GetTrace handles GET /admin/v1/traces/{id}.
+// GetTrace handles GET /admin/v1/traces/{id} and POST
+// /admin/v1/traces/{id}/replay (P3-03 / mootd-admin#26).
 //
 // Single-call detail for the admin prompt viewer (P1-12 /
 // mootd-admin#17). Returns the full llm_calls row including the
@@ -1215,22 +1216,38 @@ func (h *Handler) ListTraces(w http.ResponseWriter, r *http.Request) {
 // IDs. Resolves user email server-side so the FE can render it
 // directly under the masked-email convention.
 func (h *Handler) GetTrace(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
 	if h.tracesRepo == nil {
 		response.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "traces repository not configured"})
 		return
 	}
 
-	// Path: /admin/v1/traces/{id}. The id is everything after the
-	// "/traces/" segment minus a trailing "/summary" — that
-	// shadowing is handled by registering /traces/summary explicitly
-	// on the mux, which has higher specificity than this prefix.
-	id := strings.TrimPrefix(r.URL.Path, "/admin/v1/traces/")
-	if id == "" || strings.Contains(id, "/") {
-		response.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "missing or invalid trace id"})
+	// Path: /admin/v1/traces/{id}[/replay]. /traces/summary is
+	// registered explicitly on the mux so its higher specificity
+	// shadows this prefix.
+	rest := strings.TrimPrefix(r.URL.Path, "/admin/v1/traces/")
+	id, sub := rest, ""
+	if idx := strings.Index(rest, "/"); idx > 0 {
+		id, sub = rest[:idx], rest[idx+1:]
+	}
+	if id == "" {
+		response.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "missing trace id"})
+		return
+	}
+
+	if sub == "replay" {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		h.replayTrace(w, r, id)
+		return
+	}
+	if sub != "" {
+		response.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "unknown sub-resource"})
+		return
+	}
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 

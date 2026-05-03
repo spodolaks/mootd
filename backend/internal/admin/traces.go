@@ -59,6 +59,7 @@ type LLMCallDetail struct {
 	ResponseRaw      string    `bson:"responseRaw,omitempty" json:"responseRaw,omitempty"`
 	WardrobeItemIDs  []string  `bson:"wardrobeItemIds,omitempty" json:"wardrobeItemIds,omitempty"`
 	DetectionRunID   string    `bson:"detectionRunId,omitempty" json:"detectionRunId,omitempty"`
+	ReplayOf         string    `bson:"replayOf,omitempty" json:"replayOf,omitempty"`
 	CreatedAt        time.Time `bson:"createdAt" json:"createdAt"`
 }
 

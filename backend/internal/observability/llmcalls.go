@@ -58,6 +58,13 @@ type LLMCall struct {
 	// generated images via /admin/v1/detection-runs/{id}.
 	// Empty for outfit-generation rows.
 	DetectionRunID string `bson:"detectionRunId,omitempty"`
+
+	// ReplayOf points back at the original llm_calls row when this
+	// row is an admin-triggered replay (P3-03 / mootd-admin#26).
+	// Empty on every row a real user generates. Used by the admin
+	// trace-detail panel to render side-by-side prompt/response
+	// diffs.
+	ReplayOf string `bson:"replayOf,omitempty"`
 }
 
 // LLMCallRepository persists LLMCall rows. Reads come later (admin
