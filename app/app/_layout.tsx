@@ -133,7 +133,10 @@ function useEventsLifecycle(authToken: string | null): void {
     events.setAuthToken(authToken);
   }, [authToken]);
 
-  // Cold-launch app_opened. Fires once on mount.
+  // Cold-launch app_opened + session_start. Fires once on
+  // mount. session_start carries platform; the analyses use
+  // it as the cohort anchor (P2-05 retention reads
+  // signed_up + session_start + session_heartbeat).
   useEffect(() => {
     const platform = Platform.OS as 'ios' | 'android' | 'web';
     const appVersion =
@@ -143,6 +146,22 @@ function useEventsLifecycle(authToken: string | null): void {
       appVersion,
       sessionType: 'cold',
     });
+    events.emit('session_start', { platform });
+  }, []);
+
+  // Heartbeat (P2-03 / mootd-admin#20). One every 60s while
+  // foregrounded — matches the issue's "max 1/min" cap. Lets
+  // the server reconstruct "session was alive at minute N"
+  // even if session_end is dropped (force-close, OS kill).
+  useEffect(() => {
+    const heartbeat = setInterval(() => {
+      if (lastAppState.current !== 'active') return;
+      const elapsedSec = Math.floor(
+        (Date.now() - sessionStartAt.current) / 1000,
+      );
+      events.emit('session_heartbeat', { elapsedSec });
+    }, 60_000);
+    return () => clearInterval(heartbeat);
   }, []);
 
   // AppState transitions: track background → foreground for
@@ -178,12 +197,14 @@ function useEventsLifecycle(authToken: string | null): void {
           });
           events.rotateSessionId();
           sessionStartAt.current = Date.now();
+          const platform = Platform.OS as 'ios' | 'android' | 'web';
           events.emit('app_opened', {
-            platform: Platform.OS as 'ios' | 'android' | 'web',
+            platform,
             appVersion:
               (Constants?.expoConfig?.version as string | undefined) ?? '0.0.0',
             sessionType: 'warm',
           });
+          events.emit('session_start', { platform });
           // Force a flush so the new session is visible to
           // analyses immediately.
           void events.flush();

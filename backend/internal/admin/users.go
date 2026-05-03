@@ -161,6 +161,12 @@ type UserDetail struct {
 	TotalSpendUSD   float64           `json:"totalSpendUsd"`
 	TotalCallCount  int64             `json:"totalCallCount"`
 	GeneratedAt     time.Time         `json:"generatedAt"`
+
+	// P2-03 (mootd-admin#20). Total time the user had the app
+	// foregrounded, summed from `session_end.properties.durationMs`
+	// over the trailing 7 days. Zero when no events recorded —
+	// rendered as "—" on the FE in that case.
+	Last7dSessionTimeMs int64 `json:"last7dSessionTimeMs,omitempty"`
 }
 
 // UsersQuery is the filter set accepted by GET /admin/v1/users. Kept
@@ -599,15 +605,59 @@ func (r *UsersMongoRepository) FindDetail(ctx context.Context, userID string) (*
 		}
 	}
 
+	// 5) Last-7d session time (P2-03 / mootd-admin#20). Aggregated
+	// from session_end events. Best-effort; zero on failure.
+	sessionMs := r.last7dSessionTimeMs(ctx, userID)
+
 	return &UserDetail{
-		Summary:         summary,
-		SpendSeries:     spendSeries,
-		CallCountSeries: countSeries,
-		RecentCalls:     calls,
-		TotalSpendUSD:   totalSpend,
-		TotalCallCount:  totalCount,
-		GeneratedAt:     time.Now().UTC(),
+		Summary:             summary,
+		SpendSeries:         spendSeries,
+		CallCountSeries:     countSeries,
+		RecentCalls:         calls,
+		TotalSpendUSD:       totalSpend,
+		TotalCallCount:      totalCount,
+		Last7dSessionTimeMs: sessionMs,
+		GeneratedAt:         time.Now().UTC(),
 	}, nil
+}
+
+// last7dSessionTimeMs sums durationMs across the user's
+// session_end events in the trailing 7 days. Read-side of the
+// SDK pipeline (P2-01 → P2-02 → here). Best-effort: returns 0
+// on any error since session time is a "nice to have" panel,
+// not the source of truth.
+func (r *UsersMongoRepository) last7dSessionTimeMs(ctx context.Context, userID string) int64 {
+	startOfWindow := time.Now().UTC().Add(-7 * 24 * time.Hour)
+	pipeline := mongo.Pipeline{
+		{{Key: "$match", Value: bson.M{
+			"userId":    userID,
+			"name":      "session_end",
+			"createdAt": bson.M{"$gte": startOfWindow},
+		}}},
+		{{Key: "$group", Value: bson.M{
+			"_id":   nil,
+			"total": bson.M{"$sum": "$properties.durationMs"},
+		}}},
+	}
+	cur, err := r.eventsCol().Aggregate(ctx, pipeline)
+	if err != nil {
+		return 0
+	}
+	defer cur.Close(ctx)
+	var rows []struct {
+		Total int64 `bson:"total"`
+	}
+	if err := cur.All(ctx, &rows); err != nil || len(rows) == 0 {
+		return 0
+	}
+	return rows[0].Total
+}
+
+// eventsCol returns the events collection. Cross-domain read
+// (the events package writes; admin reads), same one-way
+// pattern we use for outfit_jobs / moodboards / wardrobe_items.
+func (r *UsersMongoRepository) eventsCol() *mongo.Collection {
+	return r.client.Database(r.dbName).Collection("events")
 }
 
 // ListWardrobe returns one page of a user's wardrobe items.

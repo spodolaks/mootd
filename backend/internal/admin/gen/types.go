@@ -1093,6 +1093,12 @@ type UserDetail struct {
 	CallCountSeries *[]DailyMetric `json:"callCountSeries,omitempty"`
 	GeneratedAt     time.Time      `json:"generatedAt"`
 
+	// Last7dSessionTimeMs Total foregrounded session time in the last 7 days,
+	// milliseconds. Aggregated from session_end events
+	// (P2-03 / mootd-admin#20). Zero when no events
+	// recorded — FE renders that as "—".
+	Last7dSessionTimeMs *int64 `json:"last7dSessionTimeMs,omitempty"`
+
 	// RecentCalls Last 25 LLM calls for this user (newest first).
 	RecentCalls *[]LLMCallSnapshot `json:"recentCalls,omitempty"`
 

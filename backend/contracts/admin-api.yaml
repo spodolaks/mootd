@@ -318,6 +318,14 @@ components:
           type: integer
           format: int64
           description: Lifetime LLM call count.
+        last7dSessionTimeMs:
+          type: integer
+          format: int64
+          description: |
+            Total foregrounded session time in the last 7 days,
+            milliseconds. Aggregated from session_end events
+            (P2-03 / mootd-admin#20). Zero when no events
+            recorded — FE renders that as "—".
         generatedAt:
           type: string
           format: date-time
