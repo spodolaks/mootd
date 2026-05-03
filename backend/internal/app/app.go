@@ -584,8 +584,17 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 		rateLimiter, rateLimitCloser = middleware.RateLimit(100, 1*time.Minute)
 	}
 
+	// Admin IP allowlist (P5-03 / mootd-admin#36). Wraps only
+	// /admin/v1/* paths so the user-facing API stays open. Empty
+	// ADMIN_ALLOWED_IPS = no-op (development default).
+	adminCIDRs := strings.Split(os.Getenv("ADMIN_ALLOWED_IPS"), ",")
+	adminAllowlist := middleware.AdminIPAllowlist(adminCIDRs, a.Logger)
+	gatedMux := http.NewServeMux()
+	gatedMux.Handle("/admin/v1/", adminAllowlist(mux))
+	gatedMux.Handle("/", mux)
+
 	// Middleware chain (outermost → innermost):
-	//   RequestID → Recover → Logging → CORS → global rate limit → mux
+	//   RequestID → Recover → Logging → CORS → global rate limit → admin allowlist → mux
 	//
 	// RequestID is outermost so panics, log lines, and the response header all
 	// carry the same correlation ID. Recover sits just inside so it can log
@@ -596,7 +605,7 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 		middleware.Recover(a.Logger)(
 			middleware.Logging(a.Logger)(
 				middleware.CORS(a.CORSAllowedOrigins)(
-					rateLimiter(mux),
+					rateLimiter(gatedMux),
 				),
 			),
 		),
