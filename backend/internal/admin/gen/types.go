@@ -557,6 +557,67 @@ type EvalSetsList struct {
 	Sets []EvalSetSummary `json:"sets"`
 }
 
+// Funnel One saved funnel definition (P2-04 / mootd-admin#21).
+type Funnel struct {
+	// AnalysisDays How far back to anchor on step 0. 1-180.
+	AnalysisDays int          `json:"analysisDays"`
+	CreatedAt    time.Time    `json:"createdAt"`
+	CreatedBy    *string      `json:"createdBy,omitempty"`
+	Id           string       `json:"id"`
+	Name         string       `json:"name"`
+	Steps        []FunnelStep `json:"steps"`
+
+	// WindowDays Step-to-step window. 1-90.
+	WindowDays int `json:"windowDays"`
+}
+
+// FunnelCreate defines model for FunnelCreate.
+type FunnelCreate struct {
+	// AnalysisDays Default 30.
+	AnalysisDays *int         `json:"analysisDays,omitempty"`
+	Name         string       `json:"name"`
+	Steps        []FunnelStep `json:"steps"`
+
+	// WindowDays Default 7.
+	WindowDays *int `json:"windowDays,omitempty"`
+}
+
+// FunnelStats defines model for FunnelStats.
+type FunnelStats struct {
+	AnalysisDays int              `json:"analysisDays"`
+	FunnelId     string           `json:"funnelId"`
+	GeneratedAt  time.Time        `json:"generatedAt"`
+	Steps        []FunnelStepStat `json:"steps"`
+	WindowDays   int              `json:"windowDays"`
+}
+
+// FunnelStep defines model for FunnelStep.
+type FunnelStep struct {
+	// EventName Catalog event name (see mootd-contracts/events/schema.md).
+	EventName string `json:"eventName"`
+
+	// Filters Optional equality matches against properties.*.
+	// Server prefixes "properties." automatically.
+	Filters *map[string]interface{} `json:"filters,omitempty"`
+}
+
+// FunnelStepStat defines model for FunnelStepStat.
+type FunnelStepStat struct {
+	// Cumulative 0-1 vs step 0. 1 on step 0.
+	Cumulative *float64 `json:"cumulative,omitempty"`
+
+	// DropOffRate 0-1 vs the prior step. 0 on step 0.
+	DropOffRate *float64 `json:"dropOffRate,omitempty"`
+	EventName   string   `json:"eventName"`
+	StepIndex   int      `json:"stepIndex"`
+	UserCount   int64    `json:"userCount"`
+}
+
+// FunnelsList defines model for FunnelsList.
+type FunnelsList struct {
+	Funnels []Funnel `json:"funnels"`
+}
+
 // LLMCallDetail Full llm_calls row including the inline-archived prompt, user
 // message, raw model response, and wardrobe item IDs (P1-11
 // Step B / mootd-admin#16). Returned by GET
@@ -1542,6 +1603,9 @@ type AdminRerunDetectionRunJSONRequestBody = DetectionRunRerunRequest
 
 // AdminStartEvalRunJSONRequestBody defines body for AdminStartEvalRun for application/json ContentType.
 type AdminStartEvalRunJSONRequestBody = EvalRunRequest
+
+// AdminCreateFunnelJSONRequestBody defines body for AdminCreateFunnel for application/json ContentType.
+type AdminCreateFunnelJSONRequestBody = FunnelCreate
 
 // AdminUpdateModelRoutingJSONRequestBody defines body for AdminUpdateModelRouting for application/json ContentType.
 type AdminUpdateModelRoutingJSONRequestBody = ModelRoutingUpdate

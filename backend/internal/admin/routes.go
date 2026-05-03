@@ -102,4 +102,9 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, authLimit Middleware, requi
 	// (gated inline since the dispatcher serves both).
 	mux.Handle("/admin/v1/prompts", requireAdmin(RequirePermission(PermPromptsRead)(http.HandlerFunc(h.PromptTemplatesRouter))))
 	mux.Handle("/admin/v1/prompts/", requireAdmin(RequirePermission(PermPromptsRead)(http.HandlerFunc(h.PromptTemplatesRouter))))
+
+	// Funnels (P2-04 / mootd-admin#21). Read = traces:read;
+	// POST gated inline.
+	mux.Handle("/admin/v1/funnels", requireAdmin(RequirePermission(PermTracesRead)(http.HandlerFunc(h.FunnelsRouter))))
+	mux.Handle("/admin/v1/funnels/", requireAdmin(RequirePermission(PermTracesRead)(http.HandlerFunc(h.FunnelsRouter))))
 }

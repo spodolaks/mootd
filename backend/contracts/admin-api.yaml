@@ -1237,6 +1237,104 @@ components:
           type: string
           maxLength: 500
 
+    FunnelStep:
+      type: object
+      required: [eventName]
+      properties:
+        eventName:
+          type: string
+          description: Catalog event name (see mootd-contracts/events/schema.md).
+        filters:
+          type: object
+          additionalProperties: true
+          description: |
+            Optional equality matches against properties.*.
+            Server prefixes "properties." automatically.
+
+    Funnel:
+      description: |
+        One saved funnel definition (P2-04 / mootd-admin#21).
+      type: object
+      required: [id, name, steps, windowDays, analysisDays, createdAt]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        steps:
+          type: array
+          items:
+            $ref: "#/components/schemas/FunnelStep"
+        windowDays:
+          type: integer
+          description: Step-to-step window. 1-90.
+        analysisDays:
+          type: integer
+          description: How far back to anchor on step 0. 1-180.
+        createdBy: { type: string }
+        createdAt:
+          type: string
+          format: date-time
+
+    FunnelsList:
+      type: object
+      required: [funnels]
+      properties:
+        funnels:
+          type: array
+          items:
+            $ref: "#/components/schemas/Funnel"
+
+    FunnelCreate:
+      type: object
+      required: [name, steps]
+      properties:
+        name:
+          type: string
+          minLength: 1
+        steps:
+          type: array
+          minItems: 2
+          items:
+            $ref: "#/components/schemas/FunnelStep"
+        windowDays:
+          type: integer
+          description: Default 7.
+        analysisDays:
+          type: integer
+          description: Default 30.
+
+    FunnelStepStat:
+      type: object
+      required: [stepIndex, eventName, userCount]
+      properties:
+        stepIndex: { type: integer }
+        eventName: { type: string }
+        userCount:
+          type: integer
+          format: int64
+        dropOffRate:
+          type: number
+          format: double
+          description: 0-1 vs the prior step. 0 on step 0.
+        cumulative:
+          type: number
+          format: double
+          description: 0-1 vs step 0. 1 on step 0.
+
+    FunnelStats:
+      type: object
+      required: [funnelId, windowDays, analysisDays, steps, generatedAt]
+      properties:
+        funnelId: { type: string }
+        windowDays: { type: integer }
+        analysisDays: { type: integer }
+        steps:
+          type: array
+          items:
+            $ref: "#/components/schemas/FunnelStepStat"
+        generatedAt:
+          type: string
+          format: date-time
+
     PromptTemplate:
       description: |
         One stored version of one named template (P3-01 /
@@ -3190,6 +3288,111 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "404":
           description: Session not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /admin/v1/funnels:
+    get:
+      operationId: adminListFunnels
+      summary: |
+        List saved funnels (P2-04 / mootd-admin#21).
+        Permission: traces:read.
+      tags: [analytics]
+      responses:
+        "200":
+          description: Funnels list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FunnelsList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      operationId: adminCreateFunnel
+      summary: |
+        Save a new funnel definition. Permission: prompts:write
+        (used here as "can configure analyses" since funnels:write
+        isn't a separate permission today).
+      tags: [analytics]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FunnelCreate"
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Funnel"
+        "400":
+          description: Bad body or unknown event name.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Missing prompts:write.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /admin/v1/funnels/{id}:
+    get:
+      operationId: adminGetFunnel
+      summary: Read one saved funnel. Permission traces:read.
+      tags: [analytics]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Funnel.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Funnel"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /admin/v1/funnels/{id}/stats:
+    get:
+      operationId: adminGetFunnelStats
+      summary: |
+        Compute step-by-step pass-through rates for the funnel.
+        Permission: traces:read.
+      tags: [analytics]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Stats.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FunnelStats"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Not found.
           content:
             application/json:
               schema:

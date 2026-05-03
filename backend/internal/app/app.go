@@ -207,6 +207,15 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 		a.Logger.Printf("admin: prompt_templates repo init failed: %v (continuing with hardcoded constants)", err)
 	}
 
+	// Funnels (P2-04 / mootd-admin#21). Best-effort wiring;
+	// when the repo init fails (index ensure error) the
+	// /funnels endpoints return 503.
+	if funnelsRepo, err := admin.NewFunnelsMongoRepository(context.Background(), a.MongoClient, a.MongoDB); err == nil {
+		adminHandler.WithFunnels(funnelsRepo)
+	} else {
+		a.Logger.Printf("admin: admin_funnels repo init failed: %v (continuing without /funnels)", err)
+	}
+
 	// Session replay (P5-05 / mootd-admin#38). Best-effort:
 	// init failure (e.g. TTL index ensure failed) just means the
 	// FE silently no-ops on /events and the read endpoints
