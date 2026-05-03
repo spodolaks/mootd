@@ -123,6 +123,22 @@ const (
 	UserSummaryTierPaid    UserSummaryTier = "paid"
 )
 
+// Defines values for UserTierTier.
+const (
+	UserTierTierBeta    UserTierTier = "beta"
+	UserTierTierFounder UserTierTier = "founder"
+	UserTierTierFree    UserTierTier = "free"
+	UserTierTierPaid    UserTierTier = "paid"
+)
+
+// Defines values for UserTierUpdateTier.
+const (
+	UserTierUpdateTierBeta    UserTierUpdateTier = "beta"
+	UserTierUpdateTierFounder UserTierUpdateTier = "founder"
+	UserTierUpdateTierFree    UserTierUpdateTier = "free"
+	UserTierUpdateTierPaid    UserTierUpdateTier = "paid"
+)
+
 // Defines values for AdminListTracesParamsStatus.
 const (
 	AdminListTracesParamsStatusError   AdminListTracesParamsStatus = "error"
@@ -600,28 +616,6 @@ type LoginResponse struct {
 	RefreshToken string `json:"refreshToken"`
 }
 
-// MFASetupResponse defines model for MFASetupResponse.
-type MFASetupResponse struct {
-	// OtpauthUri otpauth://totp/... URI for QR rendering.
-	OtpauthUri string `json:"otpauthUri"`
-
-	// Secret Base32-encoded TOTP secret. Echo back on /verify.
-	Secret string `json:"secret"`
-}
-
-// MFAVerifyRequest defines model for MFAVerifyRequest.
-type MFAVerifyRequest struct {
-	Code   string `json:"code"`
-	Secret string `json:"secret"`
-}
-
-// MFAVerifyResponse defines model for MFAVerifyResponse.
-type MFAVerifyResponse struct {
-	// RecoveryCodes 8 plaintext one-time recovery codes. The admin sees
-	// them ONCE — the server only stores hashes from here on.
-	RecoveryCodes []string `json:"recoveryCodes"`
-}
-
 // ModelRouting Per-tier routing config (P4-05 / mootd-admin#33).
 // Returned by GET /admin/v1/model-routing. The mapping is
 // stored as a single Mongo doc with the four tier keys and
@@ -749,6 +743,75 @@ type SearchHitKind string
 // cost; admins refine the query when more is needed.
 type SearchResponse struct {
 	Hits []SearchHit `json:"hits"`
+}
+
+// SessionDetail defines model for SessionDetail.
+type SessionDetail struct {
+	Events []SessionDetailEvent `json:"events"`
+
+	// Summary Header for one admin session in the replay list. Computed
+	// on aggregation; the admin_session_events collection
+	// stores raw events.
+	Summary SessionSummary `json:"summary"`
+}
+
+// SessionDetailEvent One event in a session's detail view.
+type SessionDetailEvent struct {
+	At         time.Time `json:"at"`
+	DurationMs int64     `json:"durationMs"`
+	Method     string    `json:"method"`
+	Path       string    `json:"path"`
+	Status     int       `json:"status"`
+}
+
+// SessionEventRequest One admin-side API call captured for replay (P5-05 /
+// mootd-admin#38). Sent fire-and-forget by the FE after
+// every request() completes.
+type SessionEventRequest struct {
+	DurationMs int64 `json:"durationMs"`
+
+	// Method GET / POST / PUT / DELETE etc.
+	Method string `json:"method"`
+
+	// Path Request path (no query string in v1 — admin URLs
+	// sometimes carry filter values that constitute PII
+	// on /traces?userId=…; query strings are stripped
+	// client-side before posting).
+	Path string `json:"path"`
+
+	// SessionId Per-tab uuid generated client-side at boot. Same
+	// session = same tab from open to close (or until the
+	// FE's hydrateSession returns null). Sessions don't
+	// persist across tab close — that's intentional;
+	// re-opening starts fresh.
+	SessionId string `json:"sessionId"`
+
+	// Status HTTP response status.
+	Status int `json:"status"`
+}
+
+// SessionSummary Header for one admin session in the replay list. Computed
+// on aggregation; the admin_session_events collection
+// stores raw events.
+type SessionSummary struct {
+	AdminEmail *string `json:"adminEmail,omitempty"`
+	AdminId    string  `json:"adminId"`
+
+	// DistinctPaths Useful at-a-glance — "did this session touch every surface, or just /users?"
+	DistinctPaths *int64 `json:"distinctPaths,omitempty"`
+
+	// ErrorCount Events with status >= 400. Spikes here are worth drilling into.
+	ErrorCount *int64    `json:"errorCount,omitempty"`
+	EventCount int64     `json:"eventCount"`
+	FirstAt    time.Time `json:"firstAt"`
+	LastAt     time.Time `json:"lastAt"`
+	SessionId  string    `json:"sessionId"`
+}
+
+// SessionsPage defines model for SessionsPage.
+type SessionsPage struct {
+	NextCursor *string          `json:"nextCursor,omitempty"`
+	Sessions   []SessionSummary `json:"sessions"`
 }
 
 // TracesPage defines model for TracesPage.
@@ -1010,6 +1073,47 @@ type UserSummary struct {
 // UserSummaryTier defines model for UserSummary.Tier.
 type UserSummaryTier string
 
+// UserTier Per-user tier authoring (P4-05 follow-up). Pairs with the
+// ModelRouting config — admins promote a user to "paid" via
+// PUT /admin/v1/users/{id}/tier and the next outfit
+// generation hits the provider configured for that tier in
+// ModelRouting. When the user has no `user_tiers` row, the
+// backend returns the system default ("free") with
+// `isDefault: true` so the UI knows to render it as a
+// placeholder.
+type UserTier struct {
+	// IsDefault True when the user has no override and the response
+	// carries the system default ("free").
+	IsDefault bool `json:"isDefault"`
+
+	// Reason Free-text rationale captured at write time.
+	Reason *string `json:"reason,omitempty"`
+
+	// SetAt When the override was last written. Empty when isDefault.
+	SetAt *time.Time `json:"setAt,omitempty"`
+
+	// SetBy Admin id that last wrote this tier. Empty when isDefault.
+	SetBy  *string      `json:"setBy,omitempty"`
+	Tier   UserTierTier `json:"tier"`
+	UserId string       `json:"userId"`
+}
+
+// UserTierTier defines model for UserTier.Tier.
+type UserTierTier string
+
+// UserTierUpdate Body for PUT /admin/v1/users/{id}/tier. `reason` is
+// required — every tier edit ends up in the audit log with
+// rationale, since promoting a user changes which provider
+// their outfit-gen calls hit (and therefore the per-call
+// cost).
+type UserTierUpdate struct {
+	Reason string             `json:"reason"`
+	Tier   UserTierUpdateTier `json:"tier"`
+}
+
+// UserTierUpdateTier defines model for UserTierUpdate.Tier.
+type UserTierUpdateTier string
+
 // UserWardrobeItem One clothing item from a user's wardrobe, surfaced to the
 // admin user-detail page (mootd-admin#11). Mirrors the
 // backend's wardrobe.ClothingItem; pngImageUrl is the
@@ -1160,6 +1264,12 @@ type AdminSearchParams struct {
 	Q string `form:"q" json:"q"`
 }
 
+// AdminListSessionsParams defines parameters for AdminListSessions.
+type AdminListSessionsParams struct {
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit  *int    `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
 // AdminListTracesParams defines parameters for AdminListTraces.
 type AdminListTracesParams struct {
 	UserId  *string                      `form:"userId,omitempty" json:"userId,omitempty"`
@@ -1249,9 +1359,6 @@ type AdminAuditPIIRevealJSONRequestBody = PIIRevealRequest
 // AdminLoginJSONRequestBody defines body for AdminLogin for application/json ContentType.
 type AdminLoginJSONRequestBody = LoginRequest
 
-// AdminMFAVerifyJSONRequestBody defines body for AdminMFAVerify for application/json ContentType.
-type AdminMFAVerifyJSONRequestBody = MFAVerifyRequest
-
 // AdminRefreshJSONRequestBody defines body for AdminRefresh for application/json ContentType.
 type AdminRefreshJSONRequestBody = RefreshRequest
 
@@ -1264,5 +1371,11 @@ type AdminStartEvalRunJSONRequestBody = EvalRunRequest
 // AdminUpdateModelRoutingJSONRequestBody defines body for AdminUpdateModelRouting for application/json ContentType.
 type AdminUpdateModelRoutingJSONRequestBody = ModelRoutingUpdate
 
+// AdminRecordSessionEventJSONRequestBody defines body for AdminRecordSessionEvent for application/json ContentType.
+type AdminRecordSessionEventJSONRequestBody = SessionEventRequest
+
 // AdminUpdateUserBudgetJSONRequestBody defines body for AdminUpdateUserBudget for application/json ContentType.
 type AdminUpdateUserBudgetJSONRequestBody = UserBudgetUpdate
+
+// AdminUpdateUserTierJSONRequestBody defines body for AdminUpdateUserTier for application/json ContentType.
+type AdminUpdateUserTierJSONRequestBody = UserTierUpdate

@@ -13,6 +13,12 @@ type Middleware = func(http.Handler) http.Handler
 //   - requireAdmin: the JWT-validating admin auth middleware. Wraps every
 //     protected endpoint. Required (not optional) — an admin handler
 //     without auth is a bug.
+//
+// Optional outer wrappers (P5-03 / mootd-admin#36): caller may
+// install IP-allowlist middleware ahead of these routes by
+// chaining at the app-level mux instead of here. The middleware
+// is in shared/middleware/ip_allowlist.go and is wired in
+// internal/app/app.go from ADMIN_ALLOWED_IPS.
 func (h *Handler) RegisterRoutes(mux *http.ServeMux, authLimit Middleware, requireAdmin Middleware) {
 	wrap := func(h http.Handler) http.Handler {
 		if authLimit == nil {
@@ -52,6 +58,12 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, authLimit Middleware, requi
 	// gate inside the handler so a missing perm returns the
 	// uniform {error, missingPermission} body the FE expects.
 	mux.Handle("/admin/v1/audit/pii-reveal", requireAdmin(http.HandlerFunc(h.AuditPIIReveal)))
+	// Session replay (P5-05 / mootd-admin#38). Recording is
+	// permission-free — every authenticated admin's actions
+	// flow into the log. Reading the log requires sessions:view.
+	mux.Handle("/admin/v1/sessions/events", requireAdmin(http.HandlerFunc(h.RecordSessionEvent)))
+	mux.Handle("/admin/v1/sessions", requireAdmin(RequirePermission(PermSessionsView)(http.HandlerFunc(h.ListSessions))))
+	mux.Handle("/admin/v1/sessions/", requireAdmin(RequirePermission(PermSessionsView)(http.HandlerFunc(h.GetSession))))
 
 	// User surfaces — readable by anyone with users:read; PII
 	// fields gated *inside* the handler with HasPermissionFromContext

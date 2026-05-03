@@ -33,6 +33,7 @@ type Handler struct {
 	routingProviders []string             // boot-time provider names; populated alongside routingRepo
 	reportsRepo   ReportsRepository       // optional — when nil, /reports/weekly returns 503
 	smtpCfg       *SMTPConfig             // optional — when nil, /reports/weekly/send returns 503
+	sessionsRepo  SessionsRepository      // optional — when nil, /sessions returns 503
 	secret        string
 }
 
@@ -68,6 +69,15 @@ func (h *Handler) WithUserBudgets(r UserBudgetsRepository) *Handler {
 // the optional deps.
 func (h *Handler) WithBudgetState(s BudgetStateReader) *Handler {
 	h.budgetState = s
+	return h
+}
+
+// WithSessions wires the session-replay repo (P5-05 /
+// mootd-admin#38). Optional — when unset, /sessions returns
+// 503 and /sessions/events silently 204s (so the FE doesn't
+// spam errors when recording isn't wired).
+func (h *Handler) WithSessions(r SessionsRepository) *Handler {
+	h.sessionsRepo = r
 	return h
 }
 

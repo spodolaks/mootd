@@ -983,36 +983,110 @@ components:
         weekLabel:
           type: string
 
-    MFASetupResponse:
+    SessionEventRequest:
+      description: |
+        One admin-side API call captured for replay (P5-05 /
+        mootd-admin#38). Sent fire-and-forget by the FE after
+        every request() completes.
       type: object
-      required: [secret, otpauthUri]
+      required: [sessionId, method, path, status, durationMs]
       properties:
-        secret:
+        sessionId:
           type: string
-          description: Base32-encoded TOTP secret. Echo back on /verify.
-        otpauthUri:
-          type: string
-          description: otpauth://totp/... URI for QR rendering.
-
-    MFAVerifyRequest:
-      type: object
-      required: [secret, code]
-      properties:
-        secret:
-          type: string
-        code:
-          type: string
-
-    MFAVerifyResponse:
-      type: object
-      required: [recoveryCodes]
-      properties:
-        recoveryCodes:
-          type: array
-          items: { type: string }
           description: |
-            8 plaintext one-time recovery codes. The admin sees
-            them ONCE — the server only stores hashes from here on.
+            Per-tab uuid generated client-side at boot. Same
+            session = same tab from open to close (or until the
+            FE's hydrateSession returns null). Sessions don't
+            persist across tab close — that's intentional;
+            re-opening starts fresh.
+        method:
+          type: string
+          description: GET / POST / PUT / DELETE etc.
+        path:
+          type: string
+          description: |
+            Request path (no query string in v1 — admin URLs
+            sometimes carry filter values that constitute PII
+            on /traces?userId=…; query strings are stripped
+            client-side before posting).
+        status:
+          type: integer
+          description: HTTP response status.
+        durationMs:
+          type: integer
+          format: int64
+
+    SessionSummary:
+      description: |
+        Header for one admin session in the replay list. Computed
+        on aggregation; the admin_session_events collection
+        stores raw events.
+      type: object
+      required: [sessionId, adminId, firstAt, lastAt, eventCount]
+      properties:
+        sessionId:
+          type: string
+        adminId:
+          type: string
+        adminEmail:
+          type: string
+        firstAt:
+          type: string
+          format: date-time
+        lastAt:
+          type: string
+          format: date-time
+        eventCount:
+          type: integer
+          format: int64
+        distinctPaths:
+          type: integer
+          format: int64
+          description: Useful at-a-glance — "did this session touch every surface, or just /users?"
+        errorCount:
+          type: integer
+          format: int64
+          description: Events with status >= 400. Spikes here are worth drilling into.
+
+    SessionsPage:
+      type: object
+      required: [sessions]
+      properties:
+        sessions:
+          type: array
+          items:
+            $ref: "#/components/schemas/SessionSummary"
+        nextCursor:
+          type: string
+
+    SessionDetailEvent:
+      description: One event in a session's detail view.
+      type: object
+      required: [at, method, path, status, durationMs]
+      properties:
+        at:
+          type: string
+          format: date-time
+        method:
+          type: string
+        path:
+          type: string
+        status:
+          type: integer
+        durationMs:
+          type: integer
+          format: int64
+
+    SessionDetail:
+      type: object
+      required: [summary, events]
+      properties:
+        summary:
+          $ref: "#/components/schemas/SessionSummary"
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/SessionDetailEvent"
 
     PIIRevealRequest:
       description: |
@@ -1106,6 +1180,58 @@ components:
           format: double
           minimum: 0
           maximum: 10000
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+
+    UserTier:
+      description: |
+        Per-user tier authoring (P4-05 follow-up). Pairs with the
+        ModelRouting config — admins promote a user to "paid" via
+        PUT /admin/v1/users/{id}/tier and the next outfit
+        generation hits the provider configured for that tier in
+        ModelRouting. When the user has no `user_tiers` row, the
+        backend returns the system default ("free") with
+        `isDefault: true` so the UI knows to render it as a
+        placeholder.
+      type: object
+      required: [userId, tier, isDefault]
+      properties:
+        userId:
+          type: string
+        tier:
+          type: string
+          enum: [free, paid, founder, beta]
+        isDefault:
+          type: boolean
+          description: |
+            True when the user has no override and the response
+            carries the system default ("free").
+        setBy:
+          type: string
+          description: Admin id that last wrote this tier. Empty when isDefault.
+        setAt:
+          type: string
+          format: date-time
+          description: When the override was last written. Empty when isDefault.
+        reason:
+          type: string
+          description: Free-text rationale captured at write time.
+
+    UserTierUpdate:
+      description: |
+        Body for PUT /admin/v1/users/{id}/tier. `reason` is
+        required — every tier edit ends up in the audit log with
+        rationale, since promoting a user changes which provider
+        their outfit-gen calls hit (and therefore the per-call
+        cost).
+      type: object
+      required: [tier, reason]
+      properties:
+        tier:
+          type: string
+          enum: [free, paid, founder, beta]
         reason:
           type: string
           minLength: 1
@@ -1980,6 +2106,80 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /admin/v1/users/{id}/tier:
+    get:
+      operationId: adminGetUserTier
+      summary: |
+        Current per-user tier (P4-05 follow-up — tier authoring).
+        Pairs with /admin/v1/model-routing: the configured tier
+        determines which provider serves outfit generation for
+        this user. When the user has no override, returns the
+        system default ("free") with `isDefault: true`.
+      tags: [users]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Tier for the user (override or default).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserTier"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    put:
+      operationId: adminUpdateUserTier
+      summary: |
+        Replace the user's tier. Writes to the `user_tiers`
+        collection (upsert by userId) and writes an audit row with
+        action=`user_tier.update` and metadata carrying the prior
+        + new tier + admin-supplied reason. Requires
+        `budgets:write` (the same permission that gates per-user
+        budget edits — both shape what an individual user costs
+        the platform).
+      tags: [users]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserTierUpdate"
+      responses:
+        "200":
+          description: New tier after the update.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserTier"
+        "400":
+          description: Invalid tier or missing reason.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Caller lacks the `budgets:write` permission.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: User not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /admin/v1/users/{id}/wardrobe:
     get:
       operationId: adminListUserWardrobe
@@ -2412,56 +2612,104 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
-  /admin/v1/auth/mfa/setup:
+  /admin/v1/sessions/events:
     post:
-      operationId: adminMFASetup
+      operationId: adminRecordSessionEvent
       summary: |
-        Generate a fresh TOTP secret + otpauth URI for QR
-        rendering (P5-02 / mootd-admin#35). Stateless — does NOT
-        save the secret to the admin's record. The FE echoes the
-        secret back on /verify alongside a proof code; only then
-        is enrollment persisted.
-      tags: [auth]
-      responses:
-        "200":
-          description: Setup payload.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/MFASetupResponse"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-
-  /admin/v1/auth/mfa/verify:
-    post:
-      operationId: adminMFAVerify
-      summary: |
-        Verify a TOTP code against the supplied secret. On
-        success: persists the secret + flips MFAEnforced=true +
-        issues 8 single-use recovery codes returned in plaintext
-        (the only time they are visible — store them now).
-      tags: [auth]
+        Record one admin-side request for the session-replay
+        audit log (P5-05 / mootd-admin#38). The frontend's
+        request() wrapper calls this fire-and-forget after every
+        API request — method, path, status, duration. No body
+        snapshots in v1; we explicitly trade "exact replay" for
+        a tiny payload + clean privacy story.
+      tags: [audit]
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/MFAVerifyRequest"
+              $ref: "#/components/schemas/SessionEventRequest"
       responses:
-        "200":
-          description: Enrolled. Body carries recovery codes.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/MFAVerifyResponse"
+        "204":
+          description: Recorded.
         "400":
-          description: Code didn't verify.
+          description: Bad body.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
+
+  /admin/v1/sessions:
+    get:
+      operationId: adminListSessions
+      summary: |
+        List recent admin sessions, grouped by sessionId. Each
+        row carries the admin id + first/last event timestamps +
+        event count + distinct paths visited. Permission:
+        sessions:view.
+      tags: [audit]
+      parameters:
+        - name: cursor
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 30
+      responses:
+        "200":
+          description: Sessions page.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionsPage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Missing sessions:view.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /admin/v1/sessions/{id}:
+    get:
+      operationId: adminGetSession
+      summary: |
+        All events for one session, in chronological order.
+        Permission: sessions:view.
+      tags: [audit]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Session detail.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionDetail"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Missing sessions:view.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Session not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /admin/v1/audit/pii-reveal:
     post:
