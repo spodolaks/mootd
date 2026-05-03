@@ -18,6 +18,7 @@ import (
 	"mootd/backend/internal/auth"
 	"mootd/backend/internal/brands"
 	"mootd/backend/internal/budget"
+	"mootd/backend/internal/events"
 	"mootd/backend/internal/feedback"
 	"mootd/backend/internal/generic"
 	"mootd/backend/internal/health"
@@ -92,6 +93,7 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 	var authLimit middleware.Middleware
 	var outfitBurstLimit middleware.Middleware
 	var outfitDailyLimit middleware.Middleware
+	var eventsLimit middleware.Middleware
 	var feedbackLimit middleware.Middleware
 	if redisClient != nil {
 		// 20/min per IP on unauth'd auth endpoints blunts refresh-token spraying
@@ -105,6 +107,12 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 		// Feedback is cheap to store but easy to spam from a broken client loop;
 		// 120/min per user is well above normal usage and prevents log-flood.
 		feedbackLimit = middleware.RedisRateLimitScoped(redisClient, "feedback", 120, 1*time.Minute)
+		// P2-02 / mootd-admin#19: analytics ingest. 600/min per
+		// user. The batched SDK flushes every 10s + on queue
+		// depth 25, so a normal session lands ~6 calls/min;
+		// 600 leaves comfortable headroom for retry storms +
+		// shorter batch intervals if we tune them later.
+		eventsLimit = middleware.RedisRateLimitScoped(redisClient, "events", 600, 1*time.Minute)
 	}
 
 	// Mock-login is only registered when explicitly opted-in via config. Any
@@ -281,6 +289,16 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 	// wired below is currently the only server-side emitter.
 	feedbackRepo := feedback.NewMongoRepository(a.MongoClient, a.MongoDB)
 	feedback.NewHandler(a.Logger, feedbackRepo).RegisterRoutes(mux, authMiddleware, feedbackLimit)
+
+	// Analytics events (P2-02 / mootd-admin#19). Best-effort
+	// init: index ensure failure logs but doesn't block startup
+	// — without the indexes the writes still land, the read
+	// surfaces in P2-04/05 just slow down.
+	if eventsRepo, err := events.NewMongoRepository(context.Background(), a.MongoClient, a.MongoDB); err == nil {
+		events.NewHandler(a.Logger, eventsRepo).RegisterRoutes(mux, authMiddleware, eventsLimit)
+	} else {
+		a.Logger.Printf("events: repo init failed: %v (events ingest disabled)", err)
+	}
 
 	// Forward-declared so the moodboard onSave closure can stamp the name of
 	// the currently-active generator on every feedback event. The generator
