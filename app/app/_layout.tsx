@@ -3,13 +3,16 @@ import { useFonts } from 'expo-font';
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
-import { Component, useEffect } from 'react';
+import { Component, useEffect, useRef } from 'react';
 import type { ReactNode, ErrorInfo } from 'react';
-import { Platform, View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import Constants from 'expo-constants';
+import { AppState, AppStateStatus, Platform, View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import 'react-native-reanimated';
 
 import { ColorSchemeProvider, useColorScheme } from '@/src/hooks';
 import { useAuthStore } from '@/src/store';
+import * as events from '@/src/lib/events';
+import { getApiBaseURL } from '@/src/data/api/client';
 
 // ─── Error Boundary ──────────────────────────────────────────────────────────
 
@@ -94,8 +97,107 @@ export const unstable_settings = {
   initialRouteName: 'index',
 };
 
+// SDK lifecycle (P2-01 / mootd-admin#18 + P2-03 / mootd-admin#20).
+//
+// Behaviour:
+//   - On first foreground after launch: emit `app_opened`
+//     (sessionType: cold).
+//   - On every subsequent foreground after >30s in background:
+//     rotate sessionId, emit `session_end` for the previous
+//     session, emit `app_opened` (sessionType: warm) for the new.
+//   - On background: stash the timestamp + a snapshot of the
+//     session's screensVisited / featuresUsed so the next
+//     active->background transition can compute durations.
+//
+// Why hooked here instead of in the SDK itself: the SDK stays
+// platform-agnostic (no `react-native` import). The lifecycle
+// driver is the Expo entry point's responsibility.
+const BACKGROUND_THRESHOLD_MS = 30_000;
+
+function useEventsLifecycle(authToken: string | null): void {
+  const lastBackgroundedAt = useRef<number | null>(null);
+  const sessionStartAt = useRef<number>(Date.now());
+  const lastAppState = useRef<AppStateStatus>(AppState.currentState);
+
+  // Boot the SDK once, before any emit. Idempotent so a
+  // hot-reload doesn't double-start.
+  useEffect(() => {
+    void events.start({ apiBaseUrl: getApiBaseURL() });
+    return () => events.stop();
+  }, []);
+
+  // Forward the auth token. Bound to the auth store via the
+  // caller; on login the store fires this hook with a new
+  // token and the SDK flushes any anonymous-queued events.
+  useEffect(() => {
+    events.setAuthToken(authToken);
+  }, [authToken]);
+
+  // Cold-launch app_opened. Fires once on mount.
+  useEffect(() => {
+    const platform = Platform.OS as 'ios' | 'android' | 'web';
+    const appVersion =
+      (Constants?.expoConfig?.version as string | undefined) ?? '0.0.0';
+    events.emit('app_opened', {
+      platform,
+      appVersion,
+      sessionType: 'cold',
+    });
+  }, []);
+
+  // AppState transitions: track background → foreground for
+  // session lifecycle, foreground → background for stashing.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (next) => {
+      const prev = lastAppState.current;
+      lastAppState.current = next;
+
+      if (prev === 'active' && next !== 'active') {
+        // Going to background.
+        lastBackgroundedAt.current = Date.now();
+        return;
+      }
+
+      if (next === 'active' && prev !== 'active') {
+        // Coming to foreground.
+        const since = lastBackgroundedAt.current;
+        lastBackgroundedAt.current = null;
+        if (since === null) return;
+
+        const awayMs = Date.now() - since;
+        if (awayMs > BACKGROUND_THRESHOLD_MS) {
+          // Long-enough background → end session, start a new one.
+          const elapsed = since - sessionStartAt.current;
+          events.emit('session_end', {
+            durationMs: Math.max(0, elapsed),
+            // We don't currently track these client-side; ship
+            // zero/empty + tighten in a follow-up if the analyses
+            // ask for them.
+            screensVisited: 0,
+            featuresUsed: [],
+          });
+          events.rotateSessionId();
+          sessionStartAt.current = Date.now();
+          events.emit('app_opened', {
+            platform: Platform.OS as 'ios' | 'android' | 'web',
+            appVersion:
+              (Constants?.expoConfig?.version as string | undefined) ?? '0.0.0',
+            sessionType: 'warm',
+          });
+          // Force a flush so the new session is visible to
+          // analyses immediately.
+          void events.flush();
+        }
+      }
+    });
+    return () => sub.remove();
+  }, []);
+}
+
 function RootLayoutContent() {
   const colorScheme = useColorScheme();
+  const session = useAuthStore((s) => s.session);
+  useEventsLifecycle(session?.accessToken ?? null);
 
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>

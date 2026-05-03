@@ -3,6 +3,7 @@ import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 import { authRepository } from '@/src/data';
 import { setAuthToken } from '@/src/data/api/client';
+import * as events from '@/src/lib/events';
 import type { AuthSession, AuthUser, GoogleOAuthParams } from '@/src/domain';
 import { usePreferencesStore } from './preferencesStore';
 
@@ -90,6 +91,11 @@ export const useAuthStore = create<AuthState>((set) => ({
         isAuthenticated: true,
       });
       syncToPreferences(session.user);
+      // P2-01: emit before returning so the event lands on
+      // whichever onLoginSuccess callback the caller routes
+      // through. The first emit after login also flushes the
+      // queued anonymous events (if any).
+      events.emit('signed_in', { method: 'google' });
       return true;
     } catch (error) {
       const message =
@@ -117,6 +123,7 @@ export const useAuthStore = create<AuthState>((set) => ({
         isAuthenticated: true,
       });
       syncToPreferences(session.user);
+      events.emit('signed_in', { method: 'google' });
       return true;
     } catch (error) {
       const message =
@@ -200,6 +207,13 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   signOut: async () => {
+    // P2-01: emit before clearing the token so the event flushes
+    // with valid auth. The SDK keeps queueing post-signout (in
+    // case of immediate sign-back-in), but those land on the
+    // next user's session — anonymous queue gets the rest.
+    events.emit('signed_out', {});
+    void events.flush();
+
     // Revoke the refresh token server-side first so a lost device can't keep
     // minting new access tokens. We do NOT await this call — network failures
     // must not block local sign-out, and the user expects an instant UI.
