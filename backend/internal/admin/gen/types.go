@@ -711,6 +711,47 @@ type PIIRevealRequest struct {
 // PIIRevealRequestKind defines model for PIIRevealRequest.Kind.
 type PIIRevealRequestKind string
 
+// PromptNamesList defines model for PromptNamesList.
+type PromptNamesList struct {
+	Names []string `json:"names"`
+}
+
+// PromptPromoteRequest defines model for PromptPromoteRequest.
+type PromptPromoteRequest struct {
+	Notes *string `json:"notes,omitempty"`
+}
+
+// PromptTemplate One stored version of one named template (P3-01 /
+// mootd-admin#24). One row per (name, version) pair.
+type PromptTemplate struct {
+	// Body Free-form template text. {{varName}} placeholders are substituted at render time.
+	Body         string    `json:"body"`
+	CreatedAt    time.Time `json:"createdAt"`
+	CreatedBy    *string   `json:"createdBy,omitempty"`
+	Id           string    `json:"id"`
+	IsProduction bool      `json:"isProduction"`
+	Name         string    `json:"name"`
+	Notes        *string   `json:"notes,omitempty"`
+
+	// Variables Detected {{varName}} placeholders in the body, in
+	// first-appearance order. Stored alongside the body
+	// so the FE can highlight them without re-parsing.
+	Variables *[]string `json:"variables,omitempty"`
+	Version   int       `json:"version"`
+}
+
+// PromptVersionCreate Body for POST /admin/v1/prompts/{name}. notes is required
+// as the audit-log rationale.
+type PromptVersionCreate struct {
+	Body  string `json:"body"`
+	Notes string `json:"notes"`
+}
+
+// PromptVersionsList defines model for PromptVersionsList.
+type PromptVersionsList struct {
+	Versions []PromptTemplate `json:"versions"`
+}
+
 // RefreshRequest defines model for RefreshRequest.
 type RefreshRequest struct {
 	RefreshToken string `json:"refreshToken"`
@@ -1370,6 +1411,12 @@ type AdminStartEvalRunJSONRequestBody = EvalRunRequest
 
 // AdminUpdateModelRoutingJSONRequestBody defines body for AdminUpdateModelRouting for application/json ContentType.
 type AdminUpdateModelRoutingJSONRequestBody = ModelRoutingUpdate
+
+// AdminCreatePromptVersionJSONRequestBody defines body for AdminCreatePromptVersion for application/json ContentType.
+type AdminCreatePromptVersionJSONRequestBody = PromptVersionCreate
+
+// AdminPromotePromptVersionJSONRequestBody defines body for AdminPromotePromptVersion for application/json ContentType.
+type AdminPromotePromptVersionJSONRequestBody = PromptPromoteRequest
 
 // AdminRecordSessionEventJSONRequestBody defines body for AdminRecordSessionEvent for application/json ContentType.
 type AdminRecordSessionEventJSONRequestBody = SessionEventRequest

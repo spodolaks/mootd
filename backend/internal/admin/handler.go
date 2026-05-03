@@ -34,6 +34,8 @@ type Handler struct {
 	reportsRepo   ReportsRepository       // optional — when nil, /reports/weekly returns 503
 	smtpCfg       *SMTPConfig             // optional — when nil, /reports/weekly/send returns 503
 	sessionsRepo  SessionsRepository      // optional — when nil, /sessions returns 503
+	templatesRepo PromptTemplatesRepository // optional — when nil, /prompts returns 503
+	templatesCache *CachedPromptTemplates    // optional — invalidated on Promote
 	secret        string
 }
 
@@ -69,6 +71,15 @@ func (h *Handler) WithUserBudgets(r UserBudgetsRepository) *Handler {
 // the optional deps.
 func (h *Handler) WithBudgetState(s BudgetStateReader) *Handler {
 	h.budgetState = s
+	return h
+}
+
+// WithPromptTemplates wires the templates repo + the cached
+// reader (P3-01 / mootd-admin#24). Promote() invalidates the
+// cache so admin edits take effect on the next outfit-gen call.
+func (h *Handler) WithPromptTemplates(repo PromptTemplatesRepository, cache *CachedPromptTemplates) *Handler {
+	h.templatesRepo = repo
+	h.templatesCache = cache
 	return h
 }
 

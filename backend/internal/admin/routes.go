@@ -96,4 +96,10 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, authLimit Middleware, requi
 	// detections:rerun (write-side perm). Method dispatch inside
 	// the handler — start-run perm checked there.
 	mux.Handle("/admin/v1/evals/", requireAdmin(RequirePermission(PermTracesRead)(http.HandlerFunc(h.EvalsRouter))))
+
+	// Prompt templates (P3-01 / mootd-admin#24). Read =
+	// prompts:read; create + promote require prompts:write
+	// (gated inline since the dispatcher serves both).
+	mux.Handle("/admin/v1/prompts", requireAdmin(RequirePermission(PermPromptsRead)(http.HandlerFunc(h.PromptTemplatesRouter))))
+	mux.Handle("/admin/v1/prompts/", requireAdmin(RequirePermission(PermPromptsRead)(http.HandlerFunc(h.PromptTemplatesRouter))))
 }

@@ -165,6 +165,30 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 		a.Logger.Printf("admin: weekly report cron armed (SMTP %s → %s)", smtpCfg.Host, smtpCfg.ToAddr)
 	}
 
+	// Prompt templates (P3-01 / mootd-admin#24). Pulls the
+	// constant parts of the outfit prompt out of Go strings and
+	// into a Mongo collection. Best-effort wiring — when init or
+	// seeding fails the system falls back to the hardcoded
+	// constants. SetPromptTemplateProvider must run before any
+	// outfit-gen call; the buildSystemPrompt path checks the
+	// global at request time so late-binding here is safe.
+	if templatesRepo, err := admin.NewPromptTemplatesMongoRepository(context.Background(), a.MongoClient, a.MongoDB); err == nil {
+		fallbacks := map[string]string{
+			"outfit_system_base": outfit.DefaultSystemBaseTemplate(),
+			"outfit_safety":      outfit.DefaultSafetyTemplate(),
+		}
+		if err := admin.SeedPromptTemplates(context.Background(), templatesRepo, fallbacks, a.Logger); err != nil {
+			a.Logger.Printf("admin: prompt template seed failed: %v (falling back to hardcoded constants)", err)
+		} else {
+			cache := admin.NewCachedPromptTemplates(templatesRepo, fallbacks, a.Logger)
+			outfit.SetPromptTemplateProvider(newPromptTemplateAdapter(cache))
+			adminHandler.WithPromptTemplates(templatesRepo, cache)
+			a.Logger.Print("admin: prompt templates wired (outfit_system_base + outfit_safety seeded)")
+		}
+	} else {
+		a.Logger.Printf("admin: prompt_templates repo init failed: %v (continuing with hardcoded constants)", err)
+	}
+
 	// Session replay (P5-05 / mootd-admin#38). Best-effort:
 	// init failure (e.g. TTL index ensure failed) just means the
 	// FE silently no-ops on /events and the read endpoints

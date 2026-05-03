@@ -1088,6 +1088,76 @@ components:
           items:
             $ref: "#/components/schemas/SessionDetailEvent"
 
+    PromptTemplate:
+      description: |
+        One stored version of one named template (P3-01 /
+        mootd-admin#24). One row per (name, version) pair.
+      type: object
+      required: [id, name, version, body, isProduction, createdAt]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        version:
+          type: integer
+        body:
+          type: string
+          description: Free-form template text. {{varName}} placeholders are substituted at render time.
+        variables:
+          type: array
+          items: { type: string }
+          description: |
+            Detected {{varName}} placeholders in the body, in
+            first-appearance order. Stored alongside the body
+            so the FE can highlight them without re-parsing.
+        isProduction:
+          type: boolean
+        createdBy:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        notes:
+          type: string
+
+    PromptNamesList:
+      type: object
+      required: [names]
+      properties:
+        names:
+          type: array
+          items: { type: string }
+
+    PromptVersionsList:
+      type: object
+      required: [versions]
+      properties:
+        versions:
+          type: array
+          items:
+            $ref: "#/components/schemas/PromptTemplate"
+
+    PromptVersionCreate:
+      description: |
+        Body for POST /admin/v1/prompts/{name}. notes is required
+        as the audit-log rationale.
+      type: object
+      required: [body, notes]
+      properties:
+        body:
+          type: string
+          minLength: 1
+        notes:
+          type: string
+          minLength: 1
+          maxLength: 500
+
+    PromptPromoteRequest:
+      type: object
+      properties:
+        notes:
+          type: string
+          maxLength: 500
+
     PIIRevealRequest:
       description: |
         Body for POST /admin/v1/audit/pii-reveal (P5-04).
@@ -1635,6 +1705,164 @@ components:
           type: string
           format: date-time
           description: When the binary was compiled (UTC).
+
+    # === singleItemDetection v1 ====================================
+    # Schemas covering the singleItemDetection orchestrator's
+    # ClothingItem extension. Source of truth for the field shapes is
+    # the Go type in github.com/spodolaks/singleItemDetection
+    # (internal/domain.ClothingItem) and the JSON schema for the
+    # structured description (schema/garment_description.schema.json).
+    # See types/clothing-item-v1.md for the cross-repo narrative.
+
+    SingleItemDetectionItem:
+      description: |
+        Full v1 ClothingItem produced by singleItemDetection's
+        Phase1Pipeline. Superset of UserWardrobeItem — the admin HITL
+        queue page (mootd-admin#34) renders this shape; the wardrobe
+        list page sticks with the slim UserWardrobeItem to keep the
+        list response tight.
+
+        SchemaVersion is bumped per docs/adr-001-schema-versioning.md
+        in the singleItemDetection repo. Consumers should read the
+        version field and migrate forward as needed; the orchestrator
+        always writes the current version.
+      type: object
+      required:
+        - id
+        - category
+        - imageUrl
+        - schemaVersion
+        - hitlRequired
+        - createdAt
+      properties:
+        id:
+          type: string
+        category:
+          type: string
+          description: Closed enum from schema/enums.json (top, bottom, outerwear, …).
+        label:
+          type: string
+        imageUrl:
+          type: string
+          description: Source image URL (typically a GridFS gridfs:// or signed link).
+        pngImageUrl:
+          type: string
+          description: Background-removed PNG (the ghost-mannequin generation when present).
+        schemaVersion:
+          type: string
+          description: Semver string. Currently "1.0.0".
+          example: "1.0.0"
+        source:
+          $ref: "#/components/schemas/SingleItemDetectionSource"
+        structuredDescription:
+          type: object
+          additionalProperties: true
+          description: |
+            Full GarmentDescription per
+            schema/garment_description.schema.json. Inlined as a free
+            object here because the closed-enum vocabulary is large and
+            evolves independently of the OpenAPI spec — consumers
+            validate against the JSON schema directly.
+        maskUrl:
+          type: string
+          description: Binary segmentation mask (PNG).
+        alphaUrl:
+          type: string
+          description: Soft alpha matte (PNG, 8-bit).
+        generationImageUrl:
+          type: string
+          description: Ghost-mannequin / catalogue render PNG.
+        confidenceOverall:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+        confidencePerAttribute:
+          type: object
+          additionalProperties:
+            type: number
+            format: double
+            minimum: 0
+            maximum: 1
+          description: Per-attribute confidence (key = dotted path into structuredDescription).
+        hitlRequired:
+          type: boolean
+          description: True when the item routed to the human review queue.
+        hitlReason:
+          $ref: "#/components/schemas/SingleItemDetectionHitlReason"
+        pipelineMetadata:
+          $ref: "#/components/schemas/SingleItemDetectionPipelineMetadata"
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    SingleItemDetectionSource:
+      type: object
+      required: [imageUrl, view, isCropped]
+      properties:
+        imageUrl:
+          type: string
+        view:
+          type: string
+          description: Closed enum from schema/enums.json (front, back, side, detail, lay_flat).
+          example: front
+        isCropped:
+          type: boolean
+
+    SingleItemDetectionHitlReason:
+      type: string
+      description: |
+        Reason the orchestrator flagged this item for human review.
+        Closed enum — additions land in lockstep with the
+        Phase1Pipeline's hitlReason switch.
+      enum:
+        - mask_too_small
+        - mask_too_large
+        - partial_framing
+        - seg_inconsistent
+        - multi_item
+        - fashionsiglip_low
+        - cost_breaker
+        - stage2_cost_capped
+        - mock_in_premium
+        - gate_fail_g1
+        - gate_fail_g3
+        - gate_fail_g6
+
+    SingleItemDetectionPipelineMetadata:
+      type: object
+      description: Per-item provenance the orchestrator stamps on every completed item.
+      required: [totalCostUsd, totalLatencyMs, retryCount]
+      properties:
+        detectorModel:
+          type: string
+          example: "grounding-dino+sam-3"
+        describerModels:
+          type: array
+          items:
+            type: string
+          description: One entry per ensemble member (claude-opus-4-7, gpt-5, gemini-2.5-pro, …).
+        generatorModel:
+          type: string
+          example: "photoroom"
+        promptVersion:
+          type: string
+          example: "v1.0.0"
+        totalCostUsd:
+          type: number
+          format: double
+          minimum: 0
+        totalLatencyMs:
+          type: integer
+          format: int64
+          minimum: 0
+        retryCount:
+          type: integer
+          minimum: 0
+          description: Sum of retries across stages 1, 2, 3.
 
 paths:
   /admin/v1/auth/login:
@@ -2706,6 +2934,160 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "404":
           description: Session not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /admin/v1/prompts:
+    get:
+      operationId: adminListPromptNames
+      summary: |
+        List the names of all configured prompt templates
+        (P3-01 / mootd-admin#24). Permission: prompts:read.
+      tags: [prompts]
+      responses:
+        "200":
+          description: Names list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PromptNamesList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /admin/v1/prompts/{name}:
+    get:
+      operationId: adminListPromptVersions
+      summary: |
+        List every version of a named template, newest first.
+        Permission: prompts:read.
+      tags: [prompts]
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Versions list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PromptVersionsList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      operationId: adminCreatePromptVersion
+      summary: |
+        Create a new version of a named template. Auto-numbered
+        (max(existing) + 1); does NOT auto-promote.
+        Permission: prompts:write.
+      tags: [prompts]
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PromptVersionCreate"
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PromptTemplate"
+        "400":
+          description: Bad body.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Missing prompts:write.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /admin/v1/prompts/{name}/{version}:
+    get:
+      operationId: adminGetPromptVersion
+      summary: One specific version. Permission prompts:read.
+      tags: [prompts]
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema: { type: string }
+        - name: version
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Template.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PromptTemplate"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /admin/v1/prompts/{name}/{version}/promote:
+    post:
+      operationId: adminPromotePromptVersion
+      summary: |
+        Promote a version to production. Atomic: sets
+        isProduction=true on this row + false on every other
+        version of the same name. Invalidates the in-process
+        cache. Permission: prompts:write.
+      tags: [prompts]
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema: { type: string }
+        - name: version
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PromptPromoteRequest"
+      responses:
+        "200":
+          description: New production version.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PromptTemplate"
+        "400":
+          description: Version not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Missing prompts:write.
           content:
             application/json:
               schema:
