@@ -246,7 +246,10 @@ export class ApiWardrobeRepository implements IWardrobeRepository {
     return results;
   }
 
-  async submitOutfitGeneration(weather?: { temperature: number; condition: string; unit: string }): Promise<string> {
+  async submitOutfitGeneration(
+    weather?: { temperature: number; condition: string; unit: string },
+    idempotencyKey?: string,
+  ): Promise<string> {
     const params = new URLSearchParams();
     if (weather) {
       params.set('temperature', String(Math.round(weather.temperature)));
@@ -256,7 +259,14 @@ export class ApiWardrobeRepository implements IWardrobeRepository {
     const qs = params.toString();
     const url = `/v1/outfits/generate${qs ? `?${qs}` : ''}`;
     console.log(`[Wardrobe] → POST ${url}`);
-    const response = await apiClient.post<{ jobId: string }>(url, {});
+    // mootd#42 — Idempotency-Key dedupes double-taps + network
+    // retries. Backend looks the key up in Redis with a 60s
+    // TTL; a duplicate inside the window returns the original
+    // jobID instead of starting a second (paid) generation.
+    const init: RequestInit = idempotencyKey
+      ? { headers: { 'Idempotency-Key': idempotencyKey } }
+      : {};
+    const response = await apiClient.post<{ jobId: string }>(url, {}, init);
     console.log(`[Wardrobe] ✓ Job submitted: ${response.jobId}`);
     return response.jobId;
   }

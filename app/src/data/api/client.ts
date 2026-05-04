@@ -8,12 +8,22 @@ const DEFAULT_TIMEOUT_MS = 10_000; // 10 seconds
 export class ApiError extends Error {
   status: number;
   details: unknown;
+  /**
+   * Server-issued request ID, captured from the X-Request-ID
+   * response header (mootd#38). Surfaces in toasts + Sentry
+   * events for cheap log correlation when a customer reports
+   * "the app crashed at 14:23 UTC". Empty when the response
+   * predates the middleware or the request never reached the
+   * server (network failure, timeout).
+   */
+  requestId: string;
 
-  constructor(message: string, status: number, details: unknown = null) {
+  constructor(message: string, status: number, details: unknown = null, requestId = '') {
     super(message);
     this.name = 'ApiError';
     this.status = status;
     this.details = details;
+    this.requestId = requestId;
   }
 }
 
@@ -116,32 +126,86 @@ const attemptRefresh = async (): Promise<boolean> => {
   return refreshPromise;
 };
 
-const request = async <T>(endpoint: string, init: RequestInit = {}, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<T> => {
+/**
+ * One attempt against the wire. Used by `request` so we can
+ * compose the 401-refresh and the safe-GET retry (mootd#45)
+ * around the same primitive.
+ */
+const fetchOnce = async (
+  endpoint: string,
+  init: RequestInit,
+  timeoutMs: number,
+): Promise<{ response: Response; body: unknown }> => {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-
-  let response: Response;
   try {
-    response = await fetch(buildURL(endpoint), {
+    const response = await fetch(buildURL(endpoint), {
       ...init,
       signal: init.signal ?? controller.signal,
       headers: buildHeaders(init.headers),
     });
-  } catch (err) {
-    if (err instanceof Error && err.name === 'AbortError') {
-      throw new ApiError(`Request timed out after ${timeoutMs}ms`, 408);
-    }
-    throw err;
+    const body = await parseResponseBody(response);
+    return { response, body };
   } finally {
     clearTimeout(timeoutId);
   }
+};
 
-  const body = await parseResponseBody(response);
+const request = async <T>(endpoint: string, init: RequestInit = {}, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<T> => {
+  let response: Response;
+  let body: unknown;
+  try {
+    ({ response, body } = await fetchOnce(endpoint, init, timeoutMs));
+  } catch (err) {
+    // mootd#45 — retry safe GETs once on a network/timeout
+    // error. Idempotent by definition; the cost of one extra
+    // hop is well worth surviving a flaky cell handoff.
+    if (
+      (init.method ?? 'GET').toUpperCase() === 'GET' &&
+      !init.signal && // caller-cancelled: don't second-guess
+      err instanceof Error
+    ) {
+      try {
+        ({ response, body } = await fetchOnce(endpoint, init, timeoutMs));
+      } catch (err2) {
+        if (err2 instanceof Error && err2.name === 'AbortError') {
+          throw new ApiError(`Request timed out after ${timeoutMs}ms`, 408);
+        }
+        throw err2;
+      }
+    } else {
+      if (err instanceof Error && err.name === 'AbortError') {
+        throw new ApiError(`Request timed out after ${timeoutMs}ms`, 408);
+      }
+      throw err;
+    }
+  }
+
+  if (!response.ok) {
+    // mootd#45 — retry safe GETs once on a 5xx. Backend
+    // restarts, brief pool exhaustion, transient upstream
+    // failures all look like 5xx to us; retrying once
+    // typically clears them.
+    if (
+      response.status >= 500 &&
+      response.status < 600 &&
+      (init.method ?? 'GET').toUpperCase() === 'GET' &&
+      !init.signal
+    ) {
+      try {
+        ({ response, body } = await fetchOnce(endpoint, init, timeoutMs));
+      } catch {
+        // Fall through to error handling below.
+      }
+    }
+  }
+
+  const requestId = response.headers.get('X-Request-ID') ?? '';
 
   if (!response.ok) {
     // User-friendly message for rate limiting
     if (response.status === 429) {
-      throw new ApiError('You\'re making too many requests. Please wait a moment and try again.', 429, body);
+      throw new ApiError('You\'re making too many requests. Please wait a moment and try again.', 429, body, requestId);
     }
 
     // Attempt token refresh on 401 before throwing
@@ -149,17 +213,16 @@ const request = async <T>(endpoint: string, init: RequestInit = {}, timeoutMs = 
       const refreshed = await attemptRefresh();
       if (refreshed) {
         // Retry the original request with the new token
-        const retryResponse = await fetch(buildURL(endpoint), {
-          ...init,
-          headers: buildHeaders(init.headers),
-        });
-        const retryBody = await parseResponseBody(retryResponse);
-        if (retryResponse.ok) return retryBody as T;
+        const retry = await fetchOnce(endpoint, init, timeoutMs);
+        if (retry.response.ok) return retry.body as T;
         // If retry also fails, fall through to error handling
+        response = retry.response;
+        body = retry.body;
+      } else {
+        // Refresh failed — clear auth and throw
+        const { useAuthStore } = await import('@/src/store/authStore');
+        void useAuthStore.getState().signOut();
       }
-      // Refresh failed — clear auth and throw
-      const { useAuthStore } = await import('@/src/store/authStore');
-      void useAuthStore.getState().signOut();
     }
 
     const fallbackMessage = `Request failed with status ${response.status}`;
@@ -171,7 +234,7 @@ const request = async <T>(endpoint: string, init: RequestInit = {}, timeoutMs = 
         ? ((body as Record<string, unknown>).error as string)
         : fallbackMessage;
 
-    throw new ApiError(apiMessage, response.status, body);
+    throw new ApiError(apiMessage, response.status, body, requestId);
   }
 
   return body as T;

@@ -146,6 +146,55 @@ func (s *JobStore) Save(ctx context.Context, job *Job) error {
 	return nil
 }
 
+// idempotencyKeyTTL is how long an Idempotency-Key → jobID
+// mapping survives in Redis (mootd#42). 60 seconds covers the
+// "user double-tapped + RN client retried on flaky network"
+// window. Generation usually completes in 5–30s, so by the
+// time the TTL elapses the user has either seen the job
+// resolve or moved on.
+const idempotencyKeyTTL = 60 * time.Second
+
+// idempotencyPrefix namespaces the Redis keys so a stray flush
+// of `outfit:idem:*` doesn't collide with `outfit:job:*`.
+const idempotencyPrefix = "outfit:idem:"
+
+// LookupIdempotency returns the jobID a previous request bound
+// to this (userID, key) pair, if any. Empty string + nil error
+// when no mapping exists. Errors only on infrastructure failure
+// — a Redis miss is treated as "no mapping, proceed".
+func (s *JobStore) LookupIdempotency(ctx context.Context, userID, key string) (string, error) {
+	if s.redis == nil || key == "" || userID == "" {
+		return "", nil
+	}
+	jobID, err := s.redis.Get(ctx, idempotencyKey(userID, key)).Result()
+	if err == nil {
+		return jobID, nil
+	}
+	if errors.Is(err, redis.Nil) {
+		return "", nil
+	}
+	return "", err
+}
+
+// SaveIdempotency binds (userID, key) → jobID for the
+// idempotencyKeyTTL window. Caller-side semantics: a second
+// SubmitGenerate with the same key inside the window returns
+// the same jobID instead of starting a new job.
+//
+// Best-effort: failures log inside the caller. Returning an
+// error here lets the caller decide whether to fail the request
+// or proceed without idempotency.
+func (s *JobStore) SaveIdempotency(ctx context.Context, userID, key, jobID string) error {
+	if s.redis == nil || key == "" || userID == "" {
+		return nil
+	}
+	return s.redis.Set(ctx, idempotencyKey(userID, key), jobID, idempotencyKeyTTL).Err()
+}
+
+func idempotencyKey(userID, key string) string {
+	return idempotencyPrefix + userID + ":" + key
+}
+
 // Get returns the job. Redis-first when wired; Mongo on miss with
 // repopulation back into Redis. Both miss → Mongo's typed
 // not-found.

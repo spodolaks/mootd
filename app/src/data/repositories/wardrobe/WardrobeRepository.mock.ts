@@ -97,7 +97,10 @@ export class MockWardrobeRepository implements IWardrobeRepository {
     };
   }
 
-  async submitOutfitGeneration(_weather?: { temperature: number; condition: string; unit: string }): Promise<string> {
+  async submitOutfitGeneration(
+    _weather?: { temperature: number; condition: string; unit: string },
+    _idempotencyKey?: string,
+  ): Promise<string> {
     await this.delay(500);
     return 'mock_job_' + Date.now();
   }

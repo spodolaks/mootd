@@ -194,13 +194,18 @@ export const TraitSelectionScreen: React.FC<TraitSelectionScreenProps> = ({
             onPress={handleBack}
             style={styles.backButton}
           />
-          {/* TODO: Re-enable validation: disabled={!allTraitsFilled} */}
+          {/* mootd#54 — gate Continue until every trait is
+              picked. The detection backend tolerates partials,
+              but leaving the screen with empty fields gives the
+              user nothing to verify the model later, so we now
+              require completion. allTraitsFilled is the same
+              memo used to dim the button below. */}
           <Button
             label={isLast ? 'Done' : 'Next'}
             variant="primary"
             size="lg"
             onPress={handleNext}
-            disabled={false}
+            disabled={!allTraitsFilled}
             style={styles.nextButton}
           />
         </View>

@@ -7,6 +7,7 @@ import (
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 // AuditEntry is one row in the admin_audit collection. Append-only —
@@ -137,6 +138,17 @@ func (r *MongoRepository) ListAudit(ctx context.Context, q AuditQuery) ([]AuditE
 	return entries, nextCursor, nil
 }
 
+// auditRetentionSeconds is the TTL applied to admin_audit rows
+// (mootd#37). 18 months balances "long enough for compliance
+// investigations" against unbounded collection growth. Documented
+// in docs/SECURITY.md alongside the secret-rotation runbook so a
+// future maintainer can see the rationale before extending it.
+//
+// Bumping this is a one-line change here + a doc update — the
+// TTL index drops the new SetExpireAfterSeconds value into the
+// next monitor pass; existing rows survive until they age out.
+const auditRetentionSeconds = 60 * 60 * 24 * 548 // 18 months
+
 // ensureAuditIndexes is called from ensureIndexes. Kept separate so
 // the index list reads naturally per-collection.
 func (r *MongoRepository) ensureAuditIndexes(ctx context.Context) error {
@@ -152,6 +164,14 @@ func (r *MongoRepository) ensureAuditIndexes(ctx context.Context) error {
 		{
 			// Filter by action across all admins.
 			Keys: bson.D{{Key: "action", Value: 1}, {Key: "at", Value: -1}},
+		},
+		{
+			// 18-month TTL (mootd#37). Mongo prunes rows whose
+			// `at` is older than auditRetentionSeconds.
+			Keys: bson.D{{Key: "at", Value: 1}},
+			Options: options.Index().
+				SetName("admin_audit_ttl_18mo").
+				SetExpireAfterSeconds(auditRetentionSeconds),
 		},
 	})
 	return err

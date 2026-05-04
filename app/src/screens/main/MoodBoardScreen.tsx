@@ -116,11 +116,20 @@ export const MoodBoardScreen: React.FC = () => {
         ? { temperature: weather.temperature, condition: weather.condition, unit: weather.unit }
         : undefined;
 
+      // mootd#42 — mint one Idempotency-Key per Generate press
+      // and reuse it across this attempt's network retries. The
+      // key is short-lived (backend TTL = 60s) so re-using a
+      // press's key won't collide with a future, intentional
+      // re-generation. UUID-grade uniqueness isn't required —
+      // userId + ts + random bits is enough for the dedupe
+      // window.
+      const idempotencyKey = `gen-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+
       let outfits: Outfit[];
       let jobId: string | undefined;
       try {
         // Submit async job
-        jobId = await wardrobeRepository.submitOutfitGeneration(weatherParams);
+        jobId = await wardrobeRepository.submitOutfitGeneration(weatherParams, idempotencyKey);
 
         // Poll every 2 seconds until complete
         let result: { status: string; outfits?: Outfit[]; error?: string };

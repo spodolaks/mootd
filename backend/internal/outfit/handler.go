@@ -94,6 +94,15 @@ func (h *Handler) Generate(w http.ResponseWriter, r *http.Request) {
 
 // SubmitGenerate handles POST /v1/outfits/generate — creates an async generation
 // job and returns 202 with the job ID. The actual generation runs in a goroutine.
+//
+// Idempotency (mootd#42): when the caller supplies an
+// `Idempotency-Key` header, a (userId, key) → jobId mapping is
+// stored in Redis with a 60s TTL. A second submit with the same
+// key inside the window returns the original jobID and does NOT
+// start a new job. The RN client is expected to mint a UUID
+// per Generate-button press and retain it across retries — that
+// way a fat-fingered double-tap or a network retry don't pay
+// twice for the same generation.
 func (h *Handler) SubmitGenerate(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -111,6 +120,26 @@ func (h *Handler) SubmitGenerate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Idempotency check — capped length so a malicious client
+	// can't poison Redis keys with megabyte values. UUIDs are
+	// 36 chars; 128 leaves headroom for any reasonable scheme
+	// without inviting abuse.
+	idemKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	if len(idemKey) > 128 {
+		response.WriteJSONErr(w, http.StatusBadRequest, "Idempotency-Key must be ≤ 128 chars", nil)
+		return
+	}
+	if idemKey != "" {
+		if existing, err := h.jobStore.LookupIdempotency(r.Context(), userID, idemKey); err != nil {
+			h.logger.Printf("outfit: idempotency lookup for %s/%s: %v (continuing without)", userID, idemKey, err)
+		} else if existing != "" {
+			// Replay the prior response. 202 again — the FE
+			// poll loop is fine receiving the same jobID.
+			response.WriteJSON(w, http.StatusAccepted, map[string]string{"jobId": existing})
+			return
+		}
+	}
+
 	weather := parseWeatherParams(r)
 
 	jobID := fmt.Sprintf("%s-%d-%d", userID[:minLen(8, len(userID))], time.Now().UnixMilli(), rand.Intn(10000))
@@ -124,6 +153,17 @@ func (h *Handler) SubmitGenerate(w http.ResponseWriter, r *http.Request) {
 		h.logger.Printf("outfit: failed to save job %s: %v", jobID, err)
 		response.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to create job"})
 		return
+	}
+
+	// Bind the idempotency key to this jobID before launching
+	// the goroutine — a retry that lands while we're still in
+	// this handler will see the mapping and replay. Failure to
+	// save the mapping logs but doesn't fail the request: the
+	// generation is durable, idempotency is best-effort safety.
+	if idemKey != "" {
+		if err := h.jobStore.SaveIdempotency(r.Context(), userID, idemKey, jobID); err != nil {
+			h.logger.Printf("outfit: idempotency save for %s/%s → %s: %v (continuing)", userID, idemKey, jobID, err)
+		}
 	}
 
 	// Launch async generation in a goroutine.

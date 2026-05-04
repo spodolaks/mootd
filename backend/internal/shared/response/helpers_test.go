@@ -109,3 +109,44 @@ func TestDecodeJSONBodyWithLimit_RejectsOverCap(t *testing.T) {
 		t.Error("expected error for body exceeding custom cap, got nil")
 	}
 }
+
+func TestWriteJSONErr_IncludesRequestID(t *testing.T) {
+	rec := httptest.NewRecorder()
+	rec.Header().Set("X-Request-ID", "req_abc123")
+	WriteJSONErr(rec, http.StatusBadRequest, "bad input", nil)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+	got := rec.Body.String()
+	// Object key order isn't guaranteed; check for both fields.
+	if !strings.Contains(got, `"error":"bad input"`) {
+		t.Errorf("body missing error field: %q", got)
+	}
+	if !strings.Contains(got, `"requestId":"req_abc123"`) {
+		t.Errorf("body missing requestId: %q", got)
+	}
+}
+
+func TestWriteJSONErr_NoRequestIDOmitsField(t *testing.T) {
+	rec := httptest.NewRecorder()
+	WriteJSONErr(rec, http.StatusInternalServerError, "boom", nil)
+	got := rec.Body.String()
+	if strings.Contains(got, "requestId") {
+		t.Errorf("expected no requestId when header unset, got %q", got)
+	}
+}
+
+func TestWriteJSONErr_MergesExtraFields(t *testing.T) {
+	rec := httptest.NewRecorder()
+	rec.Header().Set("X-Request-ID", "req_xyz")
+	WriteJSONErr(rec, http.StatusForbidden, "permission denied", map[string]any{
+		"missingPermission": "users:purge",
+	})
+	got := rec.Body.String()
+	if !strings.Contains(got, `"missingPermission":"users:purge"`) {
+		t.Errorf("body missing extra field: %q", got)
+	}
+	if !strings.Contains(got, `"requestId":"req_xyz"`) {
+		t.Errorf("body missing requestId: %q", got)
+	}
+}

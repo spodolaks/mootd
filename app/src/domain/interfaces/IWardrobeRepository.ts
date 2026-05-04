@@ -61,8 +61,17 @@ export interface IWardrobeRepository {
 
   /**
    * Submit async outfit generation job. Returns a job ID.
+   *
+   * `idempotencyKey` (optional) lets the caller dedupe a
+   * Generate-button double-tap or a network retry. Mint a UUID
+   * once per Generate press and pass it on every retry — the
+   * backend (mootd#42) returns the original jobID inside a 60s
+   * window instead of paying for a second LLM call.
    */
-  submitOutfitGeneration(weather?: { temperature: number; condition: string; unit: string }): Promise<string>;
+  submitOutfitGeneration(
+    weather?: { temperature: number; condition: string; unit: string },
+    idempotencyKey?: string,
+  ): Promise<string>;
 
   /**
    * Poll an outfit generation job. Returns status + outfits when complete.

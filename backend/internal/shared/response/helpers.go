@@ -23,6 +23,36 @@ func WriteJSON(w http.ResponseWriter, status int, payload any) {
 	}
 }
 
+// WriteJSONErr writes an error response with the canonical
+// {error, requestId} shape (mootd#38). The requestId echoes the
+// X-Request-ID response header so a customer-supplied "the app
+// crashed at 14:23" report joins instantly to the matching log
+// line.
+//
+// Prefer this over `WriteJSON(w, status, map[string]string{
+// "error": ...})` for new code. Existing call sites can stay on
+// WriteJSON until touched — every response also carries the
+// X-Request-ID header (set by the RequestID middleware) so
+// correlation works either way.
+//
+// We read the request ID off the response writer's headers
+// (set unconditionally by the RequestID middleware earlier in
+// the chain) rather than the request context, which would
+// create an import cycle with shared/middleware.
+//
+// `extra` lets callers attach error-specific fields (e.g.
+// missingPermission, requireMfa). nil is fine.
+func WriteJSONErr(w http.ResponseWriter, status int, message string, extra map[string]any) {
+	body := map[string]any{"error": message}
+	if reqID := w.Header().Get("X-Request-ID"); reqID != "" {
+		body["requestId"] = reqID
+	}
+	for k, v := range extra {
+		body[k] = v
+	}
+	WriteJSON(w, status, body)
+}
+
 // DefaultMaxBodyBytes is the ceiling applied by DecodeJSONBody. Sized
 // deliberately small — most endpoints accept a handful of fields and don't
 // need more than this to do their job. Endpoints that legitimately carry
