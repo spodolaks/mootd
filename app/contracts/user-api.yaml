@@ -1,0 +1,1626 @@
+openapi: 3.1.0
+info:
+  title: Mootd User API
+  version: 0.2.0-wip
+  description: |
+    Public-facing API consumed by the Mootd React Native app
+    (and any future first-party clients).
+
+    Backfilled from the existing hand-coded backend at
+    [mootd/backend](https://github.com/spodolaks/mootd) per
+    mootd-admin#41. Behaviour preservation was the priority —
+    no shape was changed during the backfill. Drift is caught
+    in CI: `make gen-user-check` (backend) and an equivalent
+    target on the RN app.
+
+    This spec is the source of truth for:
+    - request/response shapes
+    - HTTP status codes
+    - authentication headers
+
+    When changing an endpoint's shape:
+      1. Edit this file, push to mootd-contracts.
+      2. Vendor into `backend/contracts/user-api.yaml` and
+         `app/contracts/user-api.yaml`.
+      3. Regenerate types in each consumer.
+      4. Update the matching hand-written types alongside.
+
+servers:
+  - url: http://127.0.0.1:8089
+    description: Local development (Docker compose).
+  - url: https://api.spodolaks.id.lv
+    description: Production.
+
+# Default: every endpoint requires the JWT bearer. Auth /
+# health / surfaces explicitly opt-out via `security: []`.
+security:
+  - bearerAuth: []
+
+tags:
+  - name: auth
+    description: Sign-in, refresh, sign-out.
+  - name: user
+    description: Authenticated user's own profile.
+  - name: privacy
+    description: GDPR-style data export + erasure (mootd-admin#23).
+  - name: wardrobe
+    description: Per-user clothing items and clothing-detection jobs.
+  - name: outfits
+    description: Outfit generation (sync + async) and feedback.
+  - name: moodboards
+    description: Per-user saved outfit cards.
+  - name: events
+    description: Analytics event ingest (mootd-admin#19).
+  - name: brands
+    description: Global brand dictionary used for autocomplete.
+  - name: generic
+    description: Shared AI-generated wardrobe items (filler items).
+  - name: surfaces
+    description: Panel + background textures rendered behind moodboards.
+  - name: health
+    description: Liveness + readiness + RN-app version sentinel.
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        15-minute access token issued by `POST /v1/auth/google`
+        or `/v1/auth/mock-login`. Refresh via `POST
+        /v1/auth/refresh` when expired — the RN app's apiClient
+        does this transparently on 401.
+
+  responses:
+    Unauthorized:
+      description: Missing or invalid JWT, or refresh failed.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    BadRequest:
+      description: Malformed body, missing field, or validation failure.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    NotFound:
+      description: Entity not found or not owned by caller.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    RateLimited:
+      description: Per-user or per-IP rate limit hit.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+  schemas:
+    # ──────────────────────────────────────────────────────────
+    # Cross-cutting error shape (mootd#41 codes).
+    # ──────────────────────────────────────────────────────────
+    ErrorResponse:
+      description: |
+        Canonical error body. `error` is human-readable; `code`
+        is the stable machine-readable identifier (mootd#41) —
+        switch on `code` for retry / branch decisions, never on
+        the message. `requestId` echoes the X-Request-ID
+        response header for log correlation.
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          example: "invalid email or password"
+        code:
+          type: string
+          enum:
+            - INVALID_TOKEN
+            - MISSING_FIELD
+            - INVALID_INPUT
+            - QUOTA_EXCEEDED
+            - RATE_LIMITED
+            - UPSTREAM_TIMEOUT
+            - UPSTREAM_ERROR
+            - NOT_FOUND
+            - FORBIDDEN
+            - CONFLICT
+            - SERVICE_UNAVAILABLE
+            - INTERNAL
+        requestId:
+          type: string
+          description: Request correlation ID; echoes X-Request-ID.
+        retryAfter:
+          type: integer
+          description: When `code=RATE_LIMITED` or `QUOTA_EXCEEDED`, seconds until retry is allowed.
+
+    # ──────────────────────────────────────────────────────────
+    # Auth (POST /v1/auth/*).
+    # ──────────────────────────────────────────────────────────
+    AuthUser:
+      description: Authenticated user surfaced in every auth response.
+      type: object
+      required: [id, email, name]
+      properties:
+        id: { type: string }
+        email: { type: string, format: email }
+        name: { type: string }
+        avatarUrl: { type: string }
+
+    MockLoginRequest:
+      description: |
+        Body for POST /v1/auth/mock-login. Only valid in
+        development — registration of the route is gated on
+        ENVIRONMENT != production.
+      type: object
+      required: [provider]
+      properties:
+        provider:
+          type: string
+          enum: [google]
+
+    MockLoginResponse:
+      type: object
+      required: [accessToken, refreshToken, expiresAt, user, mode]
+      properties:
+        accessToken: { type: string }
+        refreshToken: { type: string }
+        expiresAt:
+          type: string
+          format: date-time
+        user:
+          $ref: "#/components/schemas/AuthUser"
+        mode:
+          type: string
+          enum: [mock]
+
+    GoogleAuthRequest:
+      description: |
+        Body for POST /v1/auth/google. The backend verifies
+        `accessToken` with Google directly and extracts user
+        info — client-supplied profile fields are intentionally
+        not accepted.
+      type: object
+      required: [accessToken]
+      properties:
+        accessToken:
+          type: string
+          description: Google OAuth access token from expo-auth-session.
+
+    GoogleAuthResponse:
+      type: object
+      required: [accessToken, refreshToken, expiresAt, user, mode]
+      properties:
+        accessToken: { type: string }
+        refreshToken: { type: string }
+        expiresAt:
+          type: string
+          format: date-time
+        user:
+          $ref: "#/components/schemas/AuthUser"
+        mode:
+          type: string
+          enum: [live]
+
+    RefreshRequest:
+      type: object
+      required: [refreshToken]
+      properties:
+        refreshToken: { type: string }
+
+    RefreshResponse:
+      type: object
+      required: [accessToken, refreshToken, expiresAt, user]
+      properties:
+        accessToken: { type: string }
+        refreshToken: { type: string }
+        expiresAt:
+          type: string
+          format: date-time
+        user:
+          $ref: "#/components/schemas/AuthUser"
+
+    LogoutRequest:
+      description: |
+        Body for POST /v1/auth/logout. Single-use: presenting a
+        valid refresh token revokes it server-side. Best-effort:
+        failures don't surface to the client.
+      type: object
+      required: [refreshToken]
+      properties:
+        refreshToken: { type: string }
+
+    # ──────────────────────────────────────────────────────────
+    # User (GET / PUT / DELETE /v1/user/profile).
+    # ──────────────────────────────────────────────────────────
+    UserDocument:
+      description: |
+        Authenticated user's profile. Returned from GET / PUT
+        /v1/user/profile. `archetypeProfile` is the per-style
+        affinity vector populated by the wardrobe analysis
+        pipeline.
+      type: object
+      required: [id, email, name, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        email: { type: string, format: email }
+        name: { type: string }
+        avatarUrl: { type: string }
+        googleId: { type: string }
+        archetypeProfile:
+          type: object
+          additionalProperties:
+            type: number
+            format: double
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    UpdateProfileRequest:
+      description: |
+        Body for PUT /v1/user/profile. Both fields are
+        optional; at least one must be supplied.
+      type: object
+      properties:
+        name: { type: string }
+        avatarUrl: { type: string }
+
+    # ──────────────────────────────────────────────────────────
+    # Privacy (mootd-admin#23).
+    # ──────────────────────────────────────────────────────────
+    PurgeReport:
+      description: |
+        Result of a successful self-purge. `collections` maps
+        each affected collection name to the number of
+        documents deleted; `total` is the sum.
+      type: object
+      required: [userId, purgedAt, collections, total]
+      properties:
+        userId: { type: string }
+        purgedAt:
+          type: string
+          format: date-time
+        collections:
+          type: object
+          additionalProperties:
+            type: integer
+            format: int64
+        total:
+          type: integer
+          format: int64
+
+    # ──────────────────────────────────────────────────────────
+    # Events (mootd-admin#19).
+    # ──────────────────────────────────────────────────────────
+    IngestEvent:
+      description: |
+        One event in a batch ingest. `name` MUST be a member
+        of the catalog (the backend rejects unknown names).
+      type: object
+      required: [name, sessionId]
+      properties:
+        name:
+          type: string
+          description: |
+            Catalog name. Current allowlist (18 events):
+            app_opened, screen_view, session_start,
+            session_heartbeat, session_end, photo_uploaded,
+            items_detected, item_confirmed, item_rejected,
+            generate_outfit_requested, generated_outfit,
+            viewed_outfit, rated_outfit, swapped_item,
+            saved_moodboard, viewed_calendar_date,
+            shared_moodboard, signed_up, signed_in,
+            signed_out.
+        sessionId: { type: string }
+        properties:
+          type: object
+          additionalProperties: true
+
+    IngestRequest:
+      description: |
+        Batch envelope. Body capped at 128KB by middleware;
+        events past the 500-per-request cap rejected.
+      type: object
+      required: [events]
+      properties:
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/IngestEvent"
+
+    EventValidationError:
+      type: object
+      required: [index, reason]
+      properties:
+        index:
+          type: integer
+          description: Position in the original request.events array.
+        reason: { type: string }
+
+    IngestResponse:
+      description: |
+        Echoes per-event outcome. Invalid events don't poison
+        the batch — accepted count + rejected indices/reasons
+        are returned together.
+      type: object
+      required: [accepted]
+      properties:
+        accepted:
+          type: integer
+        rejected:
+          type: array
+          items:
+            $ref: "#/components/schemas/EventValidationError"
+
+    # ──────────────────────────────────────────────────────────
+    # Wardrobe.
+    # ──────────────────────────────────────────────────────────
+    ClothingItem:
+      description: A persisted garment in the caller's wardrobe.
+      type: object
+      required: [id, userId, category, label, imageUrl, traits, createdAt]
+      properties:
+        id: { type: string }
+        userId: { type: string }
+        category: { type: string }
+        label: { type: string }
+        imageUrl: { type: string }
+        pngImageUrl:
+          type: string
+          description: Background-removed PNG; populated asynchronously by the bg-removal worker.
+        traits:
+          type: object
+          additionalProperties:
+            type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    DetectedItem:
+      description: |
+        Client-facing representation of one detected garment
+        returned immediately from POST /v1/wardrobe/detect
+        (before the user reviews + commits).
+      type: object
+      required: [id, category, label]
+      properties:
+        id: { type: string }
+        category: { type: string }
+        label: { type: string }
+        imageUrl: { type: string }
+        pngImageUrl: { type: string }
+        confidence:
+          type: number
+          format: double
+        traits:
+          type: object
+          additionalProperties:
+            type: string
+
+    DetectResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/DetectedItem"
+
+    DetectJobSubmitResponse:
+      description: |
+        Async detection job created from POST
+        /v1/wardrobe/detect-jobs. Poll the matching GET
+        /v1/wardrobe/detect-jobs/{id} for status.
+      type: object
+      required: [jobId]
+      properties:
+        jobId: { type: string }
+
+    DetectJobStatus:
+      description: |
+        Polled state of an async detection job. `status`
+        progresses pending → processing → completed | failed.
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [pending, processing, completed, failed]
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/DetectedItem"
+        error:
+          type: string
+
+    SearchProduct:
+      description: One result from the external clothing-search service.
+      type: object
+      required: [id, title, source, imageUrl]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        source: { type: string }
+        price:
+          type: string
+          description: Pre-formatted human display string ("$49.99").
+        imageUrl: { type: string }
+
+    SearchResponse:
+      type: object
+      required: [results]
+      properties:
+        results:
+          type: array
+          items:
+            $ref: "#/components/schemas/SearchProduct"
+
+    SearchRequest:
+      type: object
+      properties:
+        brand:
+          type: string
+
+    WardrobeItemListResponse:
+      description: |
+        Paginated wardrobe items, newest first. nextCursor is
+        empty when no more rows.
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ClothingItem"
+        nextCursor:
+          type: string
+
+    UpdateWardrobeItemRequest:
+      description: |
+        Body for PATCH /v1/wardrobe/items/{id}. Subset of
+        fields are mutable; at least one must be supplied.
+      type: object
+      properties:
+        category: { type: string }
+        label: { type: string }
+        traits:
+          type: object
+          additionalProperties:
+            type: string
+
+    # ──────────────────────────────────────────────────────────
+    # Outfits.
+    # ──────────────────────────────────────────────────────────
+    Weather:
+      description: |
+        Weather context attached to outfit generation +
+        moodboard saves. All fields optional.
+      type: object
+      properties:
+        temperature: { type: string }
+        condition: { type: string }
+        unit:
+          type: string
+          enum: [C, F]
+
+    Outfit:
+      description: |
+        A suggested outfit. Items reference wardrobe item IDs.
+        Surface fields (panelId/Url, backgroundId/Url) carry
+        the LLM's choice of moodboard texture.
+      type: object
+      required: [name, description, items]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        description: { type: string }
+        items:
+          type: array
+          items: { type: string }
+          description: Wardrobe item IDs referenced by this outfit.
+        rationale:
+          type: string
+          description: One-line stylist explanation tied to archetype/weather.
+        layoutRoles:
+          type: object
+          additionalProperties:
+            type: string
+            enum: [hero, support, accent]
+          description: itemID → render role.
+        visualWeights:
+          type: object
+          additionalProperties:
+            type: string
+            enum: [statement, supporting, minor]
+          description: itemID → visual weight; flags the signature piece per outfit.
+        suggestions:
+          type: array
+          items: { type: string }
+          description: Hints for complementary items not in the wardrobe.
+        archetypeScores:
+          type: object
+          additionalProperties:
+            type: number
+            format: double
+          description: Per-outfit archetype alignment.
+        smartSuggestion:
+          type: string
+          description: Archetype-driven item suggestion (small wardrobes).
+        weather:
+          $ref: "#/components/schemas/Weather"
+        palette:
+          type: array
+          items: { type: string }
+          description: Dominant colors per item as #RRGGBB, deduped (≤4).
+        panelId: { type: string }
+        backgroundId: { type: string }
+        panelUrl: { type: string }
+        backgroundUrl: { type: string }
+
+    GenerateResponse:
+      description: Synchronous generate result (deprecated; prefer async).
+      type: object
+      required: [outfits]
+      properties:
+        outfits:
+          type: array
+          items:
+            $ref: "#/components/schemas/Outfit"
+
+    OutfitJobSubmitResponse:
+      description: Created from POST /v1/outfits/generate.
+      type: object
+      required: [jobId]
+      properties:
+        jobId: { type: string }
+
+    OutfitJobStatus:
+      description: |
+        Polled state of an async outfit-generation job. Same
+        progression as detect jobs (pending → processing →
+        completed | failed).
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [pending, processing, completed, failed]
+        outfits:
+          type: array
+          items:
+            $ref: "#/components/schemas/Outfit"
+        error:
+          type: string
+
+    # ──────────────────────────────────────────────────────────
+    # Outfit feedback (training-data event log).
+    # ──────────────────────────────────────────────────────────
+    FeedbackContext:
+      description: Coarse, non-PII signals attached to a feedback event.
+      type: object
+      properties:
+        weather: { type: string }
+        dayOfWeek: { type: string }
+        hour: { type: integer }
+        archetype: { type: string }
+        occasion: { type: string }
+
+    OutfitSnapshot:
+      description: |
+        Trimmed outfit shape preserved on a feedback event so
+        training jobs don't need to cross-reference a
+        moodboard row that may later be deleted.
+      type: object
+      required: [id, items]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        items:
+          type: array
+          items: { type: string }
+        rationale: { type: string }
+        archetypeScores:
+          type: object
+          additionalProperties:
+            type: number
+            format: double
+
+    FeedbackSubmitRequest:
+      description: |
+        POST /v1/outfits/feedback body. UserID is taken from
+        the JWT — clients can't forge events for other users.
+      type: object
+      required: [action]
+      properties:
+        jobId: { type: string }
+        chosenOutfitId: { type: string }
+        action:
+          type: string
+          enum: [saved, skipped, regenerated, rated, item_swapped]
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 5
+        generatedBatch:
+          type: array
+          items:
+            $ref: "#/components/schemas/OutfitSnapshot"
+        context:
+          $ref: "#/components/schemas/FeedbackContext"
+        promptVersion: { type: string }
+        generatorVersion: { type: string }
+        swappedFrom:
+          type: string
+          description: Wardrobe item ID swapped out (action=item_swapped).
+        swappedTo:
+          type: string
+          description: Wardrobe item ID swapped in (action=item_swapped).
+
+    FeedbackSubmitResponse:
+      type: object
+      required: [id]
+      properties:
+        id: { type: string }
+
+    # ──────────────────────────────────────────────────────────
+    # Moodboards.
+    # ──────────────────────────────────────────────────────────
+    OutfitItemSnapshot:
+      description: |
+        Snapshot of a wardrobe item embedded in a saved
+        moodboard so the card stays renderable after the
+        original item is deleted/edited.
+      type: object
+      required: [id, category, label, imageUrl]
+      properties:
+        id: { type: string }
+        category: { type: string }
+        label: { type: string }
+        imageUrl: { type: string }
+        pngImageUrl: { type: string }
+
+    MoodboardOutfit:
+      description: |
+        Inlined outfit on a SavedMoodBoard. Same shape as
+        Outfit but with `snapshots` carrying resolved item
+        data so the card renders even after items are deleted.
+      allOf:
+        - $ref: "#/components/schemas/Outfit"
+        - type: object
+          properties:
+            snapshots:
+              type: array
+              items:
+                $ref: "#/components/schemas/OutfitItemSnapshot"
+
+    SavedMoodBoard:
+      type: object
+      required: [id, userId, outfit, date, createdAt]
+      properties:
+        id: { type: string }
+        userId: { type: string }
+        outfit:
+          $ref: "#/components/schemas/MoodboardOutfit"
+        date:
+          type: string
+          description: Calendar date in YYYY-MM-DD.
+        imageUrl:
+          type: string
+          description: |
+            Pre-rendered collage PNG (GridFS-backed). Populated
+            only when the client supplied `boardImage` on save.
+        createdAt:
+          type: string
+          format: date-time
+
+    SaveMoodboardRequest:
+      type: object
+      required: [outfit]
+      properties:
+        outfit:
+          $ref: "#/components/schemas/MoodboardOutfit"
+        date:
+          type: string
+          description: YYYY-MM-DD; today is used when empty.
+        generatedBatch:
+          type: array
+          items:
+            $ref: "#/components/schemas/Outfit"
+          description: |
+            Full set of outfits the user was shown. Strongly
+            recommended — without it preference pairs can't be
+            reconstructed for ranker training.
+        jobId:
+          type: string
+          description: Ties the save back to the generation job.
+        boardImage:
+          type: string
+          description: |
+            Base64-encoded collage PNG (with or without
+            data: URL prefix). Optional; when present, stored
+            in GridFS and surfaced as imageUrl.
+
+    MoodboardListResponse:
+      type: object
+      required: [moodboards]
+      properties:
+        moodboards:
+          type: array
+          items:
+            $ref: "#/components/schemas/SavedMoodBoard"
+        nextCursor:
+          type: string
+          nullable: true
+
+    # ──────────────────────────────────────────────────────────
+    # Brands + generic items + surfaces.
+    # ──────────────────────────────────────────────────────────
+    BrandsResponse:
+      type: object
+      required: [brands]
+      properties:
+        brands:
+          type: array
+          items: { type: string }
+
+    SaveBrandRequest:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+
+    GenericItem:
+      type: object
+      required: [id, category, label, imageUrl, traits, archetypeScores, primaryArchetype, createdAt]
+      properties:
+        id: { type: string }
+        category: { type: string }
+        label: { type: string }
+        description: { type: string }
+        imageUrl: { type: string }
+        pngImageUrl: { type: string }
+        traits:
+          type: object
+          additionalProperties:
+            type: string
+        archetypeScores:
+          type: object
+          additionalProperties:
+            type: number
+            format: double
+        primaryArchetype: { type: string }
+        dedupKey: { type: string }
+        usageCount: { type: integer }
+        createdAt:
+          type: string
+          format: date-time
+
+    GenericItemsList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/GenericItem"
+
+    # ──────────────────────────────────────────────────────────
+    # Health (mootd#40).
+    # ──────────────────────────────────────────────────────────
+    LivenessResponse:
+      type: object
+      required: [service, status]
+      properties:
+        service:
+          type: string
+          example: mootd-backend
+        status:
+          type: string
+          example: ok
+        time_utc:
+          type: string
+
+    ReadinessResponse:
+      type: object
+      required: [service, status]
+      properties:
+        service: { type: string }
+        status:
+          type: string
+          enum: [ready, not_ready]
+        mongo: { type: string }
+        redis:
+          type: string
+          enum: [up, down, absent]
+        reason:
+          type: string
+          description: Set when status=not_ready.
+
+    ClientHealthResponse:
+      description: |
+        RN-app version sentinel (mootd#40). The app polls on
+        foreground; when its own version is below
+        `minClientVersion`, it renders a blocking "please
+        update" sheet. `maintenance: true` shows a soft
+        banner.
+      type: object
+      required: [version, sha, minClientVersion, maintenance]
+      properties:
+        version: { type: string }
+        sha: { type: string }
+        minClientVersion: { type: string }
+        maintenance: { type: boolean }
+
+paths:
+  # ──────────────────────────────────────────────────────────
+  # Health.
+  # ──────────────────────────────────────────────────────────
+  /healthz:
+    get:
+      operationId: liveness
+      summary: Liveness probe.
+      tags: [health]
+      security: []
+      responses:
+        "200":
+          description: Process is alive.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LivenessResponse"
+
+  /readyz:
+    get:
+      operationId: readiness
+      summary: Readiness probe (Mongo + optionally-required Redis).
+      tags: [health]
+      security: []
+      responses:
+        "200":
+          description: All required dependencies reachable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadinessResponse"
+        "503":
+          description: Dependency unreachable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadinessResponse"
+
+  /v1/health:
+    get:
+      operationId: clientHealth
+      summary: |
+        Public version sentinel (mootd#40). Polled by the RN
+        app on foreground.
+      tags: [health]
+      security: []
+      responses:
+        "200":
+          description: Build identity + minimum-client gate.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClientHealthResponse"
+
+  # ──────────────────────────────────────────────────────────
+  # Auth.
+  # ──────────────────────────────────────────────────────────
+  /v1/auth/google:
+    post:
+      operationId: signInWithGoogle
+      summary: Exchange a Google OAuth access token for a mootd JWT pair.
+      tags: [auth]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GoogleAuthRequest"
+      responses:
+        "200":
+          description: Authenticated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GoogleAuthResponse"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /v1/auth/mock-login:
+    post:
+      operationId: signInWithMock
+      summary: |
+        Issue a JWT for a fixed dev user without real
+        credentials. Only registered when ENVIRONMENT !=
+        production.
+      tags: [auth]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MockLoginRequest"
+      responses:
+        "200":
+          description: Authenticated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MockLoginResponse"
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /v1/auth/refresh:
+    post:
+      operationId: refreshTokens
+      summary: |
+        Single-use refresh: presenting a valid refresh token
+        revokes it and issues a new pair.
+      tags: [auth]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefreshRequest"
+      responses:
+        "200":
+          description: New token pair.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RefreshResponse"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /v1/auth/logout:
+    post:
+      operationId: signOut
+      summary: Revoke a refresh token.
+      tags: [auth]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LogoutRequest"
+      responses:
+        "204":
+          description: Best-effort revocation. No body.
+
+  # ──────────────────────────────────────────────────────────
+  # User profile.
+  # ──────────────────────────────────────────────────────────
+  /v1/user/profile:
+    get:
+      operationId: getProfile
+      summary: Read the authenticated user's profile.
+      tags: [user]
+      responses:
+        "200":
+          description: Profile.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserDocument"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      operationId: updateProfile
+      summary: Patch name and/or avatar.
+      tags: [user]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateProfileRequest"
+      responses:
+        "200":
+          description: Updated profile.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserDocument"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      operationId: deleteAccount
+      summary: |
+        Erase the authenticated user's data via the cascade
+        (wardrobe + outfits + moodboards + feedback + user
+        record). Equivalent to /v1/privacy/self but predates
+        it; both endpoints remain wired for compatibility.
+      tags: [user]
+      responses:
+        "204":
+          description: Account deleted.
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "503":
+          description: Cascade not configured (dev mode).
+
+  # ──────────────────────────────────────────────────────────
+  # Privacy (mootd-admin#23).
+  # ──────────────────────────────────────────────────────────
+  /v1/privacy/self:
+    delete:
+      operationId: privacySelfPurge
+      summary: |
+        Self-serve GDPR purge. Wipes every per-user record
+        (wardrobe, outfits, moodboards, feedback, events,
+        traces, llm_calls, detection_runs, budget) plus the
+        user document. Idempotent: 404 on second call.
+      tags: [privacy]
+      responses:
+        "200":
+          description: Purge succeeded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PurgeReport"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/privacy/export:
+    get:
+      operationId: privacyExport
+      summary: |
+        JSON ZIP archive with every record we hold about the
+        caller.
+      tags: [privacy]
+      responses:
+        "200":
+          description: ZIP attachment.
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ──────────────────────────────────────────────────────────
+  # Events (mootd-admin#19).
+  # ──────────────────────────────────────────────────────────
+  /v1/events:
+    post:
+      operationId: ingestEvents
+      summary: |
+        Batch-ingest analytics events. Body capped at 128KB;
+        invalid events don't poison the batch.
+      tags: [events]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IngestRequest"
+      responses:
+        "202":
+          description: Batch accepted (some entries may have been rejected).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IngestResponse"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  # ──────────────────────────────────────────────────────────
+  # Wardrobe.
+  # ──────────────────────────────────────────────────────────
+  /v1/wardrobe/items:
+    get:
+      operationId: listWardrobeItems
+      summary: List the caller's wardrobe items (paginated, newest first).
+      tags: [wardrobe]
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          schema: { type: string }
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        "200":
+          description: Items.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WardrobeItemListResponse"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      operationId: createWardrobeItem
+      summary: Persist a detected item (post-trait-review commit).
+      tags: [wardrobe]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DetectedItem"
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClothingItem"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /v1/wardrobe/items/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      operationId: getWardrobeItem
+      summary: Read one wardrobe item (caller-owned only).
+      tags: [wardrobe]
+      responses:
+        "200":
+          description: Item.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClothingItem"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      operationId: updateWardrobeItem
+      summary: Patch label / category / traits.
+      tags: [wardrobe]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateWardrobeItemRequest"
+      responses:
+        "200":
+          description: Updated item.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClothingItem"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      operationId: deleteWardrobeItem
+      summary: Permanently delete one wardrobe item.
+      tags: [wardrobe]
+      responses:
+        "204":
+          description: Deleted.
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/wardrobe/items/{id}/search:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      operationId: searchSimilarProducts
+      summary: |
+        Run an external clothing-search lookup against the
+        item's photo; results are not persisted.
+      tags: [wardrobe]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SearchRequest"
+      responses:
+        "200":
+          description: Search hits.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchResponse"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/wardrobe/detect:
+    post:
+      operationId: detectFromPhoto
+      summary: |
+        Synchronous detection — accepts a photo (multipart) and
+        returns detected items inline. Prefer the async
+        /v1/wardrobe/detect-jobs flow for production traffic;
+        sync survives for dev parity.
+      tags: [wardrobe]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [photo]
+              properties:
+                photo:
+                  type: string
+                  format: binary
+      responses:
+        "200":
+          description: Detected items.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DetectResponse"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "422":
+          description: Detection upstream failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /v1/wardrobe/detect-jobs:
+    post:
+      operationId: submitDetectJob
+      summary: Submit an async detection job; returns 202 with the job ID.
+      tags: [wardrobe]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [photo]
+              properties:
+                photo:
+                  type: string
+                  format: binary
+      responses:
+        "202":
+          description: Job created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DetectJobSubmitResponse"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /v1/wardrobe/detect-jobs/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      operationId: pollDetectJob
+      summary: Poll an async detection job.
+      tags: [wardrobe]
+      responses:
+        "200":
+          description: Current job state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DetectJobStatus"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ──────────────────────────────────────────────────────────
+  # Outfits.
+  # ──────────────────────────────────────────────────────────
+  /v1/outfits:
+    get:
+      operationId: getOutfits
+      summary: |
+        Synchronous outfit generation. Deprecated for new
+        clients — use /v1/outfits/generate (async) so the
+        request doesn't tie up a server worker for the LLM
+        latency. Kept live for older builds.
+      tags: [outfits]
+      parameters:
+        - name: temperature
+          in: query
+          required: false
+          schema: { type: string }
+        - name: condition
+          in: query
+          required: false
+          schema: { type: string }
+        - name: unit
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [C, F]
+            default: C
+      responses:
+        "200":
+          description: Generated outfits.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenerateResponse"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500":
+          description: Generation failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /v1/outfits/generate:
+    post:
+      operationId: submitOutfitGeneration
+      summary: |
+        Submit an async outfit-generation job. Idempotent via
+        the optional Idempotency-Key header (mootd#42) — same
+        key inside a 60s window returns the prior jobID.
+      tags: [outfits]
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema:
+            type: string
+            maxLength: 128
+        - name: temperature
+          in: query
+          required: false
+          schema: { type: string }
+        - name: condition
+          in: query
+          required: false
+          schema: { type: string }
+        - name: unit
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [C, F]
+            default: C
+      responses:
+        "202":
+          description: Job created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OutfitJobSubmitResponse"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503":
+          description: Async generation unavailable (Redis not configured).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /v1/outfits/jobs/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      operationId: pollOutfitJob
+      summary: Poll an async outfit-generation job.
+      tags: [outfits]
+      responses:
+        "200":
+          description: Current job state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OutfitJobStatus"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/outfits/feedback:
+    post:
+      operationId: submitOutfitFeedback
+      summary: |
+        Append a feedback event for the given generation
+        batch. Append-only; never overwritten.
+      tags: [outfits]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FeedbackSubmitRequest"
+      responses:
+        "201":
+          description: Recorded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeedbackSubmitResponse"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  # ──────────────────────────────────────────────────────────
+  # Moodboards.
+  # ──────────────────────────────────────────────────────────
+  /v1/moodboards:
+    get:
+      operationId: listMoodboards
+      summary: List the caller's saved moodboards (paginated).
+      tags: [moodboards]
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          schema: { type: string }
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        "200":
+          description: Moodboards.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MoodboardListResponse"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      operationId: saveMoodboard
+      summary: Save a moodboard against a calendar date.
+      tags: [moodboards]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaveMoodboardRequest"
+      responses:
+        "201":
+          description: Saved.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SavedMoodBoard"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /v1/moodboards/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      operationId: getMoodboard
+      summary: Read one saved moodboard (caller-owned only).
+      tags: [moodboards]
+      responses:
+        "200":
+          description: Moodboard.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SavedMoodBoard"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      operationId: deleteMoodboard
+      summary: Permanently delete one saved moodboard.
+      tags: [moodboards]
+      responses:
+        "204":
+          description: Deleted.
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ──────────────────────────────────────────────────────────
+  # Brands + generic items + surfaces.
+  # ──────────────────────────────────────────────────────────
+  /v1/brands:
+    get:
+      operationId: searchBrands
+      summary: Search the global brand dictionary (autocomplete).
+      tags: [brands]
+      parameters:
+        - name: q
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        "200":
+          description: Brand matches.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BrandsResponse"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      operationId: saveBrand
+      summary: Append a brand to the global dictionary (idempotent).
+      tags: [brands]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaveBrandRequest"
+      responses:
+        "201":
+          description: Saved or already present.
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /v1/generic/items:
+    get:
+      operationId: listGenericItems
+      summary: |
+        List shared AI-generated wardrobe items used to fill
+        small wardrobes for outfit generation.
+      tags: [generic]
+      responses:
+        "200":
+          description: Generic items.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenericItemsList"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /v1/generic/trigger:
+    post:
+      operationId: triggerGenericGeneration
+      summary: |
+        Force a fresh generation pass for the caller's
+        archetype profile. Idempotent.
+      tags: [generic]
+      responses:
+        "202":
+          description: Generation enqueued.
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /v1/surfaces/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      operationId: getSurfaceImage
+      summary: Stream a surface (panel / background) image.
+      tags: [surfaces]
+      security: []
+      responses:
+        "200":
+          description: PNG bytes.
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+        "404": { $ref: "#/components/responses/NotFound" }
