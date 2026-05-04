@@ -82,9 +82,14 @@ type TracesRepository interface {
 	// Summary aggregates over the same filter — count, spend, mean
 	// + p95 latency. Pagination params on q are ignored.
 	Summary(ctx context.Context, q TracesQuery) (TracesSummary, error)
-	// IterAll streams every row matching the filter (no pagination).
-	// Used by CSV export; capped at maxRows by the caller.
+	// IterAll returns every row matching the filter (capped at
+	// maxRows). Used by tests; CSV export prefers StreamAll for
+	// flat-memory iteration (mootd#43).
 	IterAll(ctx context.Context, q TracesQuery, maxRows int) ([]LLMCallSnapshot, error)
+	// StreamAll iterates every row matching the filter, invoking
+	// fn once per row (mootd#43). Returns (emittedCount, err);
+	// emittedCount == maxRows means the result was truncated.
+	StreamAll(ctx context.Context, q TracesQuery, maxRows int, fn func(LLMCallSnapshot) error) (int, error)
 	// FindDetail returns the full llm_calls row by id, including the
 	// archival fields (systemPrompt / userMessage / responseRaw /
 	// wardrobeItemIds). Returns (nil, nil) when not found so the
@@ -238,9 +243,8 @@ func (r *TracesMongoRepository) Summary(ctx context.Context, q TracesQuery) (Tra
 }
 
 // IterAll returns every row matching the filter, capped at maxRows.
-// Used by CSV export; the cap protects the server from a no-filter
-// export blowing up memory. Caller's responsibility to communicate
-// truncation if len(result) == maxRows.
+// Used by tests + future callers that legitimately want everything
+// in memory. CSV export prefers StreamAll (mootd#43).
 func (r *TracesMongoRepository) IterAll(ctx context.Context, q TracesQuery, maxRows int) ([]LLMCallSnapshot, error) {
 	if maxRows <= 0 {
 		maxRows = 50_000
@@ -262,6 +266,60 @@ func (r *TracesMongoRepository) IterAll(ctx context.Context, q TracesQuery, maxR
 		return nil, err
 	}
 	return rows, nil
+}
+
+// StreamAll iterates every row matching the filter, calling fn once
+// per row. Memory stays flat regardless of result size — the Mongo
+// cursor batches transparently and we never materialise the full
+// slice (mootd#43). Caller's fn writes the row directly to the CSV
+// writer (or any other io.Writer-backed sink).
+//
+// Returns:
+//   - the number of rows emitted (caller emits a Truncated header
+//     when emitted == maxRows).
+//   - the first error from fn or the cursor; iteration stops on
+//     either.
+//
+// maxRows ≤ 0 falls back to 50,000 (same default as IterAll).
+func (r *TracesMongoRepository) StreamAll(
+	ctx context.Context,
+	q TracesQuery,
+	maxRows int,
+	fn func(LLMCallSnapshot) error,
+) (int, error) {
+	if maxRows <= 0 {
+		maxRows = 50_000
+	}
+	filter := buildTracesFilter(q)
+	cur, err := r.col().Find(
+		ctx, filter,
+		findOpts().
+			SetSort(bson.D{{Key: "createdAt", Value: -1}, {Key: "_id", Value: -1}}).
+			SetLimit(int64(maxRows)),
+	)
+	if err != nil {
+		return 0, err
+	}
+	defer cur.Close(ctx)
+
+	emitted := 0
+	for cur.Next(ctx) {
+		var row LLMCallSnapshot
+		if decErr := cur.Decode(&row); decErr != nil {
+			return emitted, decErr
+		}
+		if err := fn(row); err != nil {
+			return emitted, err
+		}
+		emitted++
+		if emitted >= maxRows {
+			break
+		}
+	}
+	if err := cur.Err(); err != nil {
+		return emitted, err
+	}
+	return emitted, nil
 }
 
 // FindDetail returns the full llm_calls row by id, including the

@@ -15,6 +15,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"mootd/backend/internal/shared/endpoints"
 )
 
 // Detector submits images to the clothing-detection service and returns
@@ -25,18 +27,24 @@ import (
 // observability rows for each upstream LLM call the detection service
 // reports under `stats`. nil disables the emission (test setups, dev
 // opt-out). Wired identically to the outfit service's recorder hook.
+//
+// pool (mootd#56) wraps a comma-separated DETECTION_API_BASE_URL into
+// a round-robin upstream rotation. Single-URL configs degenerate to
+// "always pick that one URL" — no behaviour change. Multi-URL configs
+// rotate per request and skip the failed URL on 5xx retry.
 type Detector struct {
-	baseURL  string
+	pool     *endpoints.Pool
 	apiKey   string
 	client   *http.Client
 	logger   *log.Logger
 	recorder LLMRecorder // optional
 }
 
-// NewDetector creates a Detector.
+// NewDetector creates a Detector. baseURL accepts a single URL or a
+// comma-separated list (mootd#56).
 func NewDetector(baseURL, apiKey string, logger *log.Logger) *Detector {
 	return &Detector{
-		baseURL: baseURL,
+		pool:    endpoints.NewPool(baseURL),
 		apiKey:  apiKey,
 		client:  &http.Client{Timeout: 3 * time.Minute},
 		logger:  logger,
@@ -449,42 +457,78 @@ func (d *Detector) callGenerate(ctx context.Context, imageData []byte, filename 
 }
 
 // postMultipart sends a multipart POST with the image to the given path.
+//
+// Failover (mootd#56): when DETECTION_API_BASE_URL is a comma-separated
+// list, the first attempt picks the next URL via round-robin. On
+// network/5xx failure, one fallback attempt against a different URL
+// fires before surfacing the error. 4xx responses (caller errors —
+// missing API key, bad image format, etc.) skip the failover since
+// they'd recur on every host.
 func (d *Detector) postMultipart(ctx context.Context, path string, imageData []byte, filename string) ([]byte, error) {
-	var buf bytes.Buffer
-	mw := multipart.NewWriter(&buf)
-
-	part, err := createFormFileWithMIME(mw, "image", filepath.Base(filename))
+	body, contentType, err := buildMultipart(imageData, filename)
 	if err != nil {
 		return nil, err
 	}
-	if _, err = io.Copy(part, bytes.NewReader(imageData)); err != nil {
-		return nil, err
-	}
-	_ = mw.Close()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, d.baseURL+path, &buf)
+	tryOnce := func(url string) (int, []byte, error) {
+		req, reqErr := http.NewRequestWithContext(ctx, http.MethodPost, url+path, bytes.NewReader(body))
+		if reqErr != nil {
+			return 0, nil, reqErr
+		}
+		req.Header.Set("Content-Type", contentType)
+		if d.apiKey != "" {
+			req.Header.Set("X-API-Key", d.apiKey)
+		}
+		resp, doErr := d.client.Do(req)
+		if doErr != nil {
+			return 0, nil, doErr
+		}
+		defer resp.Body.Close()
+		respBody, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			return resp.StatusCode, nil, fmt.Errorf("read response from %s: %w", path, readErr)
+		}
+		return resp.StatusCode, respBody, nil
+	}
+
+	url := d.pool.Next()
+	status, respBody, err := tryOnce(url)
+	// Failover gate: only retry against another host when this
+	// host is broken (network error or 5xx). 4xx is caller-side
+	// — the next host would 4xx the same way.
+	if (err != nil || status >= 500) && d.pool.Size() > 1 {
+		fb := d.pool.Fallback(url)
+		if fb != url {
+			d.logger.Printf("detector: %s failed (status=%d, err=%v); failing over to %s", url, status, err, fb)
+			status, respBody, err = tryOnce(fb)
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Content-Type", mw.FormDataContentType())
-	if d.apiKey != "" {
-		req.Header.Set("X-API-Key", d.apiKey)
-	}
-
-	resp, err := d.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read response from %s: %w", path, err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("detection service %s returned %d: %s", path, resp.StatusCode, string(respBody))
+	if status != http.StatusOK {
+		return nil, fmt.Errorf("detection service %s returned %d: %s", path, status, string(respBody))
 	}
 	return respBody, nil
+}
+
+// buildMultipart prepares the request body once so retries
+// against a fallback URL can replay the same bytes (a streamed
+// multipart writer can't be rewound).
+func buildMultipart(imageData []byte, filename string) ([]byte, string, error) {
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	part, err := createFormFileWithMIME(mw, "image", filepath.Base(filename))
+	if err != nil {
+		return nil, "", err
+	}
+	if _, err := io.Copy(part, bytes.NewReader(imageData)); err != nil {
+		return nil, "", err
+	}
+	if err := mw.Close(); err != nil {
+		return nil, "", err
+	}
+	return buf.Bytes(), mw.FormDataContentType(), nil
 }
 
 // createFormFileWithMIME is like multipart.Writer.CreateFormFile but sets the

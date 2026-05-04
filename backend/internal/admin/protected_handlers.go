@@ -1398,17 +1398,48 @@ func (h *Handler) exportTracesCSV(w http.ResponseWriter, r *http.Request, q Trac
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
-	rows, err := h.tracesRepo.IterAll(ctx, q, maxExportRows)
-	if err != nil {
-		h.logger.Printf("admin /traces export: iter failed: %v", err)
-		response.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
-		return
+	// Stream the response directly into the CSV writer (mootd#43).
+	// Memory stays flat regardless of result size; previously we
+	// materialised every row into a slice first which could top
+	// 50–200 MB on a busy month.
+	filename := fmt.Sprintf("traces-%s.csv", time.Now().UTC().Format("20060102-150405"))
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+	w.WriteHeader(http.StatusOK)
+
+	writer := csv.NewWriter(w)
+	_ = writer.Write([]string{
+		"id", "createdAt", "userId", "provider", "model", "feature",
+		"status", "costUsd", "durationMs",
+	})
+
+	rowCount, streamErr := h.tracesRepo.StreamAll(ctx, q, maxExportRows, func(c LLMCallSnapshot) error {
+		return writer.Write([]string{
+			c.ID,
+			c.CreatedAt.UTC().Format(time.RFC3339Nano),
+			c.UserID,
+			c.Provider,
+			c.Model,
+			c.Feature,
+			c.Status,
+			strconv.FormatFloat(c.CostUSD, 'f', -1, 64),
+			strconv.FormatInt(c.DurationMs, 10),
+		})
+	})
+	writer.Flush()
+	if streamErr != nil {
+		// Headers + partial body already on the wire; can't
+		// switch to JSON. Best we can do is log + (server-side)
+		// note the truncation. The CSV consumer sees a clean
+		// EOF since csv.Writer doesn't emit trailers.
+		h.logger.Printf("admin /traces export: stream failed at row %d: %v", rowCount, streamErr)
 	}
 
-	// Audit. Best-effort — if the audit write fails we still serve
-	// the CSV; the alternative (denying the export over an audit
-	// hiccup) is worse for operators. Email lookup is best-effort
-	// too: empty email in the audit row beats blocking the export.
+	// Audit. Best-effort — if the audit write fails we still
+	// served the CSV; the alternative (denying the export over an
+	// audit hiccup) is worse for operators. Email lookup is
+	// best-effort too: empty email in the audit row beats blocking
+	// the export.
 	if h.repo != nil {
 		adminID, _ := AdminIDFromContext(r.Context())
 		var adminEmail string
@@ -1425,7 +1456,8 @@ func (h *Handler) exportTracesCSV(w http.ResponseWriter, r *http.Request, q Trac
 			UserAgent:  r.Header.Get("User-Agent"),
 			Metadata: map[string]any{
 				"format":   "csv",
-				"rowCount": len(rows),
+				"rowCount": rowCount,
+				"truncated": rowCount == maxExportRows,
 				"filter": map[string]any{
 					"userId":  q.UserID,
 					"model":   q.Model,
@@ -1438,31 +1470,6 @@ func (h *Handler) exportTracesCSV(w http.ResponseWriter, r *http.Request, q Trac
 			},
 		})
 	}
-
-	filename := fmt.Sprintf("traces-%s.csv", time.Now().UTC().Format("20060102-150405"))
-	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
-	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
-	w.WriteHeader(http.StatusOK)
-
-	writer := csv.NewWriter(w)
-	_ = writer.Write([]string{
-		"id", "createdAt", "userId", "provider", "model", "feature",
-		"status", "costUsd", "durationMs",
-	})
-	for _, c := range rows {
-		_ = writer.Write([]string{
-			c.ID,
-			c.CreatedAt.UTC().Format(time.RFC3339Nano),
-			c.UserID,
-			c.Provider,
-			c.Model,
-			c.Feature,
-			c.Status,
-			strconv.FormatFloat(c.CostUSD, 'f', -1, 64),
-			strconv.FormatInt(c.DurationMs, 10),
-		})
-	}
-	writer.Flush()
 }
 
 // parseTracesQuery hoists URL query parsing out of the handler. Note
