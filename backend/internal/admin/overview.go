@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"errors"
+	"sort"
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -52,6 +53,35 @@ type DailyMetric struct {
 	Value float64 `bson:"value" json:"value"`
 }
 
+// SpendByFeatureSeries is one 30-day spend spark for a single
+// feature label (mootd-admin#94). Series is zero-filled to 30
+// rows oldest-first; a feature with no calls in the window
+// still gets 30 zeroes so the FE's stack ordering stays stable.
+type SpendByFeatureSeries struct {
+	Feature string        `json:"feature"`
+	Series  []DailyMetric `json:"series"`
+}
+
+// SinceDelta is the "what changed since admin's last visit"
+// summary (mootd-admin#97). Computed fresh on every overview
+// request that carries `since=<RFC-3339>`. Numbers cover the
+// half-open interval [since, now); SpendChangePct compares
+// that window's spend to an equal-length window immediately
+// before it.
+type SinceDelta struct {
+	Since           time.Time `json:"since"`
+	DurationMinutes int64     `json:"durationMinutes"`
+	NewErrors       int64     `json:"newErrors"`
+	NewSignups      int64     `json:"newSignups"`
+	SpendUSD        float64   `json:"spendUsd"`
+	// SpendChangePct is (current / prior) - 1, expressed as a
+	// fraction (0.18 = +18%). Omitted when the prior window's
+	// spend is zero (avoids divide-by-zero + infinite values
+	// the FE would have to special-case).
+	SpendChangePct  *float64 `json:"spendChangePct,omitempty"`
+	OverBudgetUsers int64    `json:"overBudgetUsers,omitempty"`
+}
+
 // OverviewMetrics is the wire shape returned by GET /admin/v1/overview.
 //
 // Renamed from the previous spendUsdToday/callCountToday scalars to
@@ -69,6 +99,18 @@ type OverviewMetrics struct {
 	SpendSeries     []DailyMetric     `json:"spendSeries,omitempty"`
 	CallCountSeries []DailyMetric     `json:"callCountSeries,omitempty"`
 	DauSeries       []DailyMetric     `json:"dauSeries,omitempty"`
+	// SpendSeriesByFeature is one zero-filled 30-day spark per
+	// feature ordered by total spend desc (mootd-admin#94).
+	// Sum across features equals SpendSeries day-for-day. Used
+	// to render a stacked-area on the spend KPI so a price
+	// change or feature regression is visible at a glance.
+	SpendSeriesByFeature []SpendByFeatureSeries `json:"spendSeriesByFeature,omitempty"`
+	// SinceLastVisit is the "what changed since I last looked"
+	// summary (mootd-admin#97). Populated only when the request
+	// carries a `since=<RFC-3339>` query param. When the
+	// caller's lastActiveAt is too recent or too old (heuristic
+	// gate inside the handler) the field is omitted.
+	SinceLastVisit *SinceDelta `json:"sinceLastVisit,omitempty"`
 	LastCalls       []LLMCallSnapshot `json:"lastCalls"`
 	CacheMetrics    *CacheMetrics     `json:"cacheMetrics,omitempty"`
 	GeneratedAt     time.Time         `json:"generatedAt"`
@@ -113,6 +155,18 @@ type OverviewRepository interface {
 	// DailySeries returns one zero-filled 30-day spark series for
 	// each of {spend, callCount, distinctUsers}, oldest-first.
 	DailySeries(ctx context.Context, now time.Time) (spend, callCount, dau []DailyMetric, err error)
+	// DailySeriesByFeature returns per-feature spend sparks for
+	// the trailing 30 days (mootd-admin#94). Ordered by total
+	// period spend desc; capped at maxFeatures (caller hint).
+	// Sum across the returned series equals DailySeries.spend
+	// day-for-day.
+	DailySeriesByFeature(ctx context.Context, now time.Time, maxFeatures int) ([]SpendByFeatureSeries, error)
+	// SinceMetrics aggregates "what happened in [since, now)"
+	// for the since-last-visit callout (mootd-admin#97). The
+	// caller computes the prior window (immediately before
+	// `since`) and supplies its endpoints separately so the
+	// repo doesn't need to know about prior-window heuristics.
+	SinceMetrics(ctx context.Context, since, now time.Time) (newErrors, newSignups int64, spendUSD float64, err error)
 	// RecentLLMCalls returns the last n calls regardless of user.
 	// userEmail field is left empty here; the handler joins it.
 	RecentLLMCalls(ctx context.Context, n int) ([]LLMCallSnapshot, error)
@@ -238,6 +292,191 @@ func (r *OverviewMongoRepository) DailySeries(ctx context.Context, now time.Time
 		dau = append(dau, DailyMetric{Date: key, Value: float64(len(b.Users))})
 	}
 	return spend, count, dau, nil
+}
+
+// DailySeriesByFeature aggregates per-feature spend across the
+// trailing 30 days (mootd-admin#94). Single Mongo round-trip:
+// $group by (feature, day-bucket) → in-Go pivot to one series
+// per feature, zero-filled.
+//
+// Cardinality control: features past `maxFeatures` (after
+// sorting by total spend desc) collapse into a synthetic
+// "other" series so an explosion in distinct feature names
+// doesn't blow up the response. Pass 0 / negative to use the
+// default cap.
+func (r *OverviewMongoRepository) DailySeriesByFeature(ctx context.Context, now time.Time, maxFeatures int) ([]SpendByFeatureSeries, error) {
+	if maxFeatures <= 0 {
+		maxFeatures = 8
+	}
+	startOfWindow := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC).Add(-29 * 24 * time.Hour)
+
+	pipeline := mongo.Pipeline{
+		{{Key: "$match", Value: bson.M{
+			"createdAt": bson.M{"$gte": startOfWindow},
+		}}},
+		{{Key: "$group", Value: bson.M{
+			"_id": bson.M{
+				"feature": "$feature",
+				"day":     bson.M{"$dateToString": bson.M{"format": "%Y-%m-%d", "date": "$createdAt", "timezone": "UTC"}},
+			},
+			"spend": bson.M{"$sum": "$costUsd"},
+		}}},
+	}
+	cur, err := r.llmCallsCol().Aggregate(ctx, pipeline)
+	if err != nil {
+		return nil, err
+	}
+	defer cur.Close(ctx)
+
+	type row struct {
+		ID struct {
+			Feature string `bson:"feature"`
+			Day     string `bson:"day"`
+		} `bson:"_id"`
+		Spend float64 `bson:"spend"`
+	}
+	var rows []row
+	if err := cur.All(ctx, &rows); err != nil {
+		return nil, err
+	}
+
+	// Pivot: feature → day → spend.
+	totals := make(map[string]float64)
+	byFeature := make(map[string]map[string]float64)
+	for _, x := range rows {
+		feat := x.ID.Feature
+		if feat == "" {
+			feat = "unknown"
+		}
+		totals[feat] += x.Spend
+		if byFeature[feat] == nil {
+			byFeature[feat] = map[string]float64{}
+		}
+		byFeature[feat][x.ID.Day] += x.Spend
+	}
+
+	// Sort features by total desc, deterministic on ties via
+	// alphabetical to keep the stack order stable across
+	// requests (recharts re-orders arbitrarily otherwise).
+	type rank struct {
+		feat  string
+		total float64
+	}
+	ranked := make([]rank, 0, len(totals))
+	for f, t := range totals {
+		ranked = append(ranked, rank{feat: f, total: t})
+	}
+	sort.Slice(ranked, func(i, j int) bool {
+		if ranked[i].total != ranked[j].total {
+			return ranked[i].total > ranked[j].total
+		}
+		return ranked[i].feat < ranked[j].feat
+	})
+
+	// Walk forward 30 days, build zero-filled series for each
+	// top-N feature. Anything past N folds into "other".
+	keys := make([]string, 30)
+	for i := 0; i < 30; i++ {
+		keys[i] = startOfWindow.Add(time.Duration(i) * 24 * time.Hour).Format("2006-01-02")
+	}
+
+	out := make([]SpendByFeatureSeries, 0, maxFeatures+1)
+	for i, r := range ranked {
+		if i >= maxFeatures {
+			break
+		}
+		series := make([]DailyMetric, 30)
+		for j, k := range keys {
+			series[j] = DailyMetric{Date: k, Value: byFeature[r.feat][k]}
+		}
+		out = append(out, SpendByFeatureSeries{Feature: r.feat, Series: series})
+	}
+	if len(ranked) > maxFeatures {
+		other := make([]DailyMetric, 30)
+		for i, r := range ranked[maxFeatures:] {
+			for j, k := range keys {
+				other[j].Date = k
+				other[j].Value += byFeature[r.feat][k]
+			}
+			_ = i
+		}
+		out = append(out, SpendByFeatureSeries{Feature: "other", Series: other})
+	}
+	return out, nil
+}
+
+// SinceMetrics aggregates the cheap "what happened recently"
+// numbers for mootd-admin#97. Three independent counts so the
+// caller can decide which to show. Two Mongo round-trips:
+//
+//   - llm_calls match `createdAt ∈ [since, now)` → spend total
+//     + error count via $facet.
+//   - events match `name=signed_up` in the same window → signup
+//     count.
+//
+// `over_budget_users` lives elsewhere (budget package) and is
+// joined inside the handler when the budget reader is wired.
+func (r *OverviewMongoRepository) SinceMetrics(ctx context.Context, since, now time.Time) (int64, int64, float64, error) {
+	if !since.Before(now) {
+		return 0, 0, 0, nil
+	}
+	// Single $facet pipeline: counts + sum of cost in one round.
+	llmPipeline := mongo.Pipeline{
+		{{Key: "$match", Value: bson.M{
+			"createdAt": bson.M{"$gte": since, "$lt": now},
+		}}},
+		{{Key: "$facet", Value: bson.M{
+			"errors": bson.A{
+				bson.M{"$match": bson.M{"status": "error"}},
+				bson.M{"$count": "n"},
+			},
+			"spend": bson.A{
+				bson.M{"$group": bson.M{
+					"_id":   nil,
+					"total": bson.M{"$sum": "$costUsd"},
+				}},
+			},
+		}}},
+	}
+	cur, err := r.llmCallsCol().Aggregate(ctx, llmPipeline)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	defer cur.Close(ctx)
+
+	type facetResult struct {
+		Errors []struct {
+			N int64 `bson:"n"`
+		} `bson:"errors"`
+		Spend []struct {
+			Total float64 `bson:"total"`
+		} `bson:"spend"`
+	}
+	var rows []facetResult
+	if err := cur.All(ctx, &rows); err != nil {
+		return 0, 0, 0, err
+	}
+	var newErrors int64
+	var spendUSD float64
+	if len(rows) > 0 {
+		if len(rows[0].Errors) > 0 {
+			newErrors = rows[0].Errors[0].N
+		}
+		if len(rows[0].Spend) > 0 {
+			spendUSD = rows[0].Spend[0].Total
+		}
+	}
+
+	// Signups in the window — counts events with name=signed_up.
+	signupCount, err := r.client.Database(r.dbName).Collection("events").CountDocuments(ctx, bson.M{
+		"name":      "signed_up",
+		"createdAt": bson.M{"$gte": since, "$lt": now},
+	})
+	if err != nil {
+		// Non-fatal: keep the other counts.
+		signupCount = 0
+	}
+	return newErrors, signupCount, spendUSD, nil
 }
 
 // RecentLLMCalls returns the last n calls. Email join happens in

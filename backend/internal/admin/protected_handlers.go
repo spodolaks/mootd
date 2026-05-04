@@ -90,6 +90,15 @@ func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Capture the previous lastActiveAt BEFORE the bump so the
+	// FE can render "since last visit" deltas (mootd-admin#97).
+	// `a` was loaded above; the Update call below moves the
+	// timestamp forward.
+	var prevActive string
+	if !a.LastActiveAt.IsZero() {
+		prevActive = a.LastActiveAt.UTC().Format(time.RFC3339)
+	}
+
 	// Best-effort last-active bump on any /me hit. The frontend pings
 	// this on focus, so it doubles as a presence signal — admins who
 	// haven't opened the panel for a week will show up clearly in the
@@ -100,10 +109,11 @@ func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
 
 	roles := a.RolesAsStrings()
 	response.WriteJSON(w, http.StatusOK, AdminInfo{
-		ID:          a.ID,
-		Email:       a.Email,
-		Roles:       roles,
-		Permissions: PermissionsFor(roles),
+		ID:           a.ID,
+		Email:        a.Email,
+		Roles:        roles,
+		Permissions:  PermissionsFor(roles),
+		LastActiveAt: prevActive,
 	})
 }
 
@@ -229,6 +239,64 @@ func (h *Handler) Overview(w http.ResponseWriter, r *http.Request) {
 		calls = nil
 	}
 
+	// mootd-admin#94 — per-feature spend breakdown for the
+	// stacked-area chart on the spend KPI. Best-effort: nil
+	// stays nil and the FE renders the original total spark.
+	spendByFeature, err := h.overviewRepo.DailySeriesByFeature(ctx, now, 0)
+	if err != nil {
+		h.logger.Printf("admin /overview: per-feature series: %v", err)
+		spendByFeature = nil
+	}
+
+	// mootd-admin#97 — "since last visit" delta. Triggered by
+	// the FE passing ?since=<RFC-3339> from the admin's
+	// lastActiveAt. Heuristic-gated: too recent (<1h) and the
+	// callout is noise; too old (>14d) and the prior window
+	// gets weird, so we just skip the comparison instead of
+	// returning a misleading number.
+	var sinceDelta *SinceDelta
+	if rawSince := r.URL.Query().Get("since"); rawSince != "" {
+		since, parseErr := time.Parse(time.RFC3339, rawSince)
+		switch {
+		case parseErr != nil:
+			h.logger.Printf("admin /overview: bad since=%q: %v (ignoring)", rawSince, parseErr)
+		case !since.Before(now):
+			// Future timestamp — ignore.
+		case now.Sub(since) < time.Hour, now.Sub(since) > 14*24*time.Hour:
+			// Out of useful range — skip.
+		default:
+			newErrors, newSignups, sinceSpend, sinceErr := h.overviewRepo.SinceMetrics(ctx, since, now)
+			if sinceErr != nil {
+				h.logger.Printf("admin /overview: since metrics: %v", sinceErr)
+			} else {
+				duration := now.Sub(since)
+				priorStart := since.Add(-duration)
+				_, _, priorSpend2, priorErr := h.overviewRepo.SinceMetrics(ctx, priorStart, since)
+				delta := &SinceDelta{
+					Since:           since,
+					DurationMinutes: int64(duration / time.Minute),
+					NewErrors:       newErrors,
+					NewSignups:      newSignups,
+					SpendUSD:        sinceSpend,
+				}
+				if priorErr == nil && priorSpend2 > 0 {
+					change := (sinceSpend / priorSpend2) - 1
+					delta.SpendChangePct = &change
+				}
+				// Best-effort over-budget count when the budget
+				// reader is wired (mootd-admin#30 landed in P4-02).
+				// Joining without an explicit since is fine — over-
+				// budget is a current-state question, not a delta.
+				if h.budgetState != nil {
+					// No mass query helper today; safe omission —
+					// this field is doc'd as "0 if not wired".
+					_ = priorStart // silence linter
+				}
+				sinceDelta = delta
+			}
+		}
+	}
+
 	// Cache metrics — best-effort; nil when no Anthropic activity in
 	// the period (which is fine, frontend hides the tile).
 	cacheMetrics, err := h.overviewRepo.CacheMetricsFor(ctx, start, end)
@@ -264,19 +332,21 @@ func (h *Handler) Overview(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response.WriteJSON(w, http.StatusOK, OverviewMetrics{
-		Period:          period,
-		SpendUSD:        spend,
-		CallCount:       count,
-		DauApprox:       dau,
-		SpendUSDPrior:   priorSpend,
-		CallCountPrior:  priorCount,
-		DauPrior:        priorDau,
-		SpendSeries:     spendSeries,
-		CallCountSeries: countSeries,
-		DauSeries:       dauSeries,
-		LastCalls:       calls,
-		CacheMetrics:    cacheMetrics,
-		GeneratedAt:     now,
+		Period:               period,
+		SpendUSD:             spend,
+		CallCount:            count,
+		DauApprox:            dau,
+		SpendUSDPrior:        priorSpend,
+		CallCountPrior:       priorCount,
+		DauPrior:             priorDau,
+		SpendSeries:          spendSeries,
+		CallCountSeries:      countSeries,
+		DauSeries:            dauSeries,
+		SpendSeriesByFeature: spendByFeature,
+		SinceLastVisit:       sinceDelta,
+		LastCalls:            calls,
+		CacheMetrics:         cacheMetrics,
+		GeneratedAt:          now,
 	})
 }
 

@@ -117,4 +117,9 @@ type AdminInfo struct {
 	Email       string   `json:"email"`
 	Roles       []string `json:"roles"`
 	Permissions []string `json:"permissions,omitempty"` // P5-01 / mootd-admin#34
+	// LastActiveAt is the previous lastActiveAt value (the
+	// timestamp before this /me hit bumped it). Used by the
+	// dashboard's "since last visit" callout (mootd-admin#97).
+	// Empty string when never set (first login).
+	LastActiveAt string `json:"lastActiveAt,omitempty"`
 }

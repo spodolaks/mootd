@@ -247,6 +247,12 @@ type Admin struct {
 	Email openapi_types.Email `json:"email"`
 	Id    string              `json:"id"`
 
+	// LastActiveAt The admin's previous lastActiveAt value as of the
+	// current /me hit (mootd-admin#97). Read by the
+	// dashboard to compute the "since last visit" delta.
+	// Absent on first login (no previous value).
+	LastActiveAt *time.Time `json:"lastActiveAt,omitempty"`
+
 	// Permissions Per-permission checks the FE uses to hide nav items
 	// and buttons (P5-01 / mootd-admin#34). Computed from
 	// the admin's roles. Stable order across requests for
@@ -911,8 +917,24 @@ type OverviewMetrics struct {
 	// UTC day so far; `7d`/`30d` are rolling windows ending now.
 	Period OverviewPeriod `json:"period"`
 
+	// SinceLastVisit "What changed since I last looked" summary
+	// (mootd-admin#97). Counts cover the half-open interval
+	// [since, now). spendChangePct compares window spend to
+	// an equal-length window immediately before it; absent
+	// when the prior window had zero spend (avoids
+	// divide-by-zero).
+	SinceLastVisit *SinceDelta `json:"sinceLastVisit,omitempty"`
+
 	// SpendSeries 30-day sparkline series for spend (oldest-first).
 	SpendSeries *[]DailyMetric `json:"spendSeries,omitempty"`
+
+	// SpendSeriesByFeature Per-feature 30-day spend sparks (mootd-admin#94).
+	// Ordered by total period spend desc; the sum
+	// across features equals spendSeries day-for-day.
+	// Features past the per-request cap fold into a
+	// synthetic "other" entry so cardinality stays
+	// bounded.
+	SpendSeriesByFeature *[]SpendByFeatureSeries `json:"spendSeriesByFeature,omitempty"`
 
 	// SpendUsd Total spend across the selected period.
 	SpendUsd float64 `json:"spendUsd"`
@@ -1102,6 +1124,39 @@ type SessionSummary struct {
 type SessionsPage struct {
 	NextCursor *string          `json:"nextCursor,omitempty"`
 	Sessions   []SessionSummary `json:"sessions"`
+}
+
+// SinceDelta "What changed since I last looked" summary
+// (mootd-admin#97). Counts cover the half-open interval
+// [since, now). spendChangePct compares window spend to
+// an equal-length window immediately before it; absent
+// when the prior window had zero spend (avoids
+// divide-by-zero).
+type SinceDelta struct {
+	DurationMinutes int64 `json:"durationMinutes"`
+	NewErrors       int64 `json:"newErrors"`
+	NewSignups      int64 `json:"newSignups"`
+
+	// OverBudgetUsers Best-effort. 0 when the budget reader (P4-02 / mootd-admin#30)
+	// isn't wired into the admin handler in this build.
+	OverBudgetUsers *int64    `json:"overBudgetUsers,omitempty"`
+	Since           time.Time `json:"since"`
+
+	// SpendChangePct (current / prior) - 1. 0.18 = +18% vs the prior
+	// window. Omitted when prior == 0.
+	SpendChangePct *float64 `json:"spendChangePct,omitempty"`
+	SpendUsd       float64  `json:"spendUsd"`
+}
+
+// SpendByFeatureSeries One 30-day spend spark for a single feature label
+// (mootd-admin#94). Series is zero-filled to 30 rows
+// oldest-first; a feature with no calls in the window
+// still gets 30 zeroes so the FE's stack ordering stays
+// stable across refreshes.
+type SpendByFeatureSeries struct {
+	// Feature Feature label as recorded on llm_calls (e.g. "outfit_generate").
+	Feature string        `json:"feature"`
+	Series  []DailyMetric `json:"series"`
 }
 
 // TraceReplayResponse defines model for TraceReplayResponse.
@@ -1551,6 +1606,14 @@ type AdminOverviewParams struct {
 	// regardless of period — they're the trend, not the
 	// headline.
 	Period *OverviewPeriod `form:"period,omitempty" json:"period,omitempty"`
+
+	// Since RFC-3339 timestamp. When supplied (and within
+	// [1h, 14d] in the past), the response carries a
+	// `sinceLastVisit` delta — new errors / signups / spend
+	// change vs the equal-length prior window
+	// (mootd-admin#97). Out-of-range values are silently
+	// ignored — the field is absent on the response.
+	Since *time.Time `form:"since,omitempty" json:"since,omitempty"`
 }
 
 // AdminGetWeeklyReportParams defines parameters for AdminGetWeeklyReport.

@@ -100,6 +100,14 @@ components:
             and buttons (P5-01 / mootd-admin#34). Computed from
             the admin's roles. Stable order across requests for
             cache-friendly snapshotting.
+        lastActiveAt:
+          type: string
+          format: date-time
+          description: |
+            The admin's previous lastActiveAt value as of the
+            current /me hit (mootd-admin#97). Read by the
+            dashboard to compute the "since last visit" delta.
+            Absent on first login (no previous value).
 
     LoginRequest:
       type: object
@@ -1865,6 +1873,19 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/DailyMetric"
+        spendSeriesByFeature:
+          type: array
+          description: |
+            Per-feature 30-day spend sparks (mootd-admin#94).
+            Ordered by total period spend desc; the sum
+            across features equals spendSeries day-for-day.
+            Features past the per-request cap fold into a
+            synthetic "other" entry so cardinality stays
+            bounded.
+          items:
+            $ref: "#/components/schemas/SpendByFeatureSeries"
+        sinceLastVisit:
+          $ref: "#/components/schemas/SinceDelta"
         lastCalls:
           type: array
           items:
@@ -1874,6 +1895,63 @@ components:
         generatedAt:
           type: string
           format: date-time
+
+    SpendByFeatureSeries:
+      description: |
+        One 30-day spend spark for a single feature label
+        (mootd-admin#94). Series is zero-filled to 30 rows
+        oldest-first; a feature with no calls in the window
+        still gets 30 zeroes so the FE's stack ordering stays
+        stable across refreshes.
+      type: object
+      required: [feature, series]
+      properties:
+        feature:
+          type: string
+          description: Feature label as recorded on llm_calls (e.g. "outfit_generate").
+        series:
+          type: array
+          items:
+            $ref: "#/components/schemas/DailyMetric"
+
+    SinceDelta:
+      description: |
+        "What changed since I last looked" summary
+        (mootd-admin#97). Counts cover the half-open interval
+        [since, now). spendChangePct compares window spend to
+        an equal-length window immediately before it; absent
+        when the prior window had zero spend (avoids
+        divide-by-zero).
+      type: object
+      required: [since, durationMinutes, newErrors, newSignups, spendUsd]
+      properties:
+        since:
+          type: string
+          format: date-time
+        durationMinutes:
+          type: integer
+          format: int64
+        newErrors:
+          type: integer
+          format: int64
+        newSignups:
+          type: integer
+          format: int64
+        spendUsd:
+          type: number
+          format: double
+        spendChangePct:
+          type: number
+          format: double
+          description: |
+            (current / prior) - 1. 0.18 = +18% vs the prior
+            window. Omitted when prior == 0.
+        overBudgetUsers:
+          type: integer
+          format: int64
+          description: |
+            Best-effort. 0 when the budget reader (P4-02 / mootd-admin#30)
+            isn't wired into the admin handler in this build.
 
     CacheMetrics:
       type: object
@@ -2382,6 +2460,19 @@ paths:
             headline.
           schema:
             $ref: "#/components/schemas/OverviewPeriod"
+        - name: since
+          in: query
+          description: |
+            RFC-3339 timestamp. When supplied (and within
+            [1h, 14d] in the past), the response carries a
+            `sinceLastVisit` delta — new errors / signups / spend
+            change vs the equal-length prior window
+            (mootd-admin#97). Out-of-range values are silently
+            ignored — the field is absent on the response.
+          required: false
+          schema:
+            type: string
+            format: date-time
       responses:
         "200":
           description: Overview metrics.
