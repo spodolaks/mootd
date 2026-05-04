@@ -76,6 +76,23 @@ services:
       # Mock-login dev endpoint. Fail-closed default ("false"). Only set to
       # "true" for local development.
       ENABLE_MOCK_LOGIN: "${ENABLE_MOCK_LOGIN:-true}"
+      # SMTP for the weekly cost report (P4-04 / mootd-admin#32) +
+      # the daily founder summary (mootd-admin#99). All-or-nothing:
+      # SMTP_HOST + SMTP_FROM + SMTP_TO must all be set for either
+      # email path to fire. Without them /reports/weekly/send returns
+      # 503 and the daily-summary cron stays disabled.
+      SMTP_HOST: "${SMTP_HOST:-}"
+      SMTP_PORT: "${SMTP_PORT:-}"
+      SMTP_USERNAME: "${SMTP_USERNAME:-}"
+      SMTP_PASSWORD: "${SMTP_PASSWORD:-}"
+      SMTP_FROM: "${SMTP_FROM:-}"
+      SMTP_TO: "${SMTP_TO:-}"
+      # Comma-separated list of addresses receiving the daily founder
+      # summary (mootd-admin#99). When set together with SMTP_*, a cron
+      # at DAILY_SUMMARY_HOUR_UTC (default 7) sends overnight numbers
+      # to every recipient. Empty → daily summary cron stays disabled.
+      FOUNDER_EMAILS: "${FOUNDER_EMAILS:-}"
+      DAILY_SUMMARY_HOUR_UTC: "${DAILY_SUMMARY_HOUR_UTC:-}"
     networks:
       - default
       - bcgrm_default

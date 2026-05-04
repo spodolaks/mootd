@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -173,6 +174,34 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 			return admin.SendWeeklyReport(*smtpCfg, report)
 		})
 		a.Logger.Printf("admin: weekly report cron armed (SMTP %s → %s)", smtpCfg.Host, smtpCfg.ToAddr)
+	}
+
+	// Daily founder summary email (mootd-admin#99). Gated on
+	// FOUNDER_EMAILS being set + SMTP configured. Different
+	// cadence + content than the weekly report — daily numbers,
+	// dashboard scope, multi-recipient. DAILY_SUMMARY_HOUR_UTC
+	// overrides the default 07:00 UTC fire time.
+	founderEmails := admin.ParseFounderEmails(os.Getenv("FOUNDER_EMAILS"))
+	if smtpCfg != nil && len(founderEmails) > 0 {
+		hourUTC := 7
+		if raw := os.Getenv("DAILY_SUMMARY_HOUR_UTC"); raw != "" {
+			if v, err := strconv.Atoi(raw); err == nil && v >= 0 && v <= 23 {
+				hourUTC = v
+			} else {
+				a.Logger.Printf("admin: bad DAILY_SUMMARY_HOUR_UTC=%q (using 7)", raw)
+			}
+		}
+		summaryBuilder := admin.NewDailySummaryBuilder(adminOverviewRepo, a.MongoClient, a.MongoDB)
+		admin.StartDailySummaryCron(workerCtx, a.Logger, nil, func(ctx context.Context) error {
+			summary, err := summaryBuilder.Build(ctx, time.Now().UTC())
+			if err != nil {
+				return fmt.Errorf("build: %w", err)
+			}
+			return admin.SendDailySummary(*smtpCfg, summary, founderEmails)
+		}, hourUTC)
+		a.Logger.Printf("admin: daily summary cron armed (%02d:00 UTC → %d recipient(s))", hourUTC, len(founderEmails))
+	} else if len(founderEmails) > 0 {
+		a.Logger.Printf("admin: FOUNDER_EMAILS set (%d) but SMTP not configured; daily summary disabled", len(founderEmails))
 	}
 
 	// Prompt templates (P3-01 / mootd-admin#24). Pulls the
