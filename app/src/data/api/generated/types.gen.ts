@@ -112,18 +112,35 @@ export type UserDocument = {
     archetypeProfile?: {
         [key: string]: number;
     };
+    /**
+     * Outfit-generation variance preference (mootd#67).
+     * 0 = predictable / play-it-safe; 0.5 = current
+     * historical default; 1 = surprise me. Backend
+     * translates to LLM temperature via a piecewise-
+     * linear map (0 → 0.5, 0.5 → 0.9, 1 → 1.2).
+     * Missing field treated as 0.5.
+     *
+     */
+    creativity?: number;
     createdAt: string;
     updatedAt: string;
 };
 
 /**
- * Body for PUT /v1/user/profile. Both fields are
+ * Body for PUT /v1/user/profile. Every field is
  * optional; at least one must be supplied.
  *
  */
 export type UpdateProfileRequest = {
     name?: string;
     avatarUrl?: string;
+    /**
+     * Update the outfit creativity preference
+     * (mootd#67). Out-of-range values are clamped
+     * server-side rather than rejected.
+     *
+     */
+    creativity?: number;
 };
 
 /**

@@ -52,6 +52,20 @@ func (r *MongoRepository) Update(ctx context.Context, id string, req UpdateProfi
 	if req.AvatarURL != nil {
 		updates["avatarUrl"] = *req.AvatarURL
 	}
+	if req.Creativity != nil {
+		// mootd#67 — clamp to [0, 1]. The slider can't escape
+		// that range on the client, but a hand-crafted curl
+		// could; refuse silently rather than 400 since we're
+		// applying the safe fallback.
+		c := *req.Creativity
+		if c < 0 {
+			c = 0
+		}
+		if c > 1 {
+			c = 1
+		}
+		updates["creativity"] = c
+	}
 
 	if len(updates) == 1 {
 		return nil, errors.New("no fields to update")

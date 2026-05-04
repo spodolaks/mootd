@@ -632,11 +632,16 @@ type SearchResponse struct {
 	Results []SearchProduct `json:"results"`
 }
 
-// UpdateProfileRequest Body for PUT /v1/user/profile. Both fields are
+// UpdateProfileRequest Body for PUT /v1/user/profile. Every field is
 // optional; at least one must be supplied.
 type UpdateProfileRequest struct {
 	AvatarUrl *string `json:"avatarUrl,omitempty"`
-	Name      *string `json:"name,omitempty"`
+
+	// Creativity Update the outfit creativity preference
+	// (mootd#67). Out-of-range values are clamped
+	// server-side rather than rejected.
+	Creativity *float64 `json:"creativity,omitempty"`
+	Name       *string  `json:"name,omitempty"`
 }
 
 // UpdateWardrobeItemRequest Body for PATCH /v1/wardrobe/items/{id}. Subset of
@@ -655,11 +660,19 @@ type UserDocument struct {
 	ArchetypeProfile *map[string]float64 `json:"archetypeProfile,omitempty"`
 	AvatarUrl        *string             `json:"avatarUrl,omitempty"`
 	CreatedAt        time.Time           `json:"createdAt"`
-	Email            openapi_types.Email `json:"email"`
-	GoogleId         *string             `json:"googleId,omitempty"`
-	Id               string              `json:"id"`
-	Name             string              `json:"name"`
-	UpdatedAt        time.Time           `json:"updatedAt"`
+
+	// Creativity Outfit-generation variance preference (mootd#67).
+	// 0 = predictable / play-it-safe; 0.5 = current
+	// historical default; 1 = surprise me. Backend
+	// translates to LLM temperature via a piecewise-
+	// linear map (0 → 0.5, 0.5 → 0.9, 1 → 1.2).
+	// Missing field treated as 0.5.
+	Creativity *float64            `json:"creativity,omitempty"`
+	Email      openapi_types.Email `json:"email"`
+	GoogleId   *string             `json:"googleId,omitempty"`
+	Id         string              `json:"id"`
+	Name       string              `json:"name"`
+	UpdatedAt  time.Time           `json:"updatedAt"`
 }
 
 // WardrobeItemListResponse Paginated wardrobe items, newest first. nextCursor is

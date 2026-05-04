@@ -30,6 +30,12 @@ export interface PreferencesState {
   // Units
   temperatureUnit: TemperatureUnit;
 
+  // Outfit creativity (mootd#67). 0 = predictable, 1 = surprising.
+  // Backend translates to LLM temperature. Cached locally so the
+  // UI reads instantly + persists across cold starts; server is
+  // updated optimistically on change.
+  creativity: number;
+
   // Account (mirrors backend, cached locally)
   displayName: string;
   email: string;
@@ -41,6 +47,7 @@ interface PreferencesActions {
   setDailyOutfitReminder: (enabled: boolean) => void;
   setWeatherAlerts: (enabled: boolean) => void;
   setTemperatureUnit: (unit: TemperatureUnit) => void;
+  setCreativity: (creativity: number) => void;
   setDisplayName: (name: string) => void;
   setEmail: (email: string) => void;
   /** Bulk-hydrate from persisted storage (called once at startup). */
@@ -59,6 +66,7 @@ const DEFAULTS: PreferencesState = {
   dailyOutfitReminder: true,
   weatherAlerts: false,
   temperatureUnit: 'celsius',
+  creativity: 0.5, // mootd#67 — middle of the slider, equivalent to historical default
   displayName: '',
   email: '',
 };
@@ -123,6 +131,7 @@ function getState(store: PreferencesStore): PreferencesState {
     dailyOutfitReminder: store.dailyOutfitReminder,
     weatherAlerts: store.weatherAlerts,
     temperatureUnit: store.temperatureUnit,
+    creativity: store.creativity,
     displayName: store.displayName,
     email: store.email,
   };
@@ -151,6 +160,7 @@ export const usePreferencesStore = create<PreferencesStore>((set, get) => ({
   setDailyOutfitReminder: (dailyOutfitReminder) => update(set, get, { dailyOutfitReminder }),
   setWeatherAlerts: (weatherAlerts) => update(set, get, { weatherAlerts }),
   setTemperatureUnit: (temperatureUnit) => update(set, get, { temperatureUnit }),
+  setCreativity: (creativity) => update(set, get, { creativity }),
   setDisplayName: (displayName) => update(set, get, { displayName }),
   setEmail: (email) => update(set, get, { email }),
 

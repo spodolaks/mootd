@@ -65,6 +65,25 @@ type LLMCall struct {
 	// trace-detail panel to render side-by-side prompt/response
 	// diffs.
 	ReplayOf string `bson:"replayOf,omitempty"`
+
+	// Granular cost-tagging (mootd#63). Lets us slice "cost by
+	// wardrobe size", "cost by image count", "cost by prompt
+	// version" without re-scanning the prompt text. All optional —
+	// older rows / non-outfit features can leave them at zero.
+	WardrobeItemCount int `bson:"wardrobeItemCount,omitempty"`
+	ImageCount        int `bson:"imageCount,omitempty"`        // 0 for non-vision providers
+	RecentBoardCount  int `bson:"recentBoardCount,omitempty"`  // positive examples injected
+	// SystemTokens / UserTokens / ResponseTokens split InputTokens
+	// + OutputTokens into the three regions caller-supplied. The
+	// existing InputTokens/OutputTokens stay as the totals.
+	SystemTokens   int     `bson:"systemTokens,omitempty"`
+	UserTokens     int     `bson:"userTokens,omitempty"`
+	ResponseTokens int     `bson:"responseTokens,omitempty"`
+	// CacheHitRatio = cacheRead / (cacheRead + cacheWrite +
+	// inputTokens). Stored at write time so analytics can $group
+	// without re-deriving on every read; the per-call inputs are
+	// also there for callers that want to verify or recompute.
+	CacheHitRatio float64 `bson:"cacheHitRatio,omitempty"`
 }
 
 // LLMCallRepository persists LLMCall rows. Reads come later (admin

@@ -109,11 +109,16 @@ func (g *ClaudeGenerator) Generate(ctx context.Context, req GeneratorRequest) ([
 		systemBlocks = []claudeSystemBlock{{Type: "text", Text: systemPrompt}}
 	}
 
+	// mootd#67 — translate user creativity preference to
+	// temperature when supplied; otherwise omit so Anthropic
+	// uses its default. omitempty in the wire shape keeps the
+	// field absent when 0.
 	payload := claudeRequest{
-		Model:     g.cfg.Model,
-		MaxTokens: 2048,
-		System:    systemBlocks,
-		Tools:     []claudeTool{tool},
+		Model:       g.cfg.Model,
+		MaxTokens:   2048,
+		Temperature: CreativityToTemperature(req.Creativity),
+		System:      systemBlocks,
+		Tools:       []claudeTool{tool},
 		ToolChoice: &claudeToolChoice{
 			Type: "tool",
 			Name: tool.Name,
@@ -438,12 +443,13 @@ func parseClaudeToolUse(resp *claudeResponse, expectedTool string) ([]Outfit, st
 // ── Anthropic Messages API wire types ───────────────────────────────────────
 
 type claudeRequest struct {
-	Model      string              `json:"model"`
-	MaxTokens  int                 `json:"max_tokens"`
-	System     []claudeSystemBlock `json:"system,omitempty"`
-	Messages   []claudeMessage     `json:"messages"`
-	Tools      []claudeTool        `json:"tools,omitempty"`
-	ToolChoice *claudeToolChoice   `json:"tool_choice,omitempty"`
+	Model       string              `json:"model"`
+	MaxTokens   int                 `json:"max_tokens"`
+	Temperature float64             `json:"temperature,omitempty"` // mootd#67 — omitted when 0
+	System      []claudeSystemBlock `json:"system,omitempty"`
+	Messages    []claudeMessage     `json:"messages"`
+	Tools       []claudeTool        `json:"tools,omitempty"`
+	ToolChoice  *claudeToolChoice   `json:"tool_choice,omitempty"`
 }
 
 // claudeSystemBlock is a system-prompt content block. Switched from a

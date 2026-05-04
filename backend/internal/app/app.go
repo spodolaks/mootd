@@ -335,14 +335,11 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 
 	brands.NewHandler(a.Logger, brands.NewMongoRepository(a.MongoClient, a.MongoDB)).RegisterRoutes(mux, authMiddleware)
 
-	// Shared adapters for archetype profile read/write via user repo.
-	profileProvider := outfit.UserProfileFunc(func(ctx context.Context, userID string) (map[string]float64, error) {
-		doc, err := userRepo.FindByID(ctx, userID)
-		if err != nil {
-			return nil, err
-		}
-		return doc.ArchetypeProfile, nil
-	})
+	// Shared adapter for the outfit service. Implements both
+	// outfit.userProfileProvider (archetype scores) and
+	// outfit.creativityProvider (mootd#67) so the service can
+	// read both without juggling two wirings.
+	profileProvider := &userOutfitAdapter{repo: userRepo}
 
 	profileUpdater := moodboard.ProfileUpdaterFunc{
 		GetFn: func(ctx context.Context, userID string) (map[string]float64, error) {
@@ -770,6 +767,38 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 // surfaceAdapter bridges surface.Repository to outfit's surfaceProvider
 // interface. Keeping the adapter here means the outfit package never imports
 // surface — the dependency direction stays one-way (app → outfit, app → surface).
+// userOutfitAdapter satisfies outfit.userProfileProvider AND
+// the optional outfit.creativityProvider extension (mootd#67)
+// from a user.Repository. Single struct with two methods so
+// wiring stays in one place + the outfit service's runtime
+// type-assertion finds creativityProvider without ceremony.
+type userOutfitAdapter struct {
+	repo *user.MongoRepository
+}
+
+func (a *userOutfitAdapter) GetArchetypeProfile(ctx context.Context, userID string) (map[string]float64, error) {
+	doc, err := a.repo.FindByID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	return doc.ArchetypeProfile, nil
+}
+
+// GetCreativity returns the user's preference (0..1). Missing
+// field → 0.5 (the dial's middle, equivalent to "no preference"
+// since CreativityToTemperature for c=0.5 returns the historical
+// 0.9 default).
+func (a *userOutfitAdapter) GetCreativity(ctx context.Context, userID string) (float64, error) {
+	doc, err := a.repo.FindByID(ctx, userID)
+	if err != nil {
+		return 0, err
+	}
+	if doc.Creativity == nil {
+		return 0.5, nil
+	}
+	return *doc.Creativity, nil
+}
+
 // adminPurgerAdapter satisfies admin.UserPurger by delegating
 // to the privacy.Service while translating the privacy
 // sentinel + report types into the admin-facing equivalents.

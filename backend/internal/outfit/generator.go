@@ -23,6 +23,41 @@ type GeneratorRequest struct {
 	Panels       []SurfaceOption // surfaces the LLM may pick a panel from
 	Backgrounds  []SurfaceOption // surfaces the LLM may pick a background from
 	UseVision    bool            // ask the provider to use image input if it supports it
+
+	// Creativity is a 0..1 user preference that maps to the
+	// LLM's temperature (mootd#67). 0 = predictable, 0.5 =
+	// current default, 1 = high variance. See CreativityToTemperature
+	// for the mapping. Zero-value (no profile preference) means
+	// "use the provider's existing default" — same behaviour as
+	// pre-#67 callers.
+	Creativity float64
+}
+
+// CreativityToTemperature translates the user-facing 0..1 slider
+// to a provider temperature (mootd#67). Values are clamped to
+// the LLM's safe range:
+//
+//	0.0 → 0.5  (conservative, low variance)
+//	0.5 → 0.9  (current default; identical behaviour to pre-#67)
+//	1.0 → 1.2  (high variance)
+//
+// Linear in between. Returns 0 when creativity is 0 (caller's
+// signal that no preference was supplied), so generators can
+// keep their compiled-in defaults.
+func CreativityToTemperature(creativity float64) float64 {
+	if creativity <= 0 {
+		return 0
+	}
+	if creativity > 1 {
+		creativity = 1
+	}
+	// Linear: 0 → 0.5, 0.5 → 0.9, 1 → 1.2.
+	// Two-segment: 0..0.5 maps to 0.5..0.9 (slope 0.8);
+	//              0.5..1 maps to 0.9..1.2 (slope 0.6).
+	if creativity <= 0.5 {
+		return 0.5 + creativity*0.8
+	}
+	return 0.9 + (creativity-0.5)*0.6
 }
 
 // GenItem is the trimmed wardrobe-item shape passed to generators.

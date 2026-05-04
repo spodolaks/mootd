@@ -66,6 +66,13 @@ type CallContext struct {
 	// Empty for outfit-generation; populated by the wardrobe
 	// adapter when the detection handler creates a run id upfront.
 	DetectionRunID string
+
+	// Granular cost-tagging dimensions (mootd#63). Optional;
+	// callers populate what they have. Recorder copies them
+	// onto the row.
+	WardrobeItemCount int
+	ImageCount        int
+	RecentBoardCount  int
 }
 
 // CallObservation is the result of calling the LLM, packaged so we
@@ -84,6 +91,17 @@ type CallObservation struct {
 	StartedAt        time.Time
 	EndedAt          time.Time
 	Err              error // nil on success
+
+	// Token-region split (mootd#63). Optional — callers
+	// populate what their generator API exposes. For Anthropic
+	// + OpenAI the prompt is split into system + user roles in
+	// the API response. SystemTokens + UserTokens should sum to
+	// InputTokens; ResponseTokens should equal OutputTokens
+	// (kept separate so callers don't have to reach into the
+	// totals when they have role-level numbers).
+	SystemTokens   int
+	UserTokens     int
+	ResponseTokens int
 }
 
 // archivalFieldMaxBytes caps any single archival field. The actual
@@ -115,6 +133,16 @@ func (r *LLMRecorder) Record(ctx context.Context, cc CallContext, obs CallObserv
 		errorMsg = truncateErr(obs.Err.Error(), 1024)
 	}
 
+	// CacheHitRatio = cacheRead / (cacheRead + cacheWrite + input)
+	// (mootd#63). Stored on the row so analytics can $group on
+	// the ratio directly. Zero denominator → 0; we don't
+	// divide-by-zero or stash a special sentinel.
+	cacheTotal := obs.CacheReadTokens + obs.CacheWriteTokens + obs.InputTokens
+	cacheHitRatio := 0.0
+	if cacheTotal > 0 {
+		cacheHitRatio = float64(obs.CacheReadTokens) / float64(cacheTotal)
+	}
+
 	row := LLMCall{
 		ID:               generateLLMCallID(),
 		TraceID:          cc.TraceID,
@@ -139,6 +167,14 @@ func (r *LLMRecorder) Record(ctx context.Context, cc CallContext, obs CallObserv
 		ResponseRaw:     truncateField(obs.RawResponse),
 		WardrobeItemIDs: cc.WardrobeItemIDs,
 		DetectionRunID:  cc.DetectionRunID,
+		// Granular cost-tagging (mootd#63).
+		WardrobeItemCount: cc.WardrobeItemCount,
+		ImageCount:        cc.ImageCount,
+		RecentBoardCount:  cc.RecentBoardCount,
+		SystemTokens:      obs.SystemTokens,
+		UserTokens:        obs.UserTokens,
+		ResponseTokens:    obs.ResponseTokens,
+		CacheHitRatio:     cacheHitRatio,
 	}
 	// PromptHash dedupe key. Prefer PromptText (caller's pre-built
 	// concat) over re-stitching, but fall back to system+user when

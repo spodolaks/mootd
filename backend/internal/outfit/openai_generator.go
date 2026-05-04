@@ -49,6 +49,14 @@ func (g *OpenAIGenerator) Generate(ctx context.Context, req GeneratorRequest) ([
 	systemPrompt := buildSystemPrompt(req.UserID, req.Weather, req.RecentBoards, req.TopArchetypes, req.Panels, req.Backgrounds)
 	userMessage := BuildUserMessage(req.Items)
 
+	// mootd#67 — translate user creativity preference to
+	// temperature when supplied; otherwise keep the historical
+	// 0.9 default (so a request without creativity still hits
+	// the same LLM behaviour as before).
+	temperature := 0.9
+	if t := CreativityToTemperature(req.Creativity); t > 0 {
+		temperature = t
+	}
 	payload := openaiChatRequest{
 		Model: g.cfg.Model,
 		Messages: []openaiMessage{
@@ -56,7 +64,7 @@ func (g *OpenAIGenerator) Generate(ctx context.Context, req GeneratorRequest) ([
 			{Role: "user", Content: userMessage},
 		},
 		ResponseFormat: &openaiResponseFormat{Type: "json_object"},
-		Temperature:    0.9,
+		Temperature:    temperature,
 		MaxTokens:      2048,
 	}
 

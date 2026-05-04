@@ -26,7 +26,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 
-import { Icon, SettingsRow, SettingsSection } from '@/src/components';
+import { Icon, SegmentedControl, SettingsRow, SettingsSection } from '@/src/components';
+import { apiClient } from '@/src/data/api/client';
 import { useColorScheme } from '@/src/hooks';
 import { usePreferencesStore } from '@/src/store/preferencesStore';
 import { useAuthStore } from '@/src/store';
@@ -81,6 +82,21 @@ export const PreferencesScreen: React.FC = () => {
     prefs.setDisplayName(draftName.trim());
     // TODO: PUT /v1/user/profile on backend
   }, [draftName, prefs]);
+
+  // mootd#67 — creativity slider. Five-step segmented control
+  // mapping to {0, 0.25, 0.5, 0.75, 1}. Optimistic local update
+  // + best-effort PUT /v1/user/profile; a network failure logs
+  // and the next save retries.
+  const handleCreativityChange = useCallback((value: string) => {
+    const c = parseFloat(value);
+    if (!Number.isFinite(c)) return;
+    prefs.setCreativity(c);
+    void apiClient
+      .put('/v1/user/profile', { creativity: c })
+      .catch((err: unknown) => {
+        console.warn('[Preferences] creativity sync failed:', err);
+      });
+  }, [prefs]);
 
   const handleDeleteAccount = useCallback(() => {
     const doDelete = () => {
@@ -219,6 +235,26 @@ export const PreferencesScreen: React.FC = () => {
           />
         </SettingsSection>
 
+        {/* ── Outfit creativity (mootd#67) ─────────────────────────────── */}
+        <SettingsSection title="Outfit creativity" color={secondary} cardBackground={cardBg}>
+          <View style={styles.creativityRow}>
+            <Text style={[styles.creativityHint, { color: secondary }]}>
+              Slide left for predictable outfits, right for surprising ones.
+            </Text>
+            <SegmentedControl
+              options={[
+                { label: 'Safe', value: '0' },
+                { label: 'Mostly safe', value: '0.25' },
+                { label: 'Balanced', value: '0.5' },
+                { label: 'Surprising', value: '0.75' },
+                { label: 'Bold', value: '1' },
+              ]}
+              selectedValue={String(prefs.creativity)}
+              onValueChange={handleCreativityChange}
+            />
+          </View>
+        </SettingsSection>
+
         {/* ── Account ─────────────────────────────────────────────────── */}
         <SettingsSection title="Account" color={secondary} cardBackground={cardBg}>
           <View style={styles.editRow}>
@@ -303,7 +339,19 @@ export const PreferencesScreen: React.FC = () => {
 
 // ─── Styles ──────────────────────────────────────────────────────────────────
 
+const creativityStyles = {
+  creativityRow: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    gap: 12,
+  } as const,
+  creativityHint: {
+    ...typography.footnote.regular,
+  } as const,
+};
+
 const styles = StyleSheet.create({
+  ...creativityStyles,
   container: { flex: 1 },
   header: {
     flexDirection: 'row',

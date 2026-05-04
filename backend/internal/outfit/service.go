@@ -23,9 +23,20 @@ type wardrobeRepository interface {
 	GetImage(ctx context.Context, itemID string) ([]byte, string, error)
 }
 
-// userProfileProvider reads the user's archetype profile.
+// userProfileProvider reads the user's archetype profile and
+// (optionally, mootd#67) the user's creativity preference.
 type userProfileProvider interface {
 	GetArchetypeProfile(ctx context.Context, userID string) (map[string]float64, error)
+}
+
+// creativityProvider is an optional extension of userProfileProvider
+// (mootd#67). When the wired implementation satisfies it, the
+// outfit service reads the user's preference and threads it through
+// to the generator's temperature. Implementations that don't satisfy
+// this interface degrade to the historical "use the provider's
+// default temperature" behaviour — no breakage for old wirings.
+type creativityProvider interface {
+	GetCreativity(ctx context.Context, userID string) (float64, error)
 }
 
 // UserProfileFunc adapts a function to satisfy userProfileProvider.
@@ -309,6 +320,19 @@ func (s *Service) GenerateOutfits(ctx context.Context, userID string, weather We
 		}
 	}
 
+	// mootd#67 — read creativity preference if the wired
+	// userProfile satisfies the optional creativityProvider
+	// interface. Failure / missing interface → 0 → generator
+	// keeps its compiled-in default.
+	var creativity float64
+	if cp, ok := s.userProfile.(creativityProvider); ok {
+		if c, err := cp.GetCreativity(ctx, userID); err != nil {
+			s.logger.Printf("outfit: creativity fetch failed for user %s: %v (using provider default)", userID, err)
+		} else {
+			creativity = c
+		}
+	}
+
 	req := GeneratorRequest{
 		UserID:        userID,
 		Items:         genItems,
@@ -318,6 +342,7 @@ func (s *Service) GenerateOutfits(ctx context.Context, userID string, weather We
 		Panels:        panels,
 		Backgrounds:   backgrounds,
 		UseVision:     s.useVision,
+		Creativity:    creativity,
 	}
 
 	s.logger.Printf("outfit: %s generator for user %s (%d items, weather=%s/%s, recent=%d, archetype=%s)",
