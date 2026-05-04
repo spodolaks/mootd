@@ -5,3 +5,4 @@ export { useGoogleAuth, fetchGoogleUserInfo } from './useGoogleAuth';
 export type { GoogleUserInfo } from './useGoogleAuth';
 export { useWeather } from './useWeather';
 export type { WeatherData, UseWeatherResult } from './useWeather';
+export { useConnectivity } from './useConnectivity';

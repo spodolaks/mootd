@@ -3,6 +3,7 @@ import {
   Icon,
   Modal,
 } from '@/src/components';
+import { Skeleton } from '@/src/components/ui';
 import { useColorScheme } from '@/src/hooks';
 import { backgrounds, button, fills, grays, labels } from '@/src/theme/colors';
 import { typography } from '@/src/theme/typography';
@@ -11,6 +12,7 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -103,6 +105,7 @@ export const WardrobeScreen: React.FC = () => {
   const [isAddModalVisible, setIsAddModalVisible] = useState(false);
   const [wardrobeItems, setWardrobeItems] = useState<WardrobeItem[]>([]);
   const [isLoadingItems, setIsLoadingItems] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false); // mootd#50 — pull-to-refresh
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
 
@@ -130,6 +133,24 @@ export const WardrobeScreen: React.FC = () => {
       Alert.alert('Error', msg);
     } finally {
       setIsLoadingItems(false);
+    }
+  }, []);
+
+  // mootd#50 — pull-to-refresh handler. Distinct state from
+  // isLoadingItems so the spinner-on-cold-start path stays
+  // skeleton-driven; the refresh path keeps existing rows in
+  // place and only spins the native pull indicator.
+  const onRefresh = useCallback(async () => {
+    setIsRefreshing(true);
+    try {
+      const { items, nextCursor: cursor } = await wardrobeRepository.getItems();
+      setWardrobeItems(items);
+      setNextCursor(cursor);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to refresh wardrobe.';
+      Alert.alert('Error', msg);
+    } finally {
+      setIsRefreshing(false);
     }
   }, []);
 
@@ -287,6 +308,9 @@ export const WardrobeScreen: React.FC = () => {
         key={item.id}
         style={styles.gridItem}
         onPress={() => handleItemPress(item)}
+        testID={`wardrobe-item-${item.id}`}
+        accessibilityRole="button"
+        accessibilityLabel={`Open ${item.label}`}
       >
         <View style={[styles.clothingCard, { backgroundColor: cardBgColor }]}>
           <ClothingCardImage
@@ -303,9 +327,17 @@ export const WardrobeScreen: React.FC = () => {
 
   const renderListEmpty = useCallback(() => {
     if (isLoadingItems && wardrobeItems.length === 0) {
+      // mootd#50 — six skeleton cards on initial load. Same
+      // grid layout as the real cards (numColumns=2) so
+      // there's no jump when data arrives.
       return (
-        <View style={styles.centeredState}>
-          <ActivityIndicator size="large" color={textColor} />
+        <View style={styles.skeletonGrid}>
+          {[0, 1, 2, 3, 4, 5].map((i) => (
+            <View key={i} style={styles.skeletonItem}>
+              <Skeleton style={styles.skeletonImage} />
+              <Skeleton style={styles.skeletonLabel} />
+            </View>
+          ))}
         </View>
       );
     }
@@ -318,7 +350,7 @@ export const WardrobeScreen: React.FC = () => {
         </Text>
       </View>
     );
-  }, [isLoadingItems, wardrobeItems.length, textColor, secondaryTextColor]);
+  }, [isLoadingItems, wardrobeItems.length, secondaryTextColor]);
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor }]} edges={['top']}>
@@ -365,6 +397,14 @@ export const WardrobeScreen: React.FC = () => {
             </View>
           ) : null
         }
+        // mootd#50 — pull-to-refresh.
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={() => { void onRefresh(); }}
+            tintColor={textColor}
+          />
+        }
         onEndReached={() => { void loadMore(); }}
         onEndReachedThreshold={0.5}
         style={styles.gridContainer}
@@ -392,6 +432,8 @@ export const WardrobeScreen: React.FC = () => {
         size="lg"
         onPress={handleAddPress}
         style={[styles.fab, { bottom: PILL_GUTTER + 8 }]}
+        testID="wardrobe-add-item"
+        accessibilityLabel="Add a new wardrobe item"
       />
 
       {/* Add Item Modal */}
@@ -516,6 +558,29 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     paddingTop: 60,
+  },
+  // mootd#50 — skeleton placeholders during initial load. Match
+  // the real-card grid (2 cols, square image + caption below)
+  // so there's no layout jump when data arrives.
+  skeletonGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    paddingHorizontal: 16,
+    gap: 12,
+  },
+  skeletonItem: {
+    width: '47%',
+    gap: 6,
+  },
+  skeletonImage: {
+    aspectRatio: 1,
+    borderRadius: 12,
+  },
+  skeletonLabel: {
+    height: 12,
+    width: '70%',
+    alignSelf: 'center',
+    borderRadius: 4,
   },
   emptyText: {
     ...typography.subheadline.regular,

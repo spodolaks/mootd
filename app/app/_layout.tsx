@@ -13,6 +13,7 @@ import { ColorSchemeProvider, useColorScheme } from '@/src/hooks';
 import { useAuthStore } from '@/src/store';
 import * as events from '@/src/lib/events';
 import { getApiBaseURL } from '@/src/data/api/client';
+import { OfflineBanner } from '@/src/components/ui';
 
 // ─── Error Boundary ──────────────────────────────────────────────────────────
 
@@ -222,6 +223,10 @@ function RootLayoutContent() {
 
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+      {/* mootd#48 — sticky offline banner. Renders nothing while
+          connected; becomes visible above the navigator when
+          NetInfo reports !isConnected. */}
+      <OfflineBanner />
       <Stack>
         <Stack.Screen name="index" options={{ headerShown: false }} />
         <Stack.Screen name="build-wardrobe" options={{ headerShown: false }} />

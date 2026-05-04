@@ -184,7 +184,12 @@ export const ItemDetailsScreen: React.FC = () => {
           {isSaving ? (
             <ActivityIndicator color={button.primary.background[colorScheme]} />
           ) : (
-            <GradientButton label="Save" onPress={() => { void handleSave(); }} />
+            <GradientButton
+              label="Save"
+              onPress={() => { void handleSave(); }}
+              testID="item-details-save"
+              accessibilityLabel="Save changes to this item"
+            />
           )}
         </View>
       </KeyboardAvoidingView>

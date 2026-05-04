@@ -70,6 +70,8 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
               icon="google"
               onPress={handleGoogleSignIn}
               disabled={isLoading}
+              testID="login-google"
+              accessibilityLabel="Sign in with Google"
             />
             {errorMessage ? (
               <Text

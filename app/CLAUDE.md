@@ -140,6 +140,18 @@ title: { ...typography.largeTitle.semiBold }
 - Use `SafeAreaView` from `react-native-safe-area-context` for screens
 - For images, use `expo-image` with `cachePolicy` for optimized loading and caching. For images that may have expired URLs (signed GCS links), track `onError` state per image and fall back to a placeholder icon
 
+### testID + accessibilityLabel (mootd#52)
+
+Every interactive surface must carry both:
+
+- **`testID`** — kebab-case, action-verb-prefixed. Stable selector for future Maestro / Detox flows. Examples: `login-google`, `tab-moodboard`, `wardrobe-item-{id}`, `moodboard-generate`, `outfit-card-choose`.
+- **`accessibilityLabel`** — full sentence read by VoiceOver / TalkBack when no visible text describes the control. Icon-only buttons (heart, eye, swap) MUST set this; text buttons may omit it (the label is read from the visible label).
+
+Conventions:
+- Lists carry per-item testIDs `{collection}-item-{id}` so a test can assert on a specific row.
+- Tab bar uses `tab-{routeName}` so the tab key matches the file-route name.
+- Modals + popovers tag their primary action with the verb (`save-confirm`, `delete-confirm`).
+
 ## Adding a New Screen
 
 1. Create route file: `app/my-screen.tsx`

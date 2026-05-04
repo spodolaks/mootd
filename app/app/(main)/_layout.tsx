@@ -89,6 +89,7 @@ function FloatingPillTabBar({ state, descriptors: _descriptors, navigation }: Bo
               accessibilityRole="button"
               accessibilityState={isFocused ? { selected: true } : {}}
               accessibilityLabel={config.label}
+              testID={`tab-${route.name}`}
             >
               <AddTab icon={config.icon} label={config.label} selected={isFocused} />
             </Pressable>

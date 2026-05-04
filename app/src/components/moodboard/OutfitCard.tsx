@@ -258,6 +258,7 @@ const OutfitCardBase: React.FC<OutfitCardProps> = ({
                 accessibilityRole="button"
                 accessibilityLabel="Rate outfit thumbs up"
                 accessibilityState={{ selected: rating === 'up', disabled: isRated || isSaving }}
+                testID="outfit-card-thumbs-up"
               >
                 <Icon
                   name="thumbs-up"
@@ -276,6 +277,7 @@ const OutfitCardBase: React.FC<OutfitCardProps> = ({
                 accessibilityRole="button"
                 accessibilityLabel="Rate outfit thumbs down"
                 accessibilityState={{ selected: rating === 'down', disabled: isRated || isSaving }}
+                testID="outfit-card-thumbs-down"
               >
                 <Icon
                   name="thumbs-down"
@@ -291,6 +293,7 @@ const OutfitCardBase: React.FC<OutfitCardProps> = ({
             disabled={isSaving}
             accessibilityRole="button"
             accessibilityLabel="Choose this outfit"
+            testID="outfit-card-choose"
           >
             {isSaving ? (
               <ActivityIndicator size="small" color={btnText} />

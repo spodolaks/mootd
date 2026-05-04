@@ -5,7 +5,8 @@ import { typography } from '@/src/theme/typography';
 import { spacing } from '@/src/theme/spacing';
 import { radius } from '@/src/theme/radius';
 import React, { useState, useCallback, useMemo } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import { Skeleton } from '@/src/components/ui';
 import { Image } from 'expo-image';
 import { Calendar, DateData } from 'react-native-calendars';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -31,6 +32,7 @@ export const CalendarScreen: React.FC = () => {
   const [boards, setBoards] = useState<SavedMoodBoard[]>([]);
   const [itemMap, setItemMap] = useState<Map<string, WardrobeItem>>(new Map());
   const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false); // mootd#50 — pull-to-refresh
   // #24 — track which platform a share is currently in-flight for so we
   // can disable both buttons + show a spinner, preventing double-tap
   // double-downloads on Instagram web.
@@ -70,6 +72,28 @@ export const CalendarScreen: React.FC = () => {
       return () => { cancelled = true; };
     }, []),
   );
+
+  // mootd#50 — pull-to-refresh handler. Same load steps as the
+  // focus effect but keeps `isLoading` low so the existing
+  // calendar grid stays put; the native pull spinner is the
+  // only spinner shown.
+  const onRefresh = useCallback(async () => {
+    setIsRefreshing(true);
+    try {
+      const [boardsList, { items }] = await Promise.all([
+        moodBoardRepository.list(),
+        wardrobeRepository.getItems(),
+      ]);
+      setBoards(boardsList);
+      const map = new Map<string, WardrobeItem>();
+      for (const item of items) map.set(item.id, item);
+      setItemMap(map);
+    } catch {
+      // silently fail — same UX as focus load.
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, []);
 
   // Index boards by date for quick lookup
   const boardsByDate = useMemo(() => {
@@ -150,6 +174,13 @@ export const CalendarScreen: React.FC = () => {
         style={styles.scrollView}
         contentContainerStyle={[styles.scrollContent, { paddingBottom: tabBottomPadding }]}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={() => { void onRefresh(); }}
+            tintColor={textColor}
+          />
+        }
       >
         {/* Calendar */}
         <View style={[styles.calendarContainer, { backgroundColor: cardBg }]}>
@@ -180,8 +211,13 @@ export const CalendarScreen: React.FC = () => {
 
         {/* Selected date outfit */}
         {isLoading ? (
-          <View style={styles.detailLoading}>
-            <ActivityIndicator size="small" color={textColor} />
+          // mootd#50 — skeleton outfit card on initial load.
+          // Same dimensions as the real card so there's no
+          // jump when data arrives.
+          <View style={[styles.outfitCard, { backgroundColor: cardBg }]}>
+            <Skeleton style={styles.skeletonTitle} />
+            <Skeleton style={styles.skeletonDesc} />
+            <Skeleton style={styles.skeletonHero} />
           </View>
         ) : selectedBoard ? (
           <View style={[styles.outfitCard, { backgroundColor: cardBg }]}>
@@ -360,6 +396,23 @@ const styles = StyleSheet.create({
     borderRadius: radius.xl,
     padding: spacing.md,
     gap: spacing.sm,
+  },
+  // mootd#50 — skeleton outfit-card placeholders.
+  skeletonTitle: {
+    height: 22,
+    width: '60%',
+    borderRadius: 4,
+  },
+  skeletonDesc: {
+    height: 14,
+    width: '90%',
+    borderRadius: 4,
+  },
+  skeletonHero: {
+    width: '100%',
+    aspectRatio: 1,
+    borderRadius: radius.lg,
+    marginTop: spacing.sm,
   },
   outfitDescription: {
     lineHeight: 20,

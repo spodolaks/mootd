@@ -355,7 +355,13 @@ export const MoodBoardScreen: React.FC = () => {
             <Text style={[styles.emptyText, { color: textColor }]}>
               Generate your first{'\n'}mood board
             </Text>
-            <GradientButton label="Generate" icon="sunrise" onPress={() => { void handleGeneratePress(); }} />
+            <GradientButton
+              label="Generate"
+              icon="sunrise"
+              onPress={() => { void handleGeneratePress(); }}
+              testID="moodboard-generate"
+              accessibilityLabel="Generate outfits"
+            />
           </View>
         );
 
