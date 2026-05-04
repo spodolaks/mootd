@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"mootd/backend/eval"
@@ -80,7 +81,7 @@ func (a *evalGeneratorAdapter) GenerateForEval(ctx context.Context, t admin.Eval
 	// Surface it as the outer error so the per-case row reads
 	// "generate: <message>" rather than swallowing it.
 	if res.Error != "" {
-		return "", "", 0, 0, 0, fmt.Errorf(res.Error)
+		return "", "", 0, 0, 0, errors.New(res.Error)
 	}
 
 	// Count automated checks. Excludes the prompt-construction

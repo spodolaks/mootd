@@ -9,6 +9,68 @@ import (
 	"net/http"
 )
 
+// ErrorCode is a stable, machine-readable error code (mootd#41).
+// Clients (RN app, admin frontend) switch on this — never on
+// the human-readable `error` message — to decide retry / display
+// behaviour. Adding a new code is a non-breaking change; renaming
+// or removing one breaks every client and shouldn't ship without
+// a contract review.
+type ErrorCode string
+
+const (
+	// CodeInvalidToken — JWT missing, malformed, or expired
+	// (and refresh path didn't recover).
+	CodeInvalidToken ErrorCode = "INVALID_TOKEN"
+
+	// CodeMissingField — request body missing a required field
+	// or violating a basic shape constraint.
+	CodeMissingField ErrorCode = "MISSING_FIELD"
+
+	// CodeInvalidInput — request validated structurally but
+	// values are out of range / disallowed.
+	CodeInvalidInput ErrorCode = "INVALID_INPUT"
+
+	// CodeQuotaExceeded — per-user budget cap hit
+	// (mootd-admin#30). Carries `retryAfter` (seconds).
+	CodeQuotaExceeded ErrorCode = "QUOTA_EXCEEDED"
+
+	// CodeRateLimited — per-IP or per-user rate limiter
+	// triggered. Distinct from QuotaExceeded: this is
+	// short-window protection, not a daily/monthly cap.
+	CodeRateLimited ErrorCode = "RATE_LIMITED"
+
+	// CodeUpstreamTimeout — LLM / detection service didn't
+	// respond inside the per-call deadline.
+	CodeUpstreamTimeout ErrorCode = "UPSTREAM_TIMEOUT"
+
+	// CodeUpstreamError — upstream returned 5xx / unparseable
+	// payload. Distinguishes transport failure from valid
+	// upstream "this won't work" responses.
+	CodeUpstreamError ErrorCode = "UPSTREAM_ERROR"
+
+	// CodeNotFound — entity does not exist or caller doesn't
+	// own it (we 404 owner-mismatch as a privacy hardening).
+	CodeNotFound ErrorCode = "NOT_FOUND"
+
+	// CodeForbidden — auth succeeded but the action is denied
+	// (RBAC, ownership, MFA-required, etc).
+	CodeForbidden ErrorCode = "FORBIDDEN"
+
+	// CodeConflict — write would violate a uniqueness/state
+	// constraint (e.g. starting a 2nd active A/B test).
+	CodeConflict ErrorCode = "CONFLICT"
+
+	// CodeServiceUnavailable — a soft-dependency isn't wired
+	// (e.g. async outfit gen requested without Redis). Distinct
+	// from UpstreamError: this is misconfiguration, not a flaky
+	// dependency.
+	CodeServiceUnavailable ErrorCode = "SERVICE_UNAVAILABLE"
+
+	// CodeInternal — anything not classified above. Surface in
+	// logs with full detail; keep the wire message generic.
+	CodeInternal ErrorCode = "INTERNAL"
+)
+
 // WriteJSON encodes payload as JSON and writes it with the given status code.
 func WriteJSON(w http.ResponseWriter, status int, payload any) {
 	body, err := json.Marshal(payload)
@@ -41,9 +103,25 @@ func WriteJSON(w http.ResponseWriter, status int, payload any) {
 // create an import cycle with shared/middleware.
 //
 // `extra` lets callers attach error-specific fields (e.g.
-// missingPermission, requireMfa). nil is fine.
+// missingPermission, requireMfa, retryAfter). nil is fine.
 func WriteJSONErr(w http.ResponseWriter, status int, message string, extra map[string]any) {
+	WriteJSONErrWithCode(w, status, "", message, extra)
+}
+
+// WriteJSONErrWithCode is WriteJSONErr with the canonical
+// {error, code, requestId} shape (mootd#41). The code field is
+// stable across UI copy changes — clients switch on it for
+// retry / display decisions. Pass empty code "" to omit it
+// (matches WriteJSONErr's behaviour).
+//
+// Migration policy: new error sites MUST pass a code. Existing
+// WriteJSON({error}) sites can be migrated when touched; the
+// requestId header still works for correlation either way.
+func WriteJSONErrWithCode(w http.ResponseWriter, status int, code ErrorCode, message string, extra map[string]any) {
 	body := map[string]any{"error": message}
+	if code != "" {
+		body["code"] = string(code)
+	}
 	if reqID := w.Header().Get("X-Request-ID"); reqID != "" {
 		body["requestId"] = reqID
 	}

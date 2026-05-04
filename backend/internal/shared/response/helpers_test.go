@@ -150,3 +150,32 @@ func TestWriteJSONErr_MergesExtraFields(t *testing.T) {
 		t.Errorf("body missing requestId: %q", got)
 	}
 }
+
+func TestWriteJSONErrWithCode_IncludesCode(t *testing.T) {
+	rec := httptest.NewRecorder()
+	rec.Header().Set("X-Request-ID", "req_q1")
+	WriteJSONErrWithCode(rec, http.StatusTooManyRequests, CodeRateLimited,
+		"too many requests", map[string]any{"retryAfter": 60})
+	got := rec.Body.String()
+	if !strings.Contains(got, `"code":"RATE_LIMITED"`) {
+		t.Errorf("body missing code: %q", got)
+	}
+	if !strings.Contains(got, `"retryAfter":60`) {
+		t.Errorf("body missing retryAfter: %q", got)
+	}
+	if !strings.Contains(got, `"requestId":"req_q1"`) {
+		t.Errorf("body missing requestId: %q", got)
+	}
+	if !strings.Contains(got, `"error":"too many requests"`) {
+		t.Errorf("body missing error: %q", got)
+	}
+}
+
+func TestWriteJSONErrWithCode_EmptyCodeOmitsField(t *testing.T) {
+	rec := httptest.NewRecorder()
+	WriteJSONErrWithCode(rec, http.StatusBadRequest, "", "bad input", nil)
+	got := rec.Body.String()
+	if strings.Contains(got, `"code"`) {
+		t.Errorf("expected no code when empty, got %q", got)
+	}
+}

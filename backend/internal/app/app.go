@@ -26,6 +26,7 @@ import (
 	"mootd/backend/internal/observability"
 	"mootd/backend/internal/outfit"
 	"mootd/backend/internal/privacy"
+	"mootd/backend/internal/shared/metrics"
 	"mootd/backend/internal/shared/middleware"
 	"mootd/backend/internal/surface"
 	"mootd/backend/internal/user"
@@ -255,7 +256,26 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 	adminHandler.RegisterRoutes(mux, authLimit, requireAdmin)
 
 	userRepo := user.NewMongoRepository(a.MongoClient, a.MongoDB)
-	health.NewHandler(a.Logger, a.MongoClient, a.MongoDB).RegisterRoutes(mux)
+	// Health endpoints (mootd#40 / #55).
+	//
+	// Redis is required in production because every fallback
+	// degrades behaviour silently — rate limit drops to
+	// in-memory (per-instance), outfit cache vanishes, async
+	// job state becomes local-only. Outside production we
+	// honour the boot-time wiring decision but don't fail
+	// /readyz for a missing Redis.
+	redisRequired := strings.EqualFold(os.Getenv("ENVIRONMENT"), "production")
+	healthHandler := health.NewHandler(a.Logger, a.MongoClient, a.MongoDB).
+		WithRedis(redisClient, redisRequired)
+	healthHandler.RegisterRoutes(mux)
+
+	// Background heartbeat for metrics.RedisStatus (mootd#39 +
+	// #55). Polls every 15s — same cadence as a typical
+	// Prometheus scrape, so the gauge is rarely older than the
+	// most recent scrape.
+	if redisClient != nil {
+		go redisHeartbeat(workerCtx, redisClient, a.Logger)
+	}
 
 	bgRemover := wardrobe.NewBackgroundRemover(a.BgRemoverBaseURL)
 	detector := wardrobe.NewDetector(a.DetectionAPIBaseURL, a.DetectionAPIKey, a.Logger)
@@ -685,6 +705,13 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 	adminAllowlist := middleware.AdminIPAllowlist(adminCIDRs, a.Logger)
 	gatedMux := http.NewServeMux()
 	gatedMux.Handle("/admin/v1/", adminAllowlist(mux))
+	// /metrics is exempt from the admin IP allowlist + global
+	// rate limiter — Prometheus scrapes every 15s and shouldn't
+	// fight for token bucket against real users. Bind it on the
+	// gated mux so the operator gates exposure at the front
+	// (Caddy basic-auth or firewall) rather than a JWT middleware
+	// that Prometheus doesn't speak.
+	gatedMux.Handle("/metrics", metrics.Handler())
 	gatedMux.Handle("/", mux)
 
 	// Middleware chain (outermost → innermost):
@@ -694,15 +721,19 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 	// carry the same correlation ID. Recover sits just inside so it can log
 	// with that ID before any handler state can be touched. Logging is inside
 	// Recover so it sees the real status code (including 500s written by the
-	// recovery handler).
-	handler := middleware.RequestID(
-		middleware.Recover(a.Logger)(
-			middleware.Logging(a.Logger)(
-				middleware.CORS(a.CORSAllowedOrigins)(
-					rateLimiter(gatedMux),
+	// recovery handler). Metrics.Instrument wraps the entire chain so the
+	// in-flight gauge + duration histogram observe the post-middleware reality.
+	handler := metrics.Instrument(
+		middleware.RequestID(
+			middleware.Recover(a.Logger)(
+				middleware.Logging(a.Logger)(
+					middleware.CORS(a.CORSAllowedOrigins)(
+						rateLimiter(gatedMux),
+					),
 				),
 			),
 		),
+		routeLabel,
 	)
 	return handler, wardrobeRepo, moodboardRepo, rateLimitCloser
 }
@@ -733,6 +764,84 @@ func (a adminPurgerAdapter) Purge(ctx context.Context, userID string) (*admin.Pu
 		Collections: rep.Collections,
 		Total:       rep.Total,
 	}, nil
+}
+
+// redisHeartbeat polls Redis every 15s and updates
+// metrics.RedisStatus. Runs until ctx is cancelled.
+func redisHeartbeat(ctx context.Context, client *redis.Client, logger *log.Logger) {
+	tick := time.NewTicker(15 * time.Second)
+	defer tick.Stop()
+	// Prime the gauge immediately so the first scrape after
+	// boot doesn't see "0 = down" by default.
+	pingAndRecord(ctx, client, logger)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+			pingAndRecord(ctx, client, logger)
+		}
+	}
+}
+
+func pingAndRecord(ctx context.Context, client *redis.Client, logger *log.Logger) {
+	pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	if err := client.Ping(pingCtx).Err(); err != nil {
+		metrics.RedisStatus.Set(0)
+		logger.Printf("redis heartbeat: down (%v)", err)
+		return
+	}
+	metrics.RedisStatus.Set(1)
+}
+
+// routeLabel collapses an HTTP path to a low-cardinality label
+// for the Prometheus duration histogram (mootd#39). Without
+// this every per-id endpoint would emit a separate timeseries
+// (`/v1/wardrobe/items/abc`, `…/def`, …) and exhaust scrape
+// memory.
+//
+// Prefix-trees would scale better but the route surface here is
+// small enough that a switch is the simplest correct thing.
+// New routes need a new case here OR the path collapses to its
+// /vN prefix automatically (the trailing case below).
+func routeLabel(r *http.Request) string {
+	p := r.URL.Path
+	switch {
+	case p == "/healthz", p == "/readyz", p == "/v1/health":
+		return p
+	case p == "/metrics":
+		return "/metrics"
+	case strings.HasPrefix(p, "/v1/wardrobe/items/"):
+		return "/v1/wardrobe/items/{id}"
+	case strings.HasPrefix(p, "/v1/outfits/jobs/"):
+		return "/v1/outfits/jobs/{id}"
+	case strings.HasPrefix(p, "/v1/moodboards/"):
+		return "/v1/moodboards/{id}"
+	case strings.HasPrefix(p, "/admin/v1/users/"):
+		return "/admin/v1/users/{id}"
+	case strings.HasPrefix(p, "/admin/v1/traces/"):
+		return "/admin/v1/traces/{id}"
+	case strings.HasPrefix(p, "/admin/v1/sessions/"):
+		return "/admin/v1/sessions/{id}"
+	case strings.HasPrefix(p, "/admin/v1/detection-runs/"):
+		return "/admin/v1/detection-runs/{id}"
+	case strings.HasPrefix(p, "/admin/v1/funnels/"):
+		return "/admin/v1/funnels/{id}"
+	case strings.HasPrefix(p, "/admin/v1/evals/"):
+		return "/admin/v1/evals/{id}"
+	case strings.HasPrefix(p, "/admin/v1/prompts/"):
+		return "/admin/v1/prompts/{name}"
+	case strings.HasPrefix(p, "/v1/surfaces/"):
+		return "/v1/surfaces/{id}"
+	}
+	// Catch-all: collapse anything past the third segment so a
+	// random new route doesn't blow up cardinality.
+	parts := strings.SplitN(p, "/", 5)
+	if len(parts) >= 5 {
+		return "/" + parts[1] + "/" + parts[2] + "/" + parts[3] + "/*"
+	}
+	return p
 }
 
 type surfaceAdapter struct {

@@ -5,6 +5,29 @@ const DEFAULT_API_BASE_URL =
   Platform.OS === 'web' ? 'https://api.spodolaks.id.lv' : 'http://127.0.0.1:8089';
 const DEFAULT_TIMEOUT_MS = 10_000; // 10 seconds
 
+/**
+ * Stable, machine-readable error codes returned by the backend
+ * (mootd#41). Switch on these — never on the human-readable
+ * `message` — for retry / UX-branch decisions.
+ *
+ * Adding a new code is non-breaking; renaming or removing a
+ * code is a contract change.
+ */
+export type ApiErrorCode =
+  | 'INVALID_TOKEN'
+  | 'MISSING_FIELD'
+  | 'INVALID_INPUT'
+  | 'QUOTA_EXCEEDED'
+  | 'RATE_LIMITED'
+  | 'UPSTREAM_TIMEOUT'
+  | 'UPSTREAM_ERROR'
+  | 'NOT_FOUND'
+  | 'FORBIDDEN'
+  | 'CONFLICT'
+  | 'SERVICE_UNAVAILABLE'
+  | 'INTERNAL'
+  | string; // backend may add new codes; allow forward-compat
+
 export class ApiError extends Error {
   status: number;
   details: unknown;
@@ -17,13 +40,27 @@ export class ApiError extends Error {
    * server (network failure, timeout).
    */
   requestId: string;
+  /**
+   * Backend's stable error code (mootd#41). Empty when the
+   * server didn't supply one (older endpoints, network errors,
+   * etc.). Use `code` for retry decisions; fall back to
+   * `status` for HTTP-level branching.
+   */
+  code: ApiErrorCode;
 
-  constructor(message: string, status: number, details: unknown = null, requestId = '') {
+  constructor(
+    message: string,
+    status: number,
+    details: unknown = null,
+    requestId = '',
+    code: ApiErrorCode = '',
+  ) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
     this.details = details;
     this.requestId = requestId;
+    this.code = code;
   }
 }
 
@@ -203,9 +240,19 @@ const request = async <T>(endpoint: string, init: RequestInit = {}, timeoutMs = 
   const requestId = response.headers.get('X-Request-ID') ?? '';
 
   if (!response.ok) {
+    // mootd#41 — pull the stable error code off the body so
+    // callers can switch on it without parsing UI copy.
+    const code =
+      body &&
+      typeof body === 'object' &&
+      'code' in body &&
+      typeof (body as Record<string, unknown>).code === 'string'
+        ? ((body as Record<string, unknown>).code as ApiErrorCode)
+        : '';
+
     // User-friendly message for rate limiting
     if (response.status === 429) {
-      throw new ApiError('You\'re making too many requests. Please wait a moment and try again.', 429, body, requestId);
+      throw new ApiError('You\'re making too many requests. Please wait a moment and try again.', 429, body, requestId, code || 'RATE_LIMITED');
     }
 
     // Attempt token refresh on 401 before throwing
@@ -234,7 +281,7 @@ const request = async <T>(endpoint: string, init: RequestInit = {}, timeoutMs = 
         ? ((body as Record<string, unknown>).error as string)
         : fallbackMessage;
 
-    throw new ApiError(apiMessage, response.status, body, requestId);
+    throw new ApiError(apiMessage, response.status, body, requestId, code);
   }
 
   return body as T;
