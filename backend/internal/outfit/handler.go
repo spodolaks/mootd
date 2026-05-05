@@ -2,6 +2,7 @@ package outfit
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -92,31 +93,50 @@ func (h *Handler) Generate(w http.ResponseWriter, r *http.Request) {
 	response.WriteJSON(w, http.StatusOK, GenerateResponse{Outfits: outfits})
 }
 
-// SubmitGenerate handles POST /v1/outfits/generate — creates an async generation
-// job and returns 202 with the job ID. The actual generation runs in a goroutine.
+// SubmitGenerate handles POST /v1/outfits/generate.
+//
+// Two transport modes (mootd#62):
+//
+//   - Default JSON path (`Accept: application/json` or absent):
+//     creates an async job via Redis, returns 202 + jobId, the
+//     generation runs in a goroutine, the client polls
+//     /v1/outfits/jobs/{id}. Backwards-compatible with every
+//     existing caller.
+//
+//   - SSE path (`Accept: text/event-stream`): keeps the HTTP
+//     connection open through the entire generation and emits
+//     `event: progress` messages with the current
+//     GenerateProgress shape. Final event is `event: done`. Used
+//     by the RN client to render perceived-latency feedback while
+//     the LLM call is in flight.
 //
 // Idempotency (mootd#42): when the caller supplies an
 // `Idempotency-Key` header, a (userId, key) → jobId mapping is
-// stored in Redis with a 60s TTL. A second submit with the same
-// key inside the window returns the original jobID and does NOT
-// start a new job. The RN client is expected to mint a UUID
-// per Generate-button press and retain it across retries — that
-// way a fat-fingered double-tap or a network retry don't pay
-// twice for the same generation.
+// stored in Redis with a 60s TTL. Applied only on the JSON path
+// today — SSE streams aren't replayable in a useful way.
 func (h *Handler) SubmitGenerate(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	if h.jobStore == nil {
-		response.WriteJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "async generation unavailable (Redis not configured)"})
-		return
-	}
-
 	userID, ok := middleware.UserIDFromContext(r.Context())
 	if !ok {
 		response.WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+
+	// SSE branch (mootd#62). Detect Accept header up-front and
+	// dispatch — the rest of this handler stays JSON-only so
+	// idempotency + jobStore wiring don't drift across the two
+	// transports.
+	if wantsSSE(r) {
+		h.handleSSEStream(w, r, userID)
+		return
+	}
+
+	if h.jobStore == nil {
+		response.WriteJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "async generation unavailable (Redis not configured)"})
 		return
 	}
 
@@ -170,6 +190,88 @@ func (h *Handler) SubmitGenerate(w http.ResponseWriter, r *http.Request) {
 	go h.runAsyncGeneration(jobID, userID, weather)
 
 	response.WriteJSON(w, http.StatusAccepted, map[string]string{"jobId": jobID})
+}
+
+// wantsSSE reports whether the caller asked for SSE via Accept
+// header. Only an explicit `text/event-stream` triggers the
+// streaming path — `*/*` keeps the JSON default for the
+// existing wave of clients that don't care.
+func wantsSSE(r *http.Request) bool {
+	accept := r.Header.Get("Accept")
+	if accept == "" {
+		return false
+	}
+	for _, part := range strings.Split(accept, ",") {
+		mt := strings.TrimSpace(strings.SplitN(part, ";", 2)[0])
+		if mt == "text/event-stream" {
+			return true
+		}
+	}
+	return false
+}
+
+// handleSSEStream drives the synchronous SSE path of
+// SubmitGenerate (mootd#62). The caller's Accept header opted
+// in; we keep the connection open through the whole LLM call
+// and emit one `event: progress` per stage milestone, ending
+// with `event: done` (success) or `event: error` (failure).
+func (h *Handler) handleSSEStream(w http.ResponseWriter, r *http.Request, userID string) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		// Server doesn't support streaming — fall back gracefully
+		// so the client at least gets a JSON response instead of
+		// a half-open stream.
+		response.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "streaming unavailable"})
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no") // disable Caddy/nginx buffering
+	w.WriteHeader(http.StatusOK)
+
+	// SSE write helper. Errors silently abort — usually means
+	// the client closed the connection. Service is still
+	// running; it'll log an error and exit at its own context.
+	emit := func(event string, payload any) error {
+		body, marshalErr := json.Marshal(payload)
+		if marshalErr != nil {
+			return marshalErr
+		}
+		if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, body); err != nil {
+			return err
+		}
+		flusher.Flush()
+		return nil
+	}
+
+	weather := parseWeatherParams(r)
+
+	// Generation timeout matches the JSON path. Use the request
+	// context as the parent so client disconnects abort the LLM
+	// call (the client doesn't need the result anymore).
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
+	defer cancel()
+
+	// Bridge the OnProgress callback to SSE wire events.
+	onProgress := func(p GenerateProgress) error {
+		switch p.Stage {
+		case StageDone:
+			return emit("done", p)
+		case StageError:
+			return emit("error", p)
+		default:
+			return emit("progress", p)
+		}
+	}
+
+	if _, err := h.service.GenerateOutfitsWithProgress(ctx, userID, weather, onProgress); err != nil {
+		// Most error categories already emitted via onProgress.
+		// Stage budget-denial through the SSE error event so the
+		// client can show a decent message.
+		_ = emit("error", GenerateProgress{Stage: StageError, Description: err.Error()})
+		h.logger.Printf("outfit: SSE generation failed for user %s: %v", userID, err)
+	}
 }
 
 // runAsyncGeneration performs the full outfit generation pipeline in the background

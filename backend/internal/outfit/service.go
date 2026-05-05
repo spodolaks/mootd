@@ -223,6 +223,83 @@ func NewService(logger *log.Logger, cfg ServiceConfig) *Service {
 // items, score archetypes, check cache, call the LLM generator, validate,
 // apply fallback if needed, and cache the result.
 func (s *Service) GenerateOutfits(ctx context.Context, userID string, weather Weather) ([]Outfit, error) {
+	return s.GenerateOutfitsWithProgress(ctx, userID, weather, nil)
+}
+
+// GenerateOutfitsWithProgress is GenerateOutfits with an
+// optional progress callback (mootd#62). Today's callback fires
+// stage milestones (connecting → streaming → done) around the
+// existing buffered LLM call; per-token streaming inside the
+// generators is a follow-up. nil callback degrades to the old
+// behaviour exactly.
+//
+// The connecting stage fires synchronously before the LLM call
+// so the client immediately sees the connection is alive.
+// During the LLM call, a goroutine fires a `streaming` heartbeat
+// every 2s (with a hint description that escalates over time)
+// so the client knows we haven't stalled. On completion, the
+// `done` stage carries the final outfits.
+func (s *Service) GenerateOutfitsWithProgress(
+	ctx context.Context,
+	userID string,
+	weather Weather,
+	onProgress StreamCallback,
+) ([]Outfit, error) {
+	if onProgress != nil {
+		// Fire-and-forget; if the wire-write fails we let the
+		// generation proceed — the client sees the failure when
+		// the SSE connection drops.
+		_ = onProgress(GenerateProgress{Stage: StageConnecting})
+	}
+
+	// Heartbeat goroutine: keeps the SSE connection alive while
+	// the LLM call is in-flight. Cancelled when the call returns
+	// (success or failure).
+	if onProgress != nil {
+		hbCtx, cancelHb := context.WithCancel(ctx)
+		defer cancelHb()
+		go func() {
+			ticker := time.NewTicker(2 * time.Second)
+			defer ticker.Stop()
+			messages := []string{
+				"Drafting outfits…",
+				"Picking pieces from your wardrobe…",
+				"Matching to today's weather…",
+				"Almost there…",
+			}
+			i := 0
+			for {
+				select {
+				case <-hbCtx.Done():
+					return
+				case <-ticker.C:
+					_ = onProgress(GenerateProgress{
+						Stage:       StageStreaming,
+						Description: messages[i%len(messages)],
+					})
+					i++
+				}
+			}
+		}()
+	}
+
+	outfits, err := s.generateOutfitsImpl(ctx, userID, weather)
+	if err != nil {
+		if onProgress != nil {
+			_ = onProgress(GenerateProgress{Stage: StageError, Description: err.Error()})
+		}
+		return nil, err
+	}
+	if onProgress != nil {
+		_ = onProgress(GenerateProgress{Stage: StageDone, Outfits: outfits})
+	}
+	return outfits, nil
+}
+
+// generateOutfitsImpl is the original buffered pipeline. Kept
+// private so GenerateOutfitsWithProgress can wrap it without
+// callers seeing the signature shift.
+func (s *Service) generateOutfitsImpl(ctx context.Context, userID string, weather Weather) ([]Outfit, error) {
 	items, err := s.wardrobe.FindByUser(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("fetch wardrobe: %w", err)

@@ -6,6 +6,7 @@ import type {
   IWardrobeRepository,
   WardrobeItem,
 } from '@/src/domain';
+import type { OutfitProgress } from '@/src/domain/interfaces/IWardrobeRepository';
 import { Platform } from 'react-native';
 import { ApiError, apiClient, getApiBaseURL, getAuthToken } from '@/src/data/api/client';
 
@@ -269,6 +270,108 @@ export class ApiWardrobeRepository implements IWardrobeRepository {
     const response = await apiClient.post<{ jobId: string }>(url, {}, init);
     console.log(`[Wardrobe] ✓ Job submitted: ${response.jobId}`);
     return response.jobId;
+  }
+
+  // mootd#62 — SSE streaming variant. Opens an SSE connection
+  // to /v1/outfits/generate (Accept: text/event-stream); fires
+  // onProgress per server event with the cumulative shape;
+  // resolves with the final outfits at `event: done`. The
+  // backend bridges per-stage GenerateProgress events
+  // (connecting → streaming heartbeats → done) into the SSE
+  // response so we don't need a separate poll loop.
+  //
+  // SSE parser is hand-rolled (split on blank-line boundaries,
+  // parse `event:` + `data:` fields). RN's fetch supports
+  // body.getReader() since 0.71.
+  async streamOutfitGeneration(
+    onProgress: (p: OutfitProgress) => void,
+    weather?: { temperature: number; condition: string; unit: string },
+    _idempotencyKey?: string,
+  ): Promise<Outfit[]> {
+    const params = new URLSearchParams();
+    if (weather) {
+      params.set('temperature', String(Math.round(weather.temperature)));
+      params.set('condition', weather.condition);
+      params.set('unit', weather.unit === 'fahrenheit' ? 'F' : 'C');
+    }
+    const qs = params.toString();
+    const path = `/v1/outfits/generate${qs ? `?${qs}` : ''}`;
+    const baseURL = getApiBaseURL();
+    const token = getAuthToken();
+    console.log(`[Wardrobe] → POST(stream) ${path}`);
+
+    const res = await fetch(`${baseURL}${path}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'text/event-stream',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({}),
+    });
+    if (!res.ok || !res.body) {
+      throw new Error(`stream open failed: HTTP ${res.status}`);
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    let buffer = '';
+    let final: Outfit[] | null = null;
+    let lastError: string | null = null;
+
+    const parseEvent = (block: string): { event: string; data: string } | null => {
+      let event = 'message';
+      const dataLines: string[] = [];
+      for (const line of block.split('\n')) {
+        if (line.startsWith('event:')) {
+          event = line.slice(6).trim();
+        } else if (line.startsWith('data:')) {
+          dataLines.push(line.slice(5).trim());
+        }
+      }
+      if (dataLines.length === 0) return null;
+      return { event, data: dataLines.join('\n') };
+    };
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      let idx;
+      while ((idx = buffer.indexOf('\n\n')) !== -1) {
+        const block = buffer.slice(0, idx);
+        buffer = buffer.slice(idx + 2);
+        const parsed = parseEvent(block);
+        if (!parsed) continue;
+        try {
+          const payload = JSON.parse(parsed.data);
+          const stage: OutfitProgress['stage'] = parsed.event === 'done'
+            ? 'done'
+            : parsed.event === 'error'
+              ? 'error'
+              : 'streaming';
+          const outfits = payload.outfits
+            ? (payload.outfits as Outfit[]).map(hydrateOutfitUrls)
+            : undefined;
+          onProgress({
+            stage,
+            outfits,
+            description: payload.description,
+          });
+          if (parsed.event === 'done' && outfits) {
+            final = outfits;
+          } else if (parsed.event === 'error') {
+            lastError = String(payload.description ?? 'streaming failed');
+          }
+        } catch (err) {
+          console.warn(`[Wardrobe] SSE parse error: ${err}`);
+        }
+      }
+    }
+
+    if (final) return final;
+    throw new Error(lastError ?? 'stream ended without final outfits');
   }
 
   async pollOutfitJob(jobId: string): Promise<{ status: 'pending' | 'processing' | 'completed' | 'failed'; outfits?: Outfit[]; error?: string }> {

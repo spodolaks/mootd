@@ -31,7 +31,59 @@ type GeneratorRequest struct {
 	// "use the provider's existing default" — same behaviour as
 	// pre-#67 callers.
 	Creativity float64
+
+	// OnProgress, when non-nil, opts the request into streaming
+	// (mootd#62). Generators that support SSE / streaming JSON
+	// fire callbacks as partial output arrives so the FE can
+	// render description + items as they're produced. Generators
+	// without streaming support ignore the callback and return
+	// the full result at end of call (back-compat).
+	//
+	// The callback receives a snapshot of the partial state. It
+	// may be called many times (anywhere from 0 to dozens per
+	// generation depending on chunk granularity) and is expected
+	// to be cheap — generators serialise calls so the callback
+	// can write to the wire without locking.
+	//
+	// Returning a non-nil error from the callback aborts the
+	// stream. Generators wrap it as an outer error from Generate.
+	OnProgress StreamCallback
 }
+
+// StreamCallback receives partial generation progress (mootd#62).
+// Implementations are expected to be cheap — typically writing
+// one SSE event to the response stream. See SubmitGenerate for
+// the wire format.
+type StreamCallback func(GenerateProgress) error
+
+// GenerateProgress is one snapshot of an in-flight generation.
+// Each event carries the cumulative state, not a delta — so a
+// late-joining client (or a client that drops events) sees a
+// consistent picture from any single event.
+type GenerateProgress struct {
+	// Stage is a coarse milestone label so the FE can render an
+	// indeterminate progress message early ("connecting" → "drafting"
+	// → "finishing") before any outfit content arrives.
+	Stage ProgressStage `json:"stage"`
+	// Outfits is the cumulative outfit list seen so far. Empty
+	// during the connecting / streaming-prelude stages; populated
+	// progressively as the LLM emits each entry.
+	Outfits []Outfit `json:"outfits,omitempty"`
+	// Description is a free-text "what is the model doing right
+	// now" hint surfaced by some providers (e.g. Anthropic content
+	// blocks). Optional; FE may ignore.
+	Description string `json:"description,omitempty"`
+}
+
+// ProgressStage is the coarse-grained progress label.
+type ProgressStage string
+
+const (
+	StageConnecting ProgressStage = "connecting" // SSE established
+	StageStreaming  ProgressStage = "streaming"  // tokens flowing
+	StageDone       ProgressStage = "done"       // final result attached
+	StageError      ProgressStage = "error"      // generation failed; details on Description
+)
 
 // CreativityToTemperature translates the user-facing 0..1 slider
 // to a provider temperature (mootd#67). Values are clamped to

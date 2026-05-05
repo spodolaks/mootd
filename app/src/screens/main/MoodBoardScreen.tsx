@@ -55,6 +55,10 @@ export const MoodBoardScreen: React.FC = () => {
   const [isSaving, setIsSaving] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
   const [cardHeight, setCardHeight] = useState(0);
+  // mootd#62 — progress message during streaming generation.
+  // Updated by the SSE callback so the user sees "Drafting
+  // outfits…" / "Almost there…" instead of a static spinner.
+  const [progressMessage, setProgressMessage] = useState<string | null>(null);
 
   // Swap item modal state
   const [swapTarget, setSwapTarget] = useState<{ outfitIndex: number; itemId: string } | null>(null);
@@ -111,6 +115,7 @@ export const MoodBoardScreen: React.FC = () => {
 
   const handleGeneratePress = async () => {
     setScreenState('generating');
+    setProgressMessage(null);
     try {
       const weatherParams = weather
         ? { temperature: weather.temperature, condition: weather.condition, unit: weather.unit }
@@ -128,21 +133,34 @@ export const MoodBoardScreen: React.FC = () => {
       let outfits: Outfit[];
       let jobId: string | undefined;
       try {
-        // Submit async job
-        jobId = await wardrobeRepository.submitOutfitGeneration(weatherParams, idempotencyKey);
-
-        // Poll every 2 seconds until complete
-        let result: { status: string; outfits?: Outfit[]; error?: string };
-        do {
-          await new Promise(resolve => setTimeout(resolve, 2000));
-          result = await wardrobeRepository.pollOutfitJob(jobId);
-        } while (result.status === 'pending' || result.status === 'processing');
-
-        if (result.status === 'failed') {
-          throw new Error(result.error || 'Outfit generation failed');
+        // mootd#62 — prefer the streaming path when the repo
+        // implements it. Surfaces per-stage progress messages
+        // ("Drafting outfits…" etc.) while the LLM call is in
+        // flight, so the user sees activity instead of a blank
+        // spinner. Polling fallback path stays intact for
+        // implementations without streaming.
+        if (wardrobeRepository.streamOutfitGeneration) {
+          outfits = await wardrobeRepository.streamOutfitGeneration(
+            (progress) => {
+              if (progress.description) {
+                setProgressMessage(progress.description);
+              }
+            },
+            weatherParams,
+            idempotencyKey,
+          );
+        } else {
+          jobId = await wardrobeRepository.submitOutfitGeneration(weatherParams, idempotencyKey);
+          let result: { status: string; outfits?: Outfit[]; error?: string };
+          do {
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            result = await wardrobeRepository.pollOutfitJob(jobId);
+          } while (result.status === 'pending' || result.status === 'processing');
+          if (result.status === 'failed') {
+            throw new Error(result.error || 'Outfit generation failed');
+          }
+          outfits = result.outfits ?? [];
         }
-
-        outfits = result.outfits ?? [];
       } catch (submitError) {
         // Async not available -- fall back to sync
         console.log('[MoodBoard] Async generation unavailable, falling back to sync');
@@ -369,7 +387,12 @@ export const MoodBoardScreen: React.FC = () => {
         return (
           <View style={styles.centered}>
             <ActivityIndicator size="large" color={textColor} />
-            <Text style={[styles.generatingText, { color: textColor }]}>Generating outfits...</Text>
+            <Text style={[styles.generatingText, { color: textColor }]}>
+              {/* mootd#62 — show the live progress message
+                  when streaming is wired; static fallback when
+                  the backend reports no progress (older builds). */}
+              {progressMessage ?? 'Generating outfits...'}
+            </Text>
           </View>
         );
 

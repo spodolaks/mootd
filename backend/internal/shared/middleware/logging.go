@@ -19,6 +19,16 @@ func (r *statusRecorder) WriteHeader(status int) {
 	r.ResponseWriter.WriteHeader(status)
 }
 
+// Flush forwards to the underlying writer's Flusher when one is
+// available (mootd#62). Without this, the SSE handler's
+// `w.(http.Flusher)` cast against a wrapped writer fails and the
+// stream silently downgrades to JSON.
+func (r *statusRecorder) Flush() {
+	if f, ok := r.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
 // Logging returns a middleware that logs each request's correlation ID, method,
 // path, status, and duration. It relies on RequestID being wired earlier in the
 // chain; when it isn't, the reqID field is empty rather than a fresh value, so

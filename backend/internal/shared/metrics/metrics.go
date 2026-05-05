@@ -134,3 +134,13 @@ func (w *statusWriter) WriteHeader(status int) {
 	w.status = status
 	w.ResponseWriter.WriteHeader(status)
 }
+
+// Flush forwards to the underlying writer's Flusher when one is
+// available (mootd#62). The SSE handler casts the writer to
+// http.Flusher; without this passthrough the wrap defeats the
+// cast and the stream downgrades.
+func (w *statusWriter) Flush() {
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}

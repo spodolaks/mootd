@@ -1,6 +1,18 @@
 import type { ClothingDetectionResult, ClothingSearchProduct, Outfit, WardrobeItem } from '../models';
 
 /**
+ * One snapshot of an in-flight outfit generation (mootd#62).
+ * Mirrors the backend's GenerateProgress shape; cumulative,
+ * not delta — a late-joining client sees consistent state from
+ * any single event.
+ */
+export interface OutfitProgress {
+  stage: 'connecting' | 'streaming' | 'done' | 'error';
+  outfits?: Outfit[];
+  description?: string;
+}
+
+/**
  * Abstraction over the wardrobe detection backend.
  * Swap between API and mock implementations via EXPO_PUBLIC_DATA_SOURCE.
  */
@@ -77,6 +89,25 @@ export interface IWardrobeRepository {
    * Poll an outfit generation job. Returns status + outfits when complete.
    */
   pollOutfitJob(jobId: string): Promise<{ status: 'pending' | 'processing' | 'completed' | 'failed'; outfits?: Outfit[]; error?: string }>;
+
+  /**
+   * Stream outfit generation via SSE (mootd#62). Calls
+   * `onProgress` once per server event with the cumulative
+   * progress shape; resolves with the final outfits when the
+   * generation completes. Throws on transport / generation
+   * failure. Implementations that don't support streaming
+   * should fall back to submit + poll under the hood.
+   *
+   * `idempotencyKey` is currently ignored on the streaming path
+   * — the connection IS the dedupe key (a duplicate Generate
+   * tap reaches a fresh stream and pays again). When this
+   * matters we'll layer the same Idempotency-Key semantics.
+   */
+  streamOutfitGeneration?(
+    onProgress: (p: OutfitProgress) => void,
+    weather?: { temperature: number; condition: string; unit: string },
+    idempotencyKey?: string,
+  ): Promise<Outfit[]>;
 
   /**
    * Search the external catalog for products matching the given wardrobe item and brand.

@@ -110,6 +110,25 @@ export class MockWardrobeRepository implements IWardrobeRepository {
     return { status: 'completed', outfits: [] };
   }
 
+  // mootd#62 — mock streaming. Fires connecting → two streaming
+  // ticks (matching the real backend's 2s heartbeat cadence) →
+  // done with an empty outfit list. Lets the screen exercise
+  // the streaming code path with mock data.
+  async streamOutfitGeneration(
+    onProgress: (p: import('@/src/domain/interfaces/IWardrobeRepository').OutfitProgress) => void,
+    _weather?: { temperature: number; condition: string; unit: string },
+    _idempotencyKey?: string,
+  ): Promise<Outfit[]> {
+    onProgress({ stage: 'connecting' });
+    await this.delay(800);
+    onProgress({ stage: 'streaming', description: 'Drafting outfits…' });
+    await this.delay(800);
+    onProgress({ stage: 'streaming', description: 'Picking pieces from your wardrobe…' });
+    await this.delay(400);
+    onProgress({ stage: 'done', outfits: [] });
+    return [];
+  }
+
   async searchByBrand(_itemId: string, _brand: string): Promise<ClothingSearchProduct[]> {
     return [];
   }
