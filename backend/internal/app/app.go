@@ -321,17 +321,24 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 
 	// Detection backend selector. DETECTION_BACKEND switches the
 	// implementation the wardrobe handler talks to:
-	//   - "legacy" (default): the on-host cloth-detection
-	//     service at DETECTION_API_BASE_URL.
-	//   - "singleitem": the singleItemDetection orchestrator at
-	//     SINGLEITEM_BASE_URL. The orchestrator runs the v1
+	//   - "singleitem" (default): the singleItemDetection
+	//     orchestrator at SINGLEITEM_BASE_URL. Runs the v1
 	//     pipeline (detect → describe → ghost-mannequin → HITL)
-	//     and is the source of truth for HITL queue rows the
-	//     admin proxy reads back.
-	// Anything else falls back to legacy with a warning so a
-	// typo doesn't silently disable detection.
+	//     and is the source of truth for the HITL queue rows
+	//     the admin proxy reads back.
+	//   - "legacy": the on-host cloth-detection service at
+	//     DETECTION_API_BASE_URL. Kept for parity testing +
+	//     dev-without-orchestrator setups.
+	// When the singleitem path can't be configured (empty
+	// SINGLEITEM_BASE_URL) we fall back to legacy with a
+	// warning so dev boots don't crash. Production should set
+	// both vars explicitly.
 	var detector wardrobe.DetectorBackend
-	switch strings.ToLower(strings.TrimSpace(os.Getenv("DETECTION_BACKEND"))) {
+	chosen := strings.ToLower(strings.TrimSpace(os.Getenv("DETECTION_BACKEND")))
+	if chosen == "" {
+		chosen = "singleitem"
+	}
+	switch chosen {
 	case "singleitem":
 		base := os.Getenv("SINGLEITEM_BASE_URL")
 		if base == "" {
@@ -341,12 +348,22 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 			a.Logger.Printf("detection backend: singleitem orchestrator at %s", base)
 			detector = wardrobe.NewSingleItemDetector(base, os.Getenv("SINGLEITEM_API_KEY"), a.Logger)
 		}
-	case "", "legacy":
+	case "legacy":
 		a.Logger.Printf("detection backend: legacy (%s)", a.DetectionAPIBaseURL)
 		detector = wardrobe.NewDetector(a.DetectionAPIBaseURL, a.DetectionAPIKey, a.Logger)
 	default:
-		a.Logger.Printf("WARNING: unknown DETECTION_BACKEND=%q — falling back to legacy", os.Getenv("DETECTION_BACKEND"))
-		detector = wardrobe.NewDetector(a.DetectionAPIBaseURL, a.DetectionAPIKey, a.Logger)
+		// Unknown value → fall back to the singleitem default
+		// path (which itself falls back to legacy if URL is
+		// empty). The double-fallback is intentional:
+		// "make boot succeed" is more important than "honour
+		// the typo".
+		a.Logger.Printf("WARNING: unknown DETECTION_BACKEND=%q — falling back to singleitem default", os.Getenv("DETECTION_BACKEND"))
+		base := os.Getenv("SINGLEITEM_BASE_URL")
+		if base == "" {
+			detector = wardrobe.NewDetector(a.DetectionAPIBaseURL, a.DetectionAPIKey, a.Logger)
+		} else {
+			detector = wardrobe.NewSingleItemDetector(base, os.Getenv("SINGLEITEM_API_KEY"), a.Logger)
+		}
 	}
 	searcher := wardrobe.NewSearcher(a.DetectionAPIBaseURL, a.DetectionAPIKey)
 	wardrobeRepo := wardrobe.NewMongoRepository(a.MongoClient, a.MongoDB)
