@@ -3,7 +3,10 @@ package wardrobe
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -17,25 +20,24 @@ import (
 // instead of the legacy on-host cloth-detection API. Selected
 // at boot when DETECTION_BACKEND=singleitem.
 //
-// The orchestrator is a separate service that runs the v1
-// pipeline end-to-end (detect → describe → generate ghost
-// mannequin → HITL gate). For mootd's purposes it returns a
-// trimmed item list compatible with the legacy `[]jobItem`
-// shape so the wardrobe handler doesn't branch on backend.
+// The orchestrator is a separate service (singleItemDetection)
+// that runs the v1 pipeline end-to-end (detect → describe →
+// generate ghost mannequin → HITL gate). Its public contract:
 //
-// Wire shape (POST {baseURL}/v1/items):
+//	POST   /v1/single-item/process              (multipart, SSE response)
+//	GET    /v1/single-item/result/{request_id}  (final ClothingItem)
+//	DELETE /v1/single-item/process/{request_id} (cancel)
 //
-//	multipart: image=<bytes>, filename=<original-name>
-//	→ 200 { "items": [{ id, category, label, imageUrl,
-//	         pngImageUrl, confidence, structuredDescription,
-//	         hitlRequired, hitlReason }] }
+// We use the POST + poll pattern: kick the pipeline off, drain
+// the SSE response (so the orchestrator's writer doesn't block
+// on a non-consuming client), then GET /result with backoff
+// until 200. Drain-then-poll is simpler than parsing SSE frames
+// and works for both "completed" and "failed" terminal states.
 //
-// Items where hitlRequired=true are still returned to the user
-// (the FE renders them like any other detected item) — the
-// admin can later approve / reject / regenerate via the HITL
-// queue (mootd-admin#34/#35). The orchestrator is the
-// source-of-truth for those records; mootd backend proxies
-// admin reads/writes through.
+// The orchestrator processes ONE garment per photo by design.
+// The legacy detector returned `[]jobItem` (multi-item); we
+// preserve that shape with a single-element list so the
+// wardrobe handler doesn't branch on backend.
 type SingleItemDetector struct {
 	baseURL string
 	apiKey  string
@@ -45,17 +47,18 @@ type SingleItemDetector struct {
 
 // NewSingleItemDetector constructs a SingleItemDetector. baseURL
 // must be the orchestrator's root (e.g.
-// http://orchestrator:8080); apiKey is the service-to-service
-// token (header X-API-Key). logger is the shared mootd logger
-// — backend-side errors stay in the same stream as the rest
-// of the wardrobe handler's logs.
+// http://orchestrator:8080); apiKey is the optional service
+// token (header X-API-Key — only enforced when
+// SID_API_KEYS is set on the orchestrator side). logger is the
+// shared mootd logger.
 func NewSingleItemDetector(baseURL, apiKey string, logger *log.Logger) *SingleItemDetector {
 	return &SingleItemDetector{
 		baseURL: baseURL,
 		apiKey:  apiKey,
-		// 3-minute ceiling matches the legacy detector. The
-		// orchestrator's median latency on the v1 pipeline is
-		// ~8-15s; ceiling protects against a hung backend.
+		// 3-minute ceiling matches the legacy detector. Median
+		// pipeline latency on the v1 pipeline is ~8-30s
+		// (balanced tier); ceiling protects against a hung
+		// upstream model.
 		client: &http.Client{Timeout: 3 * time.Minute},
 		logger: logger,
 	}
@@ -64,15 +67,16 @@ func NewSingleItemDetector(baseURL, apiKey string, logger *log.Logger) *SingleIt
 // Compile-time satisfaction check.
 var _ DetectorBackend = (*SingleItemDetector)(nil)
 
-// Detect uploads the image to the orchestrator and adapts the
-// response into the same `[]jobItem` + DetectionRunData shape
-// the legacy detector returns.
-//
-// The orchestrator's response carries pipeline metadata
-// (totalCostUsd, totalLatencyMs, retryCount, model versions)
-// that we surface as the DetectionRunData so the admin
-// /detection-runs page renders the same view regardless of
-// backend.
+// pollInterval is the gap between /result polls. The
+// orchestrator's pipeline emits a final SSE event when done;
+// we don't subscribe to those (would require an SSE parser),
+// so a short poll keeps end-to-end latency low without
+// hammering the orchestrator.
+const singleitemPollInterval = 500 * time.Millisecond
+
+// Detect submits the image to the orchestrator and waits for
+// the pipeline to complete. Returns a single-element jobItem
+// list (the orchestrator processes one garment per photo).
 func (d *SingleItemDetector) Detect(
 	ctx context.Context,
 	userID, runID string,
@@ -84,111 +88,241 @@ func (d *SingleItemDetector) Detect(
 	}
 
 	startedAt := time.Now().UTC()
-	body, contentType, err := buildMultipart(imageData, filename)
-	if err != nil {
-		return nil, nil, fmt.Errorf("build multipart: %w", err)
+
+	// Mint a request_id locally so we know which row to poll for
+	// even before the SSE stream tells us. Reusing mootd's runID
+	// would be cleaner but the orchestrator imposes its own
+	// uniqueness contract (one in-flight job per id), and
+	// re-running the same runID across detection backends would
+	// collide.
+	requestID := generateSingleItemRequestID(runID)
+
+	if err := d.submitProcess(ctx, requestID, userID, imageData, filename); err != nil {
+		return nil, nil, fmt.Errorf("submit process: %w", err)
 	}
 
-	url := d.baseURL + "/v1/items"
+	item, err := d.pollResult(ctx, requestID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("poll result: %w", err)
+	}
+
+	endedAt := time.Now().UTC()
+	jobItems := []jobItem{itemToJobItem(item)}
+	runData := &DetectionRunData{
+		StartedAt: startedAt,
+		EndedAt:   endedAt,
+		// Orchestrator's pipelineMetadata carries cost +
+		// per-stage latency; mootd's DetectionRunData has a
+		// single TotalCostUSD slot, so we surface that and
+		// let the admin /detection-runs detail page show "—"
+		// for the per-stage breakdown (not collected for
+		// orchestrator runs).
+		TotalCostUSD: pipelineCostFromItem(item),
+	}
+
+	d.logger.Printf("singleitem: user=%s run=%s sid_request_id=%s item=%s/%s cost=$%.4f latency=%dms",
+		userID, runID, requestID, item.Category, item.Label,
+		runData.TotalCostUSD, endedAt.Sub(startedAt).Milliseconds())
+
+	return jobItems, runData, nil
+}
+
+// submitProcess fires POST /v1/single-item/process with the
+// image as a multipart upload and drains the SSE stream so the
+// orchestrator can flush its writer. We don't parse the SSE
+// frames — the GET /result endpoint is the source of truth
+// for the final payload.
+func (d *SingleItemDetector) submitProcess(ctx context.Context, requestID, userID string, imageData []byte, filename string) error {
+	body, contentType, err := buildMultipart(imageData, filename)
+	if err != nil {
+		return fmt.Errorf("build multipart: %w", err)
+	}
+
+	url := d.baseURL + "/v1/single-item/process"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
-		return nil, nil, fmt.Errorf("build request: %w", err)
+		return fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("Content-Type", contentType)
+	req.Header.Set("X-Request-Id", requestID)
 	if d.apiKey != "" {
 		req.Header.Set("X-API-Key", d.apiKey)
 	}
-	// Forward the user + run identity so the orchestrator can
-	// stamp them on its rows (the HITL queue surfaces the
-	// originating user).
-	req.Header.Set("X-Mootd-User-Id", userID)
-	if runID != "" {
-		req.Header.Set("X-Mootd-Run-Id", runID)
+	if userID != "" {
+		req.Header.Set("X-Mootd-User-Id", userID)
 	}
 
 	resp, err := d.client.Do(req)
 	if err != nil {
-		return nil, nil, fmt.Errorf("orchestrator call: %w", err)
+		return fmt.Errorf("orchestrator unreachable: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		return nil, nil, fmt.Errorf("orchestrator %s returned %d: %s", url, resp.StatusCode, string(errBody))
+		return fmt.Errorf("orchestrator %s returned %d: %s", url, resp.StatusCode, string(errBody))
 	}
 
-	var parsed orchestratorResponse
-	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
-		return nil, nil, fmt.Errorf("decode orchestrator response: %w", err)
-	}
-
-	items := make([]jobItem, 0, len(parsed.Items))
-	for _, it := range parsed.Items {
-		items = append(items, it.toJobItem())
-	}
-
-	endedAt := time.Now().UTC()
-	runData := &DetectionRunData{
-		StartedAt:    startedAt,
-		EndedAt:      endedAt,
-		TotalCostUSD: parsed.PipelineCostUSD,
-		// AnalyzeStats / GenerateStats / OverallStyle are
-		// legacy-detector concepts. Leave nil — the run row
-		// will record an empty per-stage breakdown for
-		// orchestrator-served runs. P1-04's admin
-		// /detection-runs page already handles nil stats
-		// (renders "—" for each cell).
-	}
-
-	d.logger.Printf("singleitem: user=%s run=%s items=%d cost=%.4f latency=%dms",
-		userID, runID, len(items), parsed.PipelineCostUSD, endedAt.Sub(startedAt).Milliseconds())
-
-	return items, runData, nil
+	// Drain the SSE stream so the orchestrator's writer flushes
+	// and the underlying connection releases. We cap the read
+	// at 4MB — pipeline events are tiny (a few KB total) but a
+	// runaway server should NEVER tie up the wardrobe handler.
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4*1024*1024))
+	return nil
 }
 
-// orchestratorResponse maps the v1 wire shape from
-// singleItemDetection's POST /v1/items endpoint. Field names
-// match the SingleItemDetectionItem schema in admin-api.yaml.
-type orchestratorResponse struct {
-	Items           []orchestratorItem `json:"items"`
-	PipelineCostUSD float64            `json:"pipelineCostUsd,omitempty"`
+// pollResult walks GET /v1/single-item/result/{request_id}
+// every singleitemPollInterval until the orchestrator returns
+// 200 (completed) or the orchestrator returns a failed-status
+// payload, or ctx is cancelled.
+func (d *SingleItemDetector) pollResult(ctx context.Context, requestID string) (*singleItemClothingItem, error) {
+	url := fmt.Sprintf("%s/v1/single-item/result/%s", d.baseURL, requestID)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return nil, fmt.Errorf("build result request: %w", err)
+		}
+		if d.apiKey != "" {
+			req.Header.Set("X-API-Key", d.apiKey)
+		}
+
+		resp, err := d.client.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("result poll: %w", err)
+		}
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 4*1024*1024))
+		resp.Body.Close()
+		if readErr != nil {
+			return nil, fmt.Errorf("read result body: %w", readErr)
+		}
+
+		switch resp.StatusCode {
+		case http.StatusOK:
+			// Could be the completed item OR a failed-status
+			// payload. The orchestrator's Result handler
+			// distinguishes by shape: completed → ClothingItem,
+			// failed → {status, error_code, error_msg}.
+			var maybeFail struct {
+				Status    string `json:"status"`
+				ErrorCode string `json:"error_code"`
+				ErrorMsg  string `json:"error_msg"`
+			}
+			if err := json.Unmarshal(body, &maybeFail); err == nil && maybeFail.Status == "failed" {
+				return nil, fmt.Errorf("orchestrator pipeline failed: %s (%s)", maybeFail.ErrorMsg, maybeFail.ErrorCode)
+			}
+			var item singleItemClothingItem
+			if err := json.Unmarshal(body, &item); err != nil {
+				return nil, fmt.Errorf("decode completed item: %w", err)
+			}
+			if item.ID == "" {
+				return nil, errors.New("completed result has empty id")
+			}
+			return &item, nil
+		case http.StatusAccepted:
+			// Still running — back off + retry.
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(singleitemPollInterval):
+			}
+		case http.StatusNotFound:
+			// Race: orchestrator hasn't yet recorded the job.
+			// Brief wait + retry once.
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(singleitemPollInterval):
+			}
+		default:
+			return nil, fmt.Errorf("orchestrator result %s returned %d: %s", url, resp.StatusCode, string(body))
+		}
+	}
 }
 
-type orchestratorItem struct {
-	ID                  string                 `json:"id"`
-	Category            string                 `json:"category"`
-	Label               string                 `json:"label"`
-	ImageURL            string                 `json:"imageUrl"`
-	PngImageURL         string                 `json:"pngImageUrl,omitempty"`
-	ConfidenceOverall   float64                `json:"confidenceOverall,omitempty"`
-	StructuredDesc      map[string]any         `json:"structuredDescription,omitempty"`
-	HitlRequired        bool                   `json:"hitlRequired,omitempty"`
-	HitlReason          string                 `json:"hitlReason,omitempty"`
+// generateSingleItemRequestID mints a request_id for the
+// orchestrator. Combines mootd's runID prefix (so logs across
+// systems can be joined) with a random suffix (so retries
+// against the same runID don't collide on the orchestrator's
+// uniqueness check).
+func generateSingleItemRequestID(runID string) string {
+	suffix := make([]byte, 6)
+	_, _ = rand.Read(suffix)
+	prefix := runID
+	if prefix == "" {
+		prefix = "mootd"
+	}
+	return prefix + "-" + hex.EncodeToString(suffix)
 }
 
-// toJobItem adapts an orchestrator item to the internal jobItem
-// shape. Traits are flattened from the structured description's
-// closed-enum attribute paths so downstream code (which expects
-// a map[string]string) stays unchanged.
-func (it orchestratorItem) toJobItem() jobItem {
+// pipelineCostFromItem extracts the rolled-up cost from the
+// orchestrator's pipelineMetadata if present. Returns 0 when
+// the field is missing or unparseable so the row still saves
+// cleanly.
+func pipelineCostFromItem(item *singleItemClothingItem) float64 {
+	if item == nil || item.PipelineMetadata == nil {
+		return 0
+	}
+	if v, ok := item.PipelineMetadata["totalCostUsd"].(float64); ok {
+		return v
+	}
+	return 0
+}
+
+// singleItemClothingItem maps the orchestrator's domain
+// `ClothingItem` shape (see
+// singleItemDetection/internal/domain/clothing_item.go) onto
+// the fields we actually consume on the mootd side. Anything
+// not listed here is ignored — the admin proxy returns the
+// full row to the admin UI directly when needed.
+type singleItemClothingItem struct {
+	ID                    string         `json:"id"`
+	Category              string         `json:"category"`
+	Label                 string         `json:"label"`
+	ImageURL              string         `json:"imageUrl"`
+	PngImageURL           string         `json:"pngImageUrl,omitempty"`
+	GenerationImageURL    string         `json:"generationImageUrl,omitempty"`
+	StructuredDescription map[string]any `json:"structuredDescription,omitempty"`
+	ConfidenceOverall     float64        `json:"confidenceOverall,omitempty"`
+	HITLRequired          bool           `json:"hitlRequired,omitempty"`
+	HITLReason            string         `json:"hitlReason,omitempty"`
+	PipelineMetadata      map[string]any `json:"pipelineMetadata,omitempty"`
+}
+
+// itemToJobItem adapts the orchestrator's ClothingItem into the
+// internal jobItem shape. Picks the best available URL for
+// each role (generationImageURL > pngImageURL > imageURL) and
+// flattens the structured description into the trait map the
+// downstream wardrobe code expects.
+func itemToJobItem(it *singleItemClothingItem) jobItem {
+	imgURL := it.ImageURL
+	if it.GenerationImageURL != "" {
+		imgURL = it.GenerationImageURL
+	}
 	return jobItem{
 		ID:         it.ID,
 		Category:   it.Category,
 		Label:      it.Label,
-		Family:     it.Category, // legacy field, alias for category
-		Type:       it.Label,    // legacy field, alias for label
-		ImageURL:   it.ImageURL,
+		Family:     it.Category, // legacy alias
+		Type:       it.Label,    // legacy alias
+		ImageURL:   imgURL,
 		Confidence: it.ConfidenceOverall,
 		Skipped:    false,
-		Traits:     flattenTraits(it.StructuredDesc),
+		Traits:     flattenTraits(it.StructuredDescription),
 	}
 }
 
 // flattenTraits projects the (potentially deep) structured
 // description into a flat map[string]string. Only top-level
-// string-valued fields are kept — nested objects are skipped
-// here; admins can drill into the full structured description
-// via the HITL queue's detail page.
+// string-valued fields are kept; nested objects are dropped
+// here so the wardrobe item table stays predictable. Admins
+// can drill into the full description via the HITL queue.
 func flattenTraits(structured map[string]any) map[string]string {
 	if len(structured) == 0 {
 		return nil
@@ -206,6 +340,6 @@ func flattenTraits(structured map[string]any) map[string]string {
 }
 
 // Compile-time guard so Go stops the build if the multipart
-// helper signature drifts.
+// helper signature drifts elsewhere.
 var _ = multipart.Writer{}
 var _ = filepath.Base
