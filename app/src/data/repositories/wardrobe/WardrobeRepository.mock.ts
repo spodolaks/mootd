@@ -97,6 +97,13 @@ export class MockWardrobeRepository implements IWardrobeRepository {
     };
   }
 
+  async getAllItems(): Promise<WardrobeItem[]> {
+    // Mock returns its full fixture in one call, so getAllItems
+    // is just a re-projection without the cursor metadata.
+    const { items } = await this.getItems();
+    return items;
+  }
+
   async submitOutfitGeneration(
     _weather?: { temperature: number; condition: string; unit: string },
     _idempotencyKey?: string,

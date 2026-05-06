@@ -272,7 +272,10 @@ export const StyleAnalysisScreen: React.FC = () => {
       const load = async () => {
         setIsLoading(true);
         try {
-          const { items: result } = await wardrobeRepository.getItems();
+          // getAllItems — Style Analysis aggregates archetype
+          // affinity across the full wardrobe, so missing items
+          // past the first page would skew the breakdown.
+          const result = await wardrobeRepository.getAllItems();
           if (!cancelled) setItems(result);
         } catch {
           // silently fail

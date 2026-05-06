@@ -220,6 +220,25 @@ export class ApiWardrobeRepository implements IWardrobeRepository {
     return { items, nextCursor: response.nextCursor ?? null };
   }
 
+  async getAllItems(): Promise<WardrobeItem[]> {
+    // Walk every page of cursor pagination. Backend caps `limit`
+    // at 100; pulling 100 at a time keeps the round-trip count
+    // low while still staying inside the cap.
+    const all: WardrobeItem[] = [];
+    let cursor: string | undefined;
+    // Safety bound: a wardrobe of 5,000 items on a 100/page walk
+    // is 50 trips. Anything past that is almost certainly a
+    // backend cursor bug; bail rather than spin indefinitely.
+    for (let page = 0; page < 50; page++) {
+      const { items, nextCursor } = await this.getItems({ limit: 100, cursor });
+      all.push(...items);
+      if (!nextCursor) return all;
+      cursor = nextCursor;
+    }
+    console.warn(`[Wardrobe] getAllItems hit the 50-page safety cap (${all.length} items so far)`);
+    return all;
+  }
+
   async updateItem(id: string, traits: Record<string, string>, label?: string, imageUrl?: string): Promise<void> {
     console.log(`[Wardrobe] → PATCH /v1/wardrobe/items/${id}`);
     await apiClient.patch(`/v1/wardrobe/items/${id}`, {

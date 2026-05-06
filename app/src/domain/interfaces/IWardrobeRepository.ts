@@ -55,6 +55,20 @@ export interface IWardrobeRepository {
   getItems(params?: { limit?: number; cursor?: string }): Promise<{ items: WardrobeItem[]; nextCursor: string | null }>;
 
   /**
+   * Fetch the caller's complete wardrobe by walking every page of
+   * cursor-paginated `getItems()` results. Use this on screens that
+   * need a full lookup table — Moodboard's collage, Calendar's
+   * saved-board snapshots, Style Analysis — where missing an item
+   * resolves to "Add top" placeholders or skews aggregations.
+   *
+   * Per-page limit defaults to 100 (the backend's max). The walk is
+   * unbounded but in practice stops in 1-2 page hops; oversized
+   * wardrobes hit the natural cap of `getItems` rather than a fresh
+   * one here.
+   */
+  getAllItems(): Promise<WardrobeItem[]>;
+
+  /**
    * Update a wardrobe item's traits and optionally its label and image URL.
    * label and imageUrl are only sent when the user selected a search product.
    */

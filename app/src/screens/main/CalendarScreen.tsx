@@ -53,9 +53,14 @@ export const CalendarScreen: React.FC = () => {
       const load = async () => {
         setIsLoading(true);
         try {
-          const [boardsList, { items }] = await Promise.all([
+          // getAllItems for the same reason MoodBoardScreen does:
+          // saved boards reference items by id, and the lookup
+          // table has to span the whole wardrobe or the older
+          // boards (saved before items were deleted/added past
+          // page 1) render placeholders.
+          const [boardsList, items] = await Promise.all([
             moodBoardRepository.list(),
-            wardrobeRepository.getItems(),
+            wardrobeRepository.getAllItems(),
           ]);
           if (cancelled) return;
           setBoards(boardsList);
@@ -80,9 +85,9 @@ export const CalendarScreen: React.FC = () => {
   const onRefresh = useCallback(async () => {
     setIsRefreshing(true);
     try {
-      const [boardsList, { items }] = await Promise.all([
+      const [boardsList, items] = await Promise.all([
         moodBoardRepository.list(),
-        wardrobeRepository.getItems(),
+        wardrobeRepository.getAllItems(),
       ]);
       setBoards(boardsList);
       const map = new Map<string, WardrobeItem>();

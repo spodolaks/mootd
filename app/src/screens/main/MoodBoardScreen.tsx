@@ -94,9 +94,13 @@ export const MoodBoardScreen: React.FC = () => {
 
   const loadData = useCallback(async () => {
     try {
-      const [boards, { items }] = await Promise.all([
+      // Use getAllItems so the collage can resolve every item the
+      // generator picks. The original `getItems()` returned only
+      // the first page (default 20) and any LLM-picked id past
+      // that rendered as an "Add top" placeholder.
+      const [boards, items] = await Promise.all([
         moodBoardRepository.list(),
-        wardrobeRepository.getItems(),
+        wardrobeRepository.getAllItems(),
       ]);
       setItemMap(buildItemMap(items));
       const saved = boards.find(b => b.date === today) ?? null;
@@ -167,8 +171,11 @@ export const MoodBoardScreen: React.FC = () => {
         outfits = await wardrobeRepository.getOutfits(weatherParams);
       }
 
-      // Also refresh wardrobe items for the collage
-      const { items } = await wardrobeRepository.getItems();
+      // Also refresh wardrobe items for the collage. Full set
+      // (paginated walk) so generated outfits referencing items
+      // past page 1 still resolve to real images instead of
+      // "Add top" placeholders.
+      const items = await wardrobeRepository.getAllItems();
 
       if (outfits.length === 0) {
         Alert.alert('No outfits generated', 'Try adding more items to your wardrobe.');
