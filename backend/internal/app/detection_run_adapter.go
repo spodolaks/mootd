@@ -14,15 +14,18 @@ import (
 // wardrobe at compile time — same pattern as observability's
 // outfit / wardrobe adapters.
 //
-// Carries a *wardrobe.Detector so admin-triggered re-runs (P1-10 /
-// mootd-admin#15) can replay the archived photo without the admin
-// package needing to know the detector exists.
+// Carries a wardrobe.DetectorBackend so admin-triggered re-runs
+// (P1-10 / mootd-admin#15) can replay the archived photo without
+// the admin package needing to know the detector exists. The
+// interface accepts either the legacy *Detector or
+// *SingleItemDetector — re-runs against the orchestrator land on
+// the same /v1/items endpoint.
 type detectionRunAdapter struct {
 	r        *wardrobe.DetectionRunMongoRepository
-	detector *wardrobe.Detector
+	detector wardrobe.DetectorBackend
 }
 
-func newDetectionRunAdapter(r *wardrobe.DetectionRunMongoRepository, detector *wardrobe.Detector) *detectionRunAdapter {
+func newDetectionRunAdapter(r *wardrobe.DetectionRunMongoRepository, detector wardrobe.DetectorBackend) *detectionRunAdapter {
 	return &detectionRunAdapter{r: r, detector: detector}
 }
 

@@ -60,6 +60,15 @@ services:
       # fails over to a different host on 5xx / network error.
       # Single URL works as before.
       DETECTION_API_BASE_URL: "http://host.docker.internal:8088"
+      # Detection backend selector. "legacy" (default) routes to
+      # the on-host cloth-detection service at DETECTION_API_BASE_URL.
+      # "singleitem" routes to the singleItemDetection orchestrator
+      # at SINGLEITEM_BASE_URL — that service runs the v1 pipeline
+      # (detect → describe → ghost-mannequin → HITL gate) and is
+      # the source of truth for the admin /hitl-queue rows.
+      DETECTION_BACKEND: "${DETECTION_BACKEND:-legacy}"
+      SINGLEITEM_BASE_URL: "${SINGLEITEM_BASE_URL:-}"
+      SINGLEITEM_API_KEY: "${SINGLEITEM_API_KEY:-}"
       # OLLAMA_BASE_URL defaults to http://host.docker.internal:11434
       # OLLAMA_MODEL defaults to qwen3:14b
       # Outfit generator. Set OUTFIT_PROVIDER=claude to use Anthropic Claude

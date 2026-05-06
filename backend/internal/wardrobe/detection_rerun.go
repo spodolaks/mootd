@@ -37,7 +37,7 @@ var ErrRunNotFound = errors.New("wardrobe: detection run not found")
 // we'll honour it as a real override here.
 func RerunDetection(
 	ctx context.Context,
-	detector *Detector,
+	detector DetectorBackend,
 	repo *DetectionRunMongoRepository,
 	originalRunID, adminID, detectionVersion string,
 ) (string, error) {

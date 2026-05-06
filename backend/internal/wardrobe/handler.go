@@ -24,7 +24,7 @@ const maxImageSize = 10 << 20 // 10 MB
 // Handler handles wardrobe HTTP endpoints.
 type Handler struct {
 	logger        *log.Logger
-	detector      *Detector
+	detector      DetectorBackend
 	searcher      *Searcher
 	repo          Repository
 	bgRemover     *BackgroundRemover
@@ -39,7 +39,11 @@ type Handler struct {
 // returns 503 in that case and clients fall back to the sync endpoint.
 // detectionRuns may be nil; the wardrobe still works, just without the
 // per-call archive that powers the admin trace-detail panel.
-func NewHandler(logger *log.Logger, detector *Detector, searcher *Searcher, repo Repository, bgRemover *BackgroundRemover, workerCtx context.Context, detectJobs *DetectJobStore) *Handler {
+//
+// detector is the DetectorBackend interface so the legacy on-host
+// service and the singleItemDetection orchestrator can be selected
+// at boot via DETECTION_BACKEND env var.
+func NewHandler(logger *log.Logger, detector DetectorBackend, searcher *Searcher, repo Repository, bgRemover *BackgroundRemover, workerCtx context.Context, detectJobs *DetectJobStore) *Handler {
 	return &Handler{logger: logger, detector: detector, searcher: searcher, repo: repo, bgRemover: bgRemover, workerCtx: workerCtx, detectJobs: detectJobs}
 }
 

@@ -63,6 +63,12 @@ const (
 	EvalRunStartStatusProcessing EvalRunStartStatus = "processing"
 )
 
+// Defines values for HitlRegenerateRequestStage.
+const (
+	Describe HitlRegenerateRequestStage = "describe"
+	Generate HitlRegenerateRequestStage = "generate"
+)
+
 // Defines values for LLMCallDetailProvider.
 const (
 	LLMCallDetailProviderAnthropic LLMCallDetailProvider = "anthropic"
@@ -129,12 +135,46 @@ const (
 	User SearchHitKind = "user"
 )
 
+// Defines values for SingleItemDetectionAuditEntryAction.
+const (
+	Approve         SingleItemDetectionAuditEntryAction = "approve"
+	PatchAttributes SingleItemDetectionAuditEntryAction = "patch_attributes"
+	Regenerate      SingleItemDetectionAuditEntryAction = "regenerate"
+	Reject          SingleItemDetectionAuditEntryAction = "reject"
+)
+
+// Defines values for SingleItemDetectionHitlReason.
+const (
+	CostBreaker      SingleItemDetectionHitlReason = "cost_breaker"
+	FashionsiglipLow SingleItemDetectionHitlReason = "fashionsiglip_low"
+	GateFailG1       SingleItemDetectionHitlReason = "gate_fail_g1"
+	GateFailG3       SingleItemDetectionHitlReason = "gate_fail_g3"
+	GateFailG6       SingleItemDetectionHitlReason = "gate_fail_g6"
+	MaskTooLarge     SingleItemDetectionHitlReason = "mask_too_large"
+	MaskTooSmall     SingleItemDetectionHitlReason = "mask_too_small"
+	MockInPremium    SingleItemDetectionHitlReason = "mock_in_premium"
+	MultiItem        SingleItemDetectionHitlReason = "multi_item"
+	PartialFraming   SingleItemDetectionHitlReason = "partial_framing"
+	SegInconsistent  SingleItemDetectionHitlReason = "seg_inconsistent"
+	Stage2CostCapped SingleItemDetectionHitlReason = "stage2_cost_capped"
+)
+
+// Defines values for SingleItemDetectionJobStatus.
+const (
+	SingleItemDetectionJobStatusCompleted SingleItemDetectionJobStatus = "completed"
+	SingleItemDetectionJobStatusFailed    SingleItemDetectionJobStatus = "failed"
+	SingleItemDetectionJobStatusPending   SingleItemDetectionJobStatus = "pending"
+	SingleItemDetectionJobStatusRejected  SingleItemDetectionJobStatus = "rejected"
+	SingleItemDetectionJobStatusReviewed  SingleItemDetectionJobStatus = "reviewed"
+	SingleItemDetectionJobStatusRunning   SingleItemDetectionJobStatus = "running"
+)
+
 // Defines values for UserOutfitBatchStatus.
 const (
-	UserOutfitBatchStatusCompleted  UserOutfitBatchStatus = "completed"
-	UserOutfitBatchStatusFailed     UserOutfitBatchStatus = "failed"
-	UserOutfitBatchStatusPending    UserOutfitBatchStatus = "pending"
-	UserOutfitBatchStatusProcessing UserOutfitBatchStatus = "processing"
+	Completed  UserOutfitBatchStatus = "completed"
+	Failed     UserOutfitBatchStatus = "failed"
+	Pending    UserOutfitBatchStatus = "pending"
+	Processing UserOutfitBatchStatus = "processing"
 )
 
 // Defines values for UserSummaryTier.
@@ -159,6 +199,12 @@ const (
 	UserTierUpdateTierFounder UserTierUpdateTier = "founder"
 	UserTierUpdateTierFree    UserTierUpdateTier = "free"
 	UserTierUpdateTierPaid    UserTierUpdateTier = "paid"
+)
+
+// Defines values for AdminListHitlQueueParamsSort.
+const (
+	Age        AdminListHitlQueueParamsSort = "age"
+	Confidence AdminListHitlQueueParamsSort = "confidence"
 )
 
 // Defines values for AdminGetCohortRetentionParamsCohortUnit.
@@ -676,6 +722,38 @@ type FunnelsList struct {
 	Funnels []Funnel `json:"funnels"`
 }
 
+// HitlPatchAttributesRequest Body for PATCH /admin/v1/items/{id}/attributes. Each key in
+// `patches` is a dotted path into structuredDescription; the
+// value overwrites whatever was there. Patched paths are added
+// to the job's lockedAttributes so a future regenerate
+// preserves them.
+type HitlPatchAttributesRequest struct {
+	Patches map[string]interface{} `json:"patches"`
+	Reason  *string                `json:"reason,omitempty"`
+}
+
+// HitlQueuePage One page of HITL queue rows.
+type HitlQueuePage struct {
+	Items      []SingleItemDetectionJob `json:"items"`
+	NextCursor *string                  `json:"nextCursor,omitempty"`
+}
+
+// HitlRegenerateRequest defines model for HitlRegenerateRequest.
+type HitlRegenerateRequest struct {
+	Reason *string `json:"reason,omitempty"`
+
+	// Stage Which stage to re-run.
+	Stage HitlRegenerateRequestStage `json:"stage"`
+}
+
+// HitlRegenerateRequestStage Which stage to re-run.
+type HitlRegenerateRequestStage string
+
+// HitlReviewRequest Body for approve/reject. All fields optional.
+type HitlReviewRequest struct {
+	Reason *string `json:"reason,omitempty"`
+}
+
 // LLMCallDetail Full llm_calls row including the inline-archived prompt, user
 // message, raw model response, and wardrobe item IDs (P1-11
 // Step B / mootd-admin#16). Returned by GET
@@ -1148,6 +1226,152 @@ type SinceDelta struct {
 	SpendUsd       float64  `json:"spendUsd"`
 }
 
+// SingleItemDetectionAuditEntry One append-only review action on a HITL job.
+type SingleItemDetectionAuditEntry struct {
+	Action SingleItemDetectionAuditEntryAction `json:"action"`
+
+	// ApiKey Last-4 fingerprint of the admin API key that performed the
+	// action (e.g. "…ab12") — full key never persisted.
+	ApiKey  string    `json:"apiKey"`
+	Details *string   `json:"details,omitempty"`
+	Reason  *string   `json:"reason,omitempty"`
+	Ts      time.Time `json:"ts"`
+}
+
+// SingleItemDetectionAuditEntryAction defines model for SingleItemDetectionAuditEntry.Action.
+type SingleItemDetectionAuditEntryAction string
+
+// SingleItemDetectionHitlReason Reason the orchestrator flagged this item for human review.
+// Closed enum — additions land in lockstep with the
+// Phase1Pipeline's hitlReason switch.
+type SingleItemDetectionHitlReason string
+
+// SingleItemDetectionItem Full v1 ClothingItem produced by singleItemDetection's
+// Phase1Pipeline. Superset of UserWardrobeItem — the admin HITL
+// queue page (mootd-admin#34) renders this shape; the wardrobe
+// list page sticks with the slim UserWardrobeItem to keep the
+// list response tight.
+//
+// SchemaVersion is bumped per docs/adr-001-schema-versioning.md
+// in the singleItemDetection repo. Consumers should read the
+// version field and migrate forward as needed; the orchestrator
+// always writes the current version.
+type SingleItemDetectionItem struct {
+	// AlphaUrl Soft alpha matte (PNG, 8-bit).
+	AlphaUrl *string `json:"alphaUrl,omitempty"`
+
+	// Category Closed enum from schema/enums.json (top, bottom, outerwear, …).
+	Category          string   `json:"category"`
+	ConfidenceOverall *float64 `json:"confidenceOverall,omitempty"`
+
+	// ConfidencePerAttribute Per-attribute confidence (key = dotted path into structuredDescription).
+	ConfidencePerAttribute *map[string]float64 `json:"confidencePerAttribute,omitempty"`
+	CreatedAt              time.Time           `json:"createdAt"`
+
+	// GenerationImageUrl Ghost-mannequin / catalogue render PNG.
+	GenerationImageUrl *string `json:"generationImageUrl,omitempty"`
+
+	// HitlReason Reason the orchestrator flagged this item for human review.
+	// Closed enum — additions land in lockstep with the
+	// Phase1Pipeline's hitlReason switch.
+	HitlReason *SingleItemDetectionHitlReason `json:"hitlReason,omitempty"`
+
+	// HitlRequired True when the item routed to the human review queue.
+	HitlRequired bool   `json:"hitlRequired"`
+	Id           string `json:"id"`
+
+	// ImageUrl Source image URL (typically a GridFS gridfs:// or signed link).
+	ImageUrl string  `json:"imageUrl"`
+	Label    *string `json:"label,omitempty"`
+
+	// MaskUrl Binary segmentation mask (PNG).
+	MaskUrl *string `json:"maskUrl,omitempty"`
+
+	// PipelineMetadata Per-item provenance the orchestrator stamps on every completed item.
+	PipelineMetadata *SingleItemDetectionPipelineMetadata `json:"pipelineMetadata,omitempty"`
+
+	// PngImageUrl Background-removed PNG (the ghost-mannequin generation when present).
+	PngImageUrl *string `json:"pngImageUrl,omitempty"`
+
+	// SchemaVersion Semver string. Currently "1.0.0".
+	SchemaVersion string                     `json:"schemaVersion"`
+	Source        *SingleItemDetectionSource `json:"source,omitempty"`
+
+	// StructuredDescription Full GarmentDescription per
+	// schema/garment_description.schema.json. Inlined as a free
+	// object here because the closed-enum vocabulary is large and
+	// evolves independently of the OpenAPI spec — consumers
+	// validate against the JSON schema directly.
+	StructuredDescription *map[string]interface{} `json:"structuredDescription,omitempty"`
+	UpdatedAt             *time.Time              `json:"updatedAt,omitempty"`
+}
+
+// SingleItemDetectionJob Wrapper the admin queue endpoints return: the orchestrator's
+// Job record (status + lifecycle metadata + audit) with the
+// v1 ClothingItem nested under `item` when one was produced.
+type SingleItemDetectionJob struct {
+	Audit       *[]SingleItemDetectionAuditEntry `json:"audit,omitempty"`
+	CompletedAt *time.Time                       `json:"completedAt,omitempty"`
+	CreatedAt   time.Time                        `json:"createdAt"`
+	ErrorCode   *string                          `json:"errorCode,omitempty"`
+	ErrorMsg    *string                          `json:"errorMsg,omitempty"`
+
+	// Item Full v1 ClothingItem produced by singleItemDetection's
+	// Phase1Pipeline. Superset of UserWardrobeItem — the admin HITL
+	// queue page (mootd-admin#34) renders this shape; the wardrobe
+	// list page sticks with the slim UserWardrobeItem to keep the
+	// list response tight.
+	//
+	// SchemaVersion is bumped per docs/adr-001-schema-versioning.md
+	// in the singleItemDetection repo. Consumers should read the
+	// version field and migrate forward as needed; the orchestrator
+	// always writes the current version.
+	Item *SingleItemDetectionItem `json:"item,omitempty"`
+
+	// LockedAttributes Dotted attribute paths an admin has explicitly edited via
+	// PATCH; future regenerate preserves these values.
+	LockedAttributes *[]string `json:"lockedAttributes,omitempty"`
+	RequestId        string    `json:"requestId"`
+	SourceUrl        *string   `json:"sourceUrl,omitempty"`
+
+	// Status Closed enum mirroring storage.JobStatus in the
+	// singleItemDetection orchestrator. Admin actions move terminal
+	// items between completed/failed and reviewed/rejected.
+	Status SingleItemDetectionJobStatus `json:"status"`
+
+	// Tier Orchestrator tier the job ran under (premium|balanced).
+	Tier      *string   `json:"tier,omitempty"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// SingleItemDetectionJobStatus Closed enum mirroring storage.JobStatus in the
+// singleItemDetection orchestrator. Admin actions move terminal
+// items between completed/failed and reviewed/rejected.
+type SingleItemDetectionJobStatus string
+
+// SingleItemDetectionPipelineMetadata Per-item provenance the orchestrator stamps on every completed item.
+type SingleItemDetectionPipelineMetadata struct {
+	// DescriberModels One entry per ensemble member (claude-opus-4-7, gpt-5, gemini-2.5-pro, …).
+	DescriberModels *[]string `json:"describerModels,omitempty"`
+	DetectorModel   *string   `json:"detectorModel,omitempty"`
+	GeneratorModel  *string   `json:"generatorModel,omitempty"`
+	PromptVersion   *string   `json:"promptVersion,omitempty"`
+
+	// RetryCount Sum of retries across stages 1, 2, 3.
+	RetryCount     int     `json:"retryCount"`
+	TotalCostUsd   float64 `json:"totalCostUsd"`
+	TotalLatencyMs int64   `json:"totalLatencyMs"`
+}
+
+// SingleItemDetectionSource defines model for SingleItemDetectionSource.
+type SingleItemDetectionSource struct {
+	ImageUrl  string `json:"imageUrl"`
+	IsCropped bool   `json:"isCropped"`
+
+	// View Closed enum from schema/enums.json (front, back, side, detail, lay_flat).
+	View string `json:"view"`
+}
+
 // SpendByFeatureSeries One 30-day spend spark for a single feature label
 // (mootd-admin#94). Series is zero-filled to 30 rows
 // oldest-first; a feature with no calls in the window
@@ -1599,6 +1823,22 @@ type AdminListEvalRunsParams struct {
 	Limit  *int    `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// AdminListHitlQueueParams defines parameters for AdminListHitlQueue.
+type AdminListHitlQueueParams struct {
+	Status        *SingleItemDetectionJobStatus  `form:"status,omitempty" json:"status,omitempty"`
+	Category      *string                        `form:"category,omitempty" json:"category,omitempty"`
+	HitlReason    *SingleItemDetectionHitlReason `form:"hitl_reason,omitempty" json:"hitl_reason,omitempty"`
+	HitlOnly      *bool                          `form:"hitl_only,omitempty" json:"hitl_only,omitempty"`
+	ConfidenceMin *float64                       `form:"confidence_min,omitempty" json:"confidence_min,omitempty"`
+	ConfidenceMax *float64                       `form:"confidence_max,omitempty" json:"confidence_max,omitempty"`
+	Sort          *AdminListHitlQueueParamsSort  `form:"sort,omitempty" json:"sort,omitempty"`
+	Cursor        *string                        `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit         *int                           `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// AdminListHitlQueueParamsSort defines parameters for AdminListHitlQueue.
+type AdminListHitlQueueParamsSort string
+
 // AdminOverviewParams defines parameters for AdminOverview.
 type AdminOverviewParams struct {
 	// Period Period selector for the headline metrics. Defaults to
@@ -1748,6 +1988,18 @@ type AdminStartEvalRunJSONRequestBody = EvalRunRequest
 
 // AdminCreateFunnelJSONRequestBody defines body for AdminCreateFunnel for application/json ContentType.
 type AdminCreateFunnelJSONRequestBody = FunnelCreate
+
+// AdminApproveSingleItemJSONRequestBody defines body for AdminApproveSingleItem for application/json ContentType.
+type AdminApproveSingleItemJSONRequestBody = HitlReviewRequest
+
+// AdminPatchSingleItemAttributesJSONRequestBody defines body for AdminPatchSingleItemAttributes for application/json ContentType.
+type AdminPatchSingleItemAttributesJSONRequestBody = HitlPatchAttributesRequest
+
+// AdminRegenerateSingleItemJSONRequestBody defines body for AdminRegenerateSingleItem for application/json ContentType.
+type AdminRegenerateSingleItemJSONRequestBody = HitlRegenerateRequest
+
+// AdminRejectSingleItemJSONRequestBody defines body for AdminRejectSingleItem for application/json ContentType.
+type AdminRejectSingleItemJSONRequestBody = HitlReviewRequest
 
 // AdminUpdateModelRoutingJSONRequestBody defines body for AdminUpdateModelRouting for application/json ContentType.
 type AdminUpdateModelRoutingJSONRequestBody = ModelRoutingUpdate

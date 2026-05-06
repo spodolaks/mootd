@@ -282,6 +282,17 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 	privacySvc := privacy.NewService(a.MongoClient, a.MongoDB)
 	adminHandler.WithUserPurger(adminPurgerAdapter{svc: privacySvc})
 
+	// HITL queue proxy (singleItemDetection #34/#35). Reuses the
+	// SINGLEITEM_BASE_URL + SINGLEITEM_API_KEY env vars set up
+	// for the detector switch — the orchestrator serves both the
+	// per-image submit endpoint and the admin reads/writes. nil
+	// proxy when the env is empty → admin /hitl-queue + /items/{id}/*
+	// endpoints return 503.
+	if hitlProxy := admin.NewHitlProxy(os.Getenv("SINGLEITEM_BASE_URL"), os.Getenv("SINGLEITEM_API_KEY")); hitlProxy != nil {
+		adminHandler.WithHitlProxy(hitlProxy)
+		a.Logger.Printf("admin: HITL queue proxy → %s", hitlProxy.BaseURL)
+	}
+
 	adminHandler.RegisterRoutes(mux, authLimit, requireAdmin)
 
 	userRepo := user.NewMongoRepository(a.MongoClient, a.MongoDB)
@@ -307,7 +318,36 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 	}
 
 	bgRemover := wardrobe.NewBackgroundRemover(a.BgRemoverBaseURL)
-	detector := wardrobe.NewDetector(a.DetectionAPIBaseURL, a.DetectionAPIKey, a.Logger)
+
+	// Detection backend selector. DETECTION_BACKEND switches the
+	// implementation the wardrobe handler talks to:
+	//   - "legacy" (default): the on-host cloth-detection
+	//     service at DETECTION_API_BASE_URL.
+	//   - "singleitem": the singleItemDetection orchestrator at
+	//     SINGLEITEM_BASE_URL. The orchestrator runs the v1
+	//     pipeline (detect → describe → ghost-mannequin → HITL)
+	//     and is the source of truth for HITL queue rows the
+	//     admin proxy reads back.
+	// Anything else falls back to legacy with a warning so a
+	// typo doesn't silently disable detection.
+	var detector wardrobe.DetectorBackend
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("DETECTION_BACKEND"))) {
+	case "singleitem":
+		base := os.Getenv("SINGLEITEM_BASE_URL")
+		if base == "" {
+			a.Logger.Print("WARNING: DETECTION_BACKEND=singleitem but SINGLEITEM_BASE_URL is empty — falling back to legacy")
+			detector = wardrobe.NewDetector(a.DetectionAPIBaseURL, a.DetectionAPIKey, a.Logger)
+		} else {
+			a.Logger.Printf("detection backend: singleitem orchestrator at %s", base)
+			detector = wardrobe.NewSingleItemDetector(base, os.Getenv("SINGLEITEM_API_KEY"), a.Logger)
+		}
+	case "", "legacy":
+		a.Logger.Printf("detection backend: legacy (%s)", a.DetectionAPIBaseURL)
+		detector = wardrobe.NewDetector(a.DetectionAPIBaseURL, a.DetectionAPIKey, a.Logger)
+	default:
+		a.Logger.Printf("WARNING: unknown DETECTION_BACKEND=%q — falling back to legacy", os.Getenv("DETECTION_BACKEND"))
+		detector = wardrobe.NewDetector(a.DetectionAPIBaseURL, a.DetectionAPIKey, a.Logger)
+	}
 	searcher := wardrobe.NewSearcher(a.DetectionAPIBaseURL, a.DetectionAPIKey)
 	wardrobeRepo := wardrobe.NewMongoRepository(a.MongoClient, a.MongoDB)
 	// Async detection uses Redis for job state. Same fallback pattern as
@@ -692,7 +732,13 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 	}
 
 	llmRecorder := observability.NewOutfitRecorderAdapter(coreLLMRec)
-	detector.WithRecorder(observability.NewWardrobeRecorderAdapter(coreLLMRec))
+	// Recorder wiring only applies to the legacy detector — its
+	// per-stage analyze/generate calls each emit an llm_calls
+	// row. The singleitem orchestrator emits its own llm_calls
+	// (separate process) so we don't double-record.
+	if legacy, ok := detector.(*wardrobe.Detector); ok {
+		legacy.WithRecorder(observability.NewWardrobeRecorderAdapter(coreLLMRec))
+	}
 
 	outfitService := outfit.NewService(a.Logger, outfit.ServiceConfig{
 		Generator:      generator,

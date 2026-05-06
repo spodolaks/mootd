@@ -2301,6 +2301,125 @@ components:
           minimum: 0
           description: Sum of retries across stages 1, 2, 3.
 
+    SingleItemDetectionJobStatus:
+      type: string
+      description: |
+        Closed enum mirroring storage.JobStatus in the
+        singleItemDetection orchestrator. Admin actions move terminal
+        items between completed/failed and reviewed/rejected.
+      enum: [pending, running, completed, failed, reviewed, rejected]
+
+    SingleItemDetectionAuditEntry:
+      type: object
+      description: One append-only review action on a HITL job.
+      required: [ts, apiKey, action]
+      properties:
+        ts:
+          type: string
+          format: date-time
+        apiKey:
+          type: string
+          description: |
+            Last-4 fingerprint of the admin API key that performed the
+            action (e.g. "…ab12") — full key never persisted.
+        action:
+          type: string
+          enum: [approve, reject, patch_attributes, regenerate]
+        reason:
+          type: string
+        details:
+          type: string
+
+    SingleItemDetectionJob:
+      type: object
+      description: |
+        Wrapper the admin queue endpoints return: the orchestrator's
+        Job record (status + lifecycle metadata + audit) with the
+        v1 ClothingItem nested under `item` when one was produced.
+      required: [requestId, status, createdAt, updatedAt]
+      properties:
+        requestId:
+          type: string
+        status:
+          $ref: "#/components/schemas/SingleItemDetectionJobStatus"
+        sourceUrl:
+          type: string
+        tier:
+          type: string
+          description: Orchestrator tier the job ran under (premium|balanced).
+        item:
+          $ref: "#/components/schemas/SingleItemDetectionItem"
+        errorCode:
+          type: string
+        errorMsg:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+        lockedAttributes:
+          type: array
+          items:
+            type: string
+          description: |
+            Dotted attribute paths an admin has explicitly edited via
+            PATCH; future regenerate preserves these values.
+        audit:
+          type: array
+          items:
+            $ref: "#/components/schemas/SingleItemDetectionAuditEntry"
+
+    HitlQueuePage:
+      type: object
+      description: One page of HITL queue rows.
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/SingleItemDetectionJob"
+        nextCursor:
+          type: string
+
+    HitlReviewRequest:
+      type: object
+      description: Body for approve/reject. All fields optional.
+      properties:
+        reason:
+          type: string
+
+    HitlPatchAttributesRequest:
+      type: object
+      description: |
+        Body for PATCH /admin/v1/items/{id}/attributes. Each key in
+        `patches` is a dotted path into structuredDescription; the
+        value overwrites whatever was there. Patched paths are added
+        to the job's lockedAttributes so a future regenerate
+        preserves them.
+      required: [patches]
+      properties:
+        patches:
+          type: object
+          additionalProperties: true
+        reason:
+          type: string
+
+    HitlRegenerateRequest:
+      type: object
+      required: [stage]
+      properties:
+        stage:
+          type: string
+          enum: [describe, generate]
+          description: Which stage to re-run.
+        reason:
+          type: string
+
 paths:
   /admin/v1/auth/login:
     post:
@@ -4105,6 +4224,225 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+  /admin/v1/hitl-queue:
+    get:
+      operationId: adminListHitlQueue
+      summary: |
+        Paginated HITL queue from singleItemDetection orchestrator.
+        Default filter is `hitl_only=true` — admins almost always
+        want "what needs review" unless they explicitly query a
+        terminal status.
+      description: |
+        Backed by the orchestrator's GET /v1/admin/hitl-queue.
+        mootd backend proxies the request, forwarding admin auth.
+      tags: [hitl]
+      parameters:
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/SingleItemDetectionJobStatus"
+        - name: category
+          in: query
+          schema:
+            type: string
+        - name: hitl_reason
+          in: query
+          schema:
+            $ref: "#/components/schemas/SingleItemDetectionHitlReason"
+        - name: hitl_only
+          in: query
+          schema:
+            type: boolean
+            default: true
+        - name: confidence_min
+          in: query
+          schema:
+            type: number
+            format: double
+            minimum: 0
+            maximum: 1
+        - name: confidence_max
+          in: query
+          schema:
+            type: number
+            format: double
+            minimum: 0
+            maximum: 1
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [age, confidence]
+            default: age
+        - name: cursor
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 25
+      responses:
+        "200":
+          description: One page of HITL queue rows.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HitlQueuePage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /admin/v1/items/{id}:
+    get:
+      operationId: adminGetSingleItem
+      summary: |
+        Full Job record for one HITL item: structuredDescription, all
+        gate scores, audit trail, and lockedAttributes.
+      tags: [hitl]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Full job record.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SingleItemDetectionJob"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Item not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /admin/v1/items/{id}/approve:
+    post:
+      operationId: adminApproveSingleItem
+      summary: |
+        Move a HITL item to the `reviewed` terminal state and append
+        an audit entry. 409 when the item is still pending/running
+        (must be cancelled first). 204 on success.
+      tags: [hitl]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/HitlReviewRequest"
+      responses:
+        "204":
+          description: Approved.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Item not found.
+        "409":
+          description: Item not yet terminal (cancel first).
+
+  /admin/v1/items/{id}/reject:
+    post:
+      operationId: adminRejectSingleItem
+      summary: Same shape as approve; status flips to `rejected`.
+      tags: [hitl]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/HitlReviewRequest"
+      responses:
+        "204":
+          description: Rejected.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Item not found.
+        "409":
+          description: Item not yet terminal.
+
+  /admin/v1/items/{id}/attributes:
+    patch:
+      operationId: adminPatchSingleItemAttributes
+      summary: |
+        Overwrite specific dotted-path values inside the item's
+        structuredDescription. Each patched path is added to the job's
+        lockedAttributes so a future regenerate preserves the edit.
+      tags: [hitl]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/HitlPatchAttributesRequest"
+      responses:
+        "204":
+          description: Patches applied + paths locked.
+        "400":
+          description: Empty patches map or invalid path.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Item not found.
+
+  /admin/v1/items/{id}/regenerate:
+    post:
+      operationId: adminRegenerateSingleItem
+      summary: |
+        Re-run a single stage (describe or generate) on an existing
+        item. Locked attributes (admin's PATCH edits) are preserved.
+        503 when the orchestrator wasn't booted with a Regenerator
+        (e.g. ANTHROPIC_API_KEY missing for stage 2).
+      tags: [hitl]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/HitlRegenerateRequest"
+      responses:
+        "204":
+          description: Stage re-run completed; item updated.
+        "400":
+          description: Missing or unknown stage.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Item not found.
+        "409":
+          description: Item not yet terminal (cancel first).
+        "422":
+          description: Re-run completed but produced no usable result.
+        "503":
+          description: Regenerator not configured.
+
 tags:
   - name: auth
     description: Login + refresh.
@@ -4118,3 +4456,8 @@ tags:
     description: User list + drill-through.
   - name: traces
     description: LLM calls + (eventually) detection runs.
+  - name: hitl
+    description: |
+      singleItemDetection HITL queue — list, approve, reject, PATCH
+      attributes, re-run a stage. Backed by the orchestrator's
+      /v1/admin/* endpoints (mootd backend proxies).

@@ -113,4 +113,12 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, authLimit Middleware, requi
 	// matches the funnels gate — both are pass-through analyses
 	// of the events stream.
 	mux.Handle("/admin/v1/retention", requireAdmin(RequirePermission(PermTracesRead)(http.HandlerFunc(h.GetCohortRetention))))
+
+	// HITL queue + per-item actions (singleItemDetection #34, #35).
+	// Read = traces:read on the queue + detail; mutating actions
+	// (approve / reject / patch / regenerate) gate inline on
+	// traces:rerun. Returns 503 when DETECTION_BACKEND != singleitem
+	// or SINGLEITEM_BASE_URL is empty.
+	mux.Handle("/admin/v1/hitl-queue", requireAdmin(RequirePermission(PermTracesRead)(http.HandlerFunc(h.HitlQueue))))
+	mux.Handle("/admin/v1/items/", requireAdmin(RequirePermission(PermTracesRead)(http.HandlerFunc(h.HitlItemsRouter))))
 }

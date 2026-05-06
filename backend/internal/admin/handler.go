@@ -41,6 +41,7 @@ type Handler struct {
 	funnelsRepo   FunnelsRepository         // optional — when nil, /funnels returns 503
 	retentionRepo RetentionRepository       // optional — when nil, /retention returns 503
 	userPurger    UserPurger                // optional — when nil, /users/{id}/purge returns 503
+	hitlProxy     *HitlProxy                // optional — when nil, /hitl-queue + /items/{id}/* return 503
 	secret        string
 }
 
