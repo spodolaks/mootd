@@ -189,7 +189,7 @@ export type IngestEvent = {
  *
  */
 export type IngestRequest = {
-    events: Array<IngestEvent>;
+    events: IngestEvent[];
 };
 
 export type EventValidationError = {
@@ -208,7 +208,7 @@ export type EventValidationError = {
  */
 export type IngestResponse = {
     accepted: number;
-    rejected?: Array<EventValidationError>;
+    rejected?: EventValidationError[];
 };
 
 /**
@@ -249,7 +249,7 @@ export type DetectedItem = {
 };
 
 export type DetectResponse = {
-    items: Array<DetectedItem>;
+    items: DetectedItem[];
 };
 
 /**
@@ -269,7 +269,7 @@ export type DetectJobSubmitResponse = {
  */
 export type DetectJobStatus = {
     status: 'pending' | 'processing' | 'completed' | 'failed';
-    items?: Array<DetectedItem>;
+    items?: DetectedItem[];
     error?: string;
 };
 
@@ -288,7 +288,7 @@ export type SearchProduct = {
 };
 
 export type SearchResponse = {
-    results: Array<SearchProduct>;
+    results: SearchProduct[];
 };
 
 export type SearchRequest = {
@@ -301,7 +301,7 @@ export type SearchRequest = {
  *
  */
 export type WardrobeItemListResponse = {
-    items: Array<ClothingItem>;
+    items: ClothingItem[];
     nextCursor?: string;
 };
 
@@ -342,7 +342,7 @@ export type Outfit = {
     /**
      * Wardrobe item IDs referenced by this outfit.
      */
-    items: Array<string>;
+    items: string[];
     /**
      * One-line stylist explanation tied to archetype/weather.
      */
@@ -362,7 +362,7 @@ export type Outfit = {
     /**
      * Hints for complementary items not in the wardrobe.
      */
-    suggestions?: Array<string>;
+    suggestions?: string[];
     /**
      * Per-outfit archetype alignment.
      */
@@ -377,7 +377,7 @@ export type Outfit = {
     /**
      * Dominant colors per item as
      */
-    palette?: Array<string>;
+    palette?: string[];
     panelId?: string;
     backgroundId?: string;
     panelUrl?: string;
@@ -388,7 +388,7 @@ export type Outfit = {
  * Synchronous generate result (deprecated; prefer async).
  */
 export type GenerateResponse = {
-    outfits: Array<Outfit>;
+    outfits: Outfit[];
 };
 
 /**
@@ -406,7 +406,7 @@ export type OutfitJobSubmitResponse = {
  */
 export type OutfitJobStatus = {
     status: 'pending' | 'processing' | 'completed' | 'failed';
-    outfits?: Array<Outfit>;
+    outfits?: Outfit[];
     error?: string;
 };
 
@@ -430,7 +430,7 @@ export type FeedbackContext = {
 export type OutfitSnapshot = {
     id: string;
     name?: string;
-    items: Array<string>;
+    items: string[];
     rationale?: string;
     archetypeScores?: {
         [key: string]: number;
@@ -447,7 +447,7 @@ export type FeedbackSubmitRequest = {
     chosenOutfitId?: string;
     action: 'saved' | 'skipped' | 'regenerated' | 'rated' | 'item_swapped';
     rating?: number;
-    generatedBatch?: Array<OutfitSnapshot>;
+    generatedBatch?: OutfitSnapshot[];
     context?: FeedbackContext;
     promptVersion?: string;
     generatorVersion?: string;
@@ -486,7 +486,7 @@ export type OutfitItemSnapshot = {
  *
  */
 export type MoodboardOutfit = Outfit & {
-    snapshots?: Array<OutfitItemSnapshot>;
+    snapshots?: OutfitItemSnapshot[];
 };
 
 export type SavedMoodBoard = {
@@ -518,7 +518,7 @@ export type SaveMoodboardRequest = {
      * reconstructed for ranker training.
      *
      */
-    generatedBatch?: Array<Outfit>;
+    generatedBatch?: Outfit[];
     /**
      * Ties the save back to the generation job.
      */
@@ -533,12 +533,12 @@ export type SaveMoodboardRequest = {
 };
 
 export type MoodboardListResponse = {
-    moodboards: Array<SavedMoodBoard>;
+    moodboards: SavedMoodBoard[];
     nextCursor?: string;
 };
 
 export type BrandsResponse = {
-    brands: Array<string>;
+    brands: string[];
 };
 
 export type SaveBrandRequest = {
@@ -565,7 +565,7 @@ export type GenericItem = {
 };
 
 export type GenericItemsList = {
-    items: Array<GenericItem>;
+    items: GenericItem[];
 };
 
 export type LivenessResponse = {

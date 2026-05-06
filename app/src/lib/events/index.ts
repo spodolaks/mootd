@@ -292,7 +292,7 @@ function scrubPII(
  *  back to a Math.random approach for safety. */
 function generateSessionId(): string {
   // Prefer the standard if it exists.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   const cr = (globalThis as any).crypto;
   if (cr && typeof cr.randomUUID === 'function') {
     return cr.randomUUID();

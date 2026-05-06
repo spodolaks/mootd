@@ -20,7 +20,7 @@ import { typography } from '@/src/theme/typography';
 import { wardrobeRepository } from '@/src/data/repositories';
 
 // Fixed trait keys shown in the editor. Values come from the item's traits map.
-const TRAIT_KEYS: Array<{ key: string; label: string }> = [
+const TRAIT_KEYS: { key: string; label: string }[] = [
   { key: 'color', label: 'Color' },
   { key: 'material', label: 'Material' },
   { key: 'size', label: 'Size' },

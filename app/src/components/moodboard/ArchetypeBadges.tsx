@@ -21,7 +21,7 @@ interface ArchetypeBadgesProps {
 const computeDisplayPercents = (
   rawScores: Record<string, number>,
   topN = 2,
-): Array<{ name: string; percent: number }> => {
+): { name: string; percent: number }[] => {
   const filtered = Object.entries(rawScores)
     .filter(([, s]) => s > 0.05)
     .sort(([, a], [, b]) => b - a)

@@ -87,7 +87,7 @@ export const MoodBoardScreen: React.FC = () => {
   const today = new Date().toISOString().split('T')[0];
 
   const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 50 }).current;
-  const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: Array<{ index: number | null }> }) => {
+  const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: { index: number | null }[] }) => {
     const idx = viewableItems[0]?.index;
     if (idx != null) setActiveIndex(idx);
   }).current;

@@ -1,6 +1,5 @@
 import { Icon } from '@/src/components';
-import { labels } from '@/src/theme/colors';
-import { grays } from '@/src/theme/colors';
+import { labels , grays } from '@/src/theme/colors';
 import type { OutfitItem, WardrobeItem } from '@/src/domain';
 import React, { useMemo } from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';

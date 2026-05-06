@@ -19,7 +19,7 @@ export class MockMoodBoardRepository implements IMoodBoardRepository {
     // server-side and only matters for real feedback collection. Log in dev
     // so the offline flow still reveals what's being forwarded.
     if (typeof options === 'object' && options?.generatedBatch) {
-      // eslint-disable-next-line no-console
+       
       console.log(
         '[mock moodboard] save received batch size',
         options.generatedBatch.length,

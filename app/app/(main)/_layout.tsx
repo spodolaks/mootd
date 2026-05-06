@@ -145,7 +145,7 @@ const styles = StyleSheet.create({
       web: {
         // RN Web maps shadow* to box-shadow; set it explicitly so the ambient
         // drop reads on web without needing platform-native shadow support.
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+         
         boxShadow: '0 8px 20px rgba(0,0,0,0.25)' as any,
       },
       default: {},

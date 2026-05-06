@@ -11,7 +11,7 @@ import { Platform } from 'react-native';
 import { ApiError, apiClient, getApiBaseURL, getAuthToken } from '@/src/data/api/client';
 
 interface DetectAPIResponse {
-  items: Array<{
+  items: {
     id: string;
     category: string;
     label: string;
@@ -19,7 +19,7 @@ interface DetectAPIResponse {
     imageUrl?: string;
     pngImageUrl?: string;
     traits?: Record<string, string>;
-  }>;
+  }[];
 }
 
 /**

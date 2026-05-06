@@ -107,7 +107,7 @@ export const PreferencesScreen: React.FC = () => {
 
     if (Platform.OS === 'web') {
       // Alert.alert is a no-op on web – use window.confirm instead
-      // eslint-disable-next-line no-restricted-globals
+       
       if (confirm('This will permanently delete your account. Continue?')) {
         doDelete();
       }
