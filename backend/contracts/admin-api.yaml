@@ -2420,6 +2420,128 @@ components:
         reason:
           type: string
 
+    ArchetypeDefaultItem:
+      description: |
+        Admin-curated wardrobe item that gets COPIED into a
+        user's wardrobe at signup (or via the seed endpoint),
+        keyed by archetype. Solves the cold-start problem —
+        new users with no uploaded items can immediately
+        generate outfits.
+      type: object
+      required: [id, archetype, category, label, imageUrl, createdAt]
+      properties:
+        id:
+          type: string
+          example: ad_a1b2c3d4
+        archetype:
+          type: string
+          enum: [ruler, rebel, creator, lover, caregiver, hero, magician, jester, sage, innocent, explorer, everyman]
+        category:
+          type: string
+          example: outerwear
+        label:
+          type: string
+          example: Black leather biker jacket
+        description:
+          type: string
+          description: |
+            Free-form copy shown alongside the item in the
+            user's wardrobe. Treated like the description an
+            uploaded item would have — gives the user
+            context for why this item exists in their
+            wardrobe before they start uploading their own.
+        imageUrl:
+          type: string
+        pngImageUrl:
+          type: string
+          description: Background-removed PNG; populated when the curator supplies one.
+        traits:
+          type: object
+          additionalProperties:
+            type: string
+        structuredDescription:
+          type: object
+          additionalProperties: true
+          description: |
+            Closed-enum attribute paths (same shape produced
+            by the singleItemDetection pipeline). Free-form
+            map so the spec doesn't pin to one schema version.
+        seededCount:
+          type: integer
+          description: Total user wardrobes that have received a copy of this row.
+        createdBy:
+          type: string
+          description: Admin id that authored the item.
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    ArchetypeDefaultItemsList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ArchetypeDefaultItem"
+
+    ArchetypeDefaultItemPatch:
+      description: |
+        Body for PATCH /admin/v1/archetype-defaults/{id}.
+        Every field optional — only the supplied keys are
+        updated, the rest stay as-is. Pass an explicit empty
+        string to clear a string field.
+      type: object
+      properties:
+        category:
+          type: string
+        label:
+          type: string
+        description:
+          type: string
+        imageUrl:
+          type: string
+        pngImageUrl:
+          type: string
+        traits:
+          type: object
+          additionalProperties:
+            type: string
+        structuredDescription:
+          type: object
+          additionalProperties: true
+
+    SeedFromArchetypeRequest:
+      description: |
+        Body for POST /admin/v1/users/seed-from-archetype/{userId}.
+        Triggers a copy of the curated defaults for `archetype`
+        into the user's wardrobe. `notes` lands in the audit
+        row alongside the seededCount.
+      type: object
+      required: [archetype, notes]
+      properties:
+        archetype:
+          type: string
+          enum: [ruler, rebel, creator, lover, caregiver, hero, magician, jester, sage, innocent, explorer, everyman]
+        notes:
+          type: string
+          description: Audit-trail rationale; required.
+
+    SeedFromArchetypeResponse:
+      type: object
+      required: [userId, archetype, seededCount]
+      properties:
+        userId:
+          type: string
+        archetype:
+          type: string
+        seededCount:
+          type: integer
+          description: Number of items actually copied (may be less than the curated total if errors occurred).
+
 paths:
   /admin/v1/auth/login:
     post:
@@ -4443,6 +4565,159 @@ paths:
         "503":
           description: Regenerator not configured.
 
+  /admin/v1/archetype-defaults:
+    get:
+      operationId: adminListArchetypeDefaults
+      summary: |
+        List curated wardrobe defaults. Pass `?archetype=<key>`
+        to filter to one archetype; omit for the global list.
+        Permission: prompts:read.
+      tags: [archetype-defaults]
+      parameters:
+        - name: archetype
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [ruler, rebel, creator, lover, caregiver, hero, magician, jester, sage, innocent, explorer, everyman]
+      responses:
+        "200":
+          description: Items.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ArchetypeDefaultItemsList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "503":
+          description: Archetype defaults repo not wired in this build.
+    post:
+      operationId: adminCreateArchetypeDefault
+      summary: |
+        Curate a new default for an archetype. Permission:
+        prompts:write. The (archetype, category, label) triple
+        is unique — a duplicate returns 409.
+      tags: [archetype-defaults]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ArchetypeDefaultItem"
+      responses:
+        "201":
+          description: Created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ArchetypeDefaultItem"
+        "400":
+          description: Missing required fields or unknown archetype.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Missing prompts:write permission.
+        "409":
+          description: Duplicate (archetype + category + label) already exists.
+
+  /admin/v1/archetype-defaults/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      operationId: adminGetArchetypeDefault
+      summary: Read one curated default. Permission prompts:read.
+      tags: [archetype-defaults]
+      responses:
+        "200":
+          description: Default item.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ArchetypeDefaultItem"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Not found.
+    patch:
+      operationId: adminUpdateArchetypeDefault
+      summary: Patch any combination of fields. Permission prompts:write.
+      tags: [archetype-defaults]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ArchetypeDefaultItemPatch"
+      responses:
+        "200":
+          description: Updated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ArchetypeDefaultItem"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Missing prompts:write permission.
+        "404":
+          description: Not found.
+    delete:
+      operationId: adminDeleteArchetypeDefault
+      summary: |
+        Remove the curated default. Wardrobe items already
+        seeded from this row stay intact (they're copies, not
+        references). Permission prompts:write. Audited.
+      tags: [archetype-defaults]
+      responses:
+        "204":
+          description: Deleted.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Missing prompts:write permission.
+        "404":
+          description: Not found.
+
+  /admin/v1/users/seed-from-archetype/{userId}:
+    parameters:
+      - name: userId
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      operationId: adminSeedWardrobeFromArchetype
+      summary: |
+        Copy curated defaults for the given archetype into the
+        target user's wardrobe. Permission users:purge. Audited
+        with the seededCount + admin-supplied notes.
+      tags: [archetype-defaults]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SeedFromArchetypeRequest"
+      responses:
+        "200":
+          description: Seeded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SeedFromArchetypeResponse"
+        "400":
+          description: Missing archetype or notes.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Missing users:purge permission.
+        "404":
+          description: User not found.
+        "503":
+          description: Wardrobe seeder not wired in this build.
+
 tags:
   - name: auth
     description: Login + refresh.
@@ -4461,3 +4736,8 @@ tags:
       singleItemDetection HITL queue — list, approve, reject, PATCH
       attributes, re-run a stage. Backed by the orchestrator's
       /v1/admin/* endpoints (mootd backend proxies).
+  - name: archetype-defaults
+    description: |
+      Admin-curated wardrobe items keyed by archetype. Copied
+      into users' wardrobes at signup or via the seed endpoint
+      so cold-start sign-ups can immediately generate outfits.

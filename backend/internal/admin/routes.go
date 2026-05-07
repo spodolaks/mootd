@@ -121,4 +121,14 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, authLimit Middleware, requi
 	// or SINGLEITEM_BASE_URL is empty.
 	mux.Handle("/admin/v1/hitl-queue", requireAdmin(RequirePermission(PermTracesRead)(http.HandlerFunc(h.HitlQueue))))
 	mux.Handle("/admin/v1/items/", requireAdmin(RequirePermission(PermTracesRead)(http.HandlerFunc(h.HitlItemsRouter))))
+
+	// Archetype-default wardrobe items (cold-start fix). Read =
+	// prompts:read; create / patch / delete gated inline on
+	// prompts:write (matches the prompts surface — both are
+	// admin-curated content authored against archetypes).
+	mux.Handle("/admin/v1/archetype-defaults", requireAdmin(RequirePermission(PermPromptsRead)(http.HandlerFunc(h.ArchetypeDefaultsRouter))))
+	mux.Handle("/admin/v1/archetype-defaults/", requireAdmin(RequirePermission(PermPromptsRead)(http.HandlerFunc(h.ArchetypeDefaultsRouter))))
+	// "Seed this user's wardrobe with their archetype defaults"
+	// — admin-triggered helper for ops + cold-start onboarding.
+	mux.Handle("/admin/v1/users/seed-from-archetype/", requireAdmin(RequirePermission(PermUsersRead)(http.HandlerFunc(h.SeedWardrobeRouter))))
 }

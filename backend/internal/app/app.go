@@ -3,6 +3,8 @@ package app
 
 import (
 	"context"
+	cryptoRand "crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"log"
 	"net/http"
@@ -367,6 +369,22 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 	}
 	searcher := wardrobe.NewSearcher(a.DetectionAPIBaseURL, a.DetectionAPIKey)
 	wardrobeRepo := wardrobe.NewMongoRepository(a.MongoClient, a.MongoDB)
+
+	// Archetype defaults (cold-start fix). Best-effort wiring;
+	// when the index ensure fails the /admin/v1/archetype-defaults
+	// endpoints return 503. The seeder reaches into both
+	// userRepo + wardrobeRepo via the wardrobeSeederAdapter.
+	if archetypeRepo, err := admin.NewArchetypeDefaultsMongoRepository(context.Background(), a.MongoClient, a.MongoDB); err == nil {
+		adminHandler.WithArchetypeDefaults(archetypeRepo)
+		adminHandler.WithWardrobeSeeder(&wardrobeSeederAdapter{
+			defaults:     archetypeRepo,
+			wardrobeRepo: wardrobeRepo,
+			userRepo:     userRepo,
+			logger:       a.Logger,
+		})
+	} else {
+		a.Logger.Printf("admin: archetype_default_items repo init failed: %v (continuing without /archetype-defaults)", err)
+	}
 	// Async detection uses Redis for job state. Same fallback pattern as
 	// outfit generation: when Redis is down, the async endpoints return 503
 	// and clients can still use the sync /v1/wardrobe/detect path.
@@ -885,6 +903,78 @@ func (a adminPurgerAdapter) Purge(ctx context.Context, userID string) (*admin.Pu
 		Collections: rep.Collections,
 		Total:       rep.Total,
 	}, nil
+}
+
+// wardrobeSeederAdapter satisfies admin.WardrobeSeeder by
+// reading curated defaults from the admin-side repo + writing
+// fresh wardrobe rows via the wardrobe repo. The user must
+// exist; absent → admin.ErrUserNotFoundForSeed.
+//
+// Each seeded item is a deep copy: fresh _id, fresh
+// createdAt, the calling user's id stamped on. Future edits +
+// deletes by the user don't touch the original default row.
+type wardrobeSeederAdapter struct {
+	defaults     admin.ArchetypeDefaultsRepository
+	wardrobeRepo *wardrobe.MongoRepository
+	userRepo     *user.MongoRepository
+	logger       *log.Logger
+}
+
+func (a *wardrobeSeederAdapter) Seed(ctx context.Context, userID, archetypeName string) (int, error) {
+	if u, err := a.userRepo.FindByID(ctx, userID); err != nil || u == nil {
+		return 0, admin.ErrUserNotFoundForSeed
+	}
+	defaults, err := a.defaults.List(ctx, archetypeName)
+	if err != nil {
+		return 0, err
+	}
+	if len(defaults) == 0 {
+		return 0, nil
+	}
+
+	now := time.Now().UTC()
+	count := 0
+	for _, d := range defaults {
+		traits := map[string]string{}
+		for k, v := range d.Traits {
+			traits[k] = v
+		}
+		// Stamp a "seededFromArchetype" trait so the user can
+		// distinguish defaults from items they uploaded; also
+		// useful for analytics ("which defaults survive vs get
+		// deleted").
+		traits["seededFromArchetype"] = d.Archetype
+		traits["seededFromDefaultId"] = d.ID
+
+		item := wardrobe.ClothingItem{
+			ID:          "wi_" + randomHex(16),
+			UserID:      userID,
+			Category:    d.Category,
+			Label:       d.Label,
+			ImageURL:    d.ImageURL,
+			PngImageURL: d.PngImageURL,
+			Traits:      traits,
+			CreatedAt:   now,
+		}
+		if err := a.wardrobeRepo.Save(ctx, item); err != nil {
+			a.logger.Printf("seed wardrobe: save item %s for user %s failed: %v (continuing)", d.ID, userID, err)
+			continue
+		}
+		count++
+		// Best-effort observability bump on the default row.
+		_ = a.defaults.IncrementSeeded(ctx, d.ID, 1)
+	}
+	return count, nil
+}
+
+// randomHex is a small helper duplicated from admin/random.go
+// so app/ doesn't need to import that file just for the
+// generator. 8 bytes → 16 hex chars; collision probability
+// is fine for wardrobe-item ids that already include a userId.
+func randomHex(bytes int) string {
+	buf := make([]byte, bytes)
+	_, _ = cryptoRand.Read(buf)
+	return hex.EncodeToString(buf)
 }
 
 // redisHeartbeat polls Redis every 15s and updates

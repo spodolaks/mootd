@@ -27,6 +27,22 @@ const (
 	AdminRolesSupport  AdminRoles = "support"
 )
 
+// Defines values for ArchetypeDefaultItemArchetype.
+const (
+	ArchetypeDefaultItemArchetypeCaregiver ArchetypeDefaultItemArchetype = "caregiver"
+	ArchetypeDefaultItemArchetypeCreator   ArchetypeDefaultItemArchetype = "creator"
+	ArchetypeDefaultItemArchetypeEveryman  ArchetypeDefaultItemArchetype = "everyman"
+	ArchetypeDefaultItemArchetypeExplorer  ArchetypeDefaultItemArchetype = "explorer"
+	ArchetypeDefaultItemArchetypeHero      ArchetypeDefaultItemArchetype = "hero"
+	ArchetypeDefaultItemArchetypeInnocent  ArchetypeDefaultItemArchetype = "innocent"
+	ArchetypeDefaultItemArchetypeJester    ArchetypeDefaultItemArchetype = "jester"
+	ArchetypeDefaultItemArchetypeLover     ArchetypeDefaultItemArchetype = "lover"
+	ArchetypeDefaultItemArchetypeMagician  ArchetypeDefaultItemArchetype = "magician"
+	ArchetypeDefaultItemArchetypeRebel     ArchetypeDefaultItemArchetype = "rebel"
+	ArchetypeDefaultItemArchetypeRuler     ArchetypeDefaultItemArchetype = "ruler"
+	ArchetypeDefaultItemArchetypeSage      ArchetypeDefaultItemArchetype = "sage"
+)
+
 // Defines values for BuildInfoEnvironment.
 const (
 	Development BuildInfoEnvironment = "development"
@@ -135,6 +151,22 @@ const (
 	User SearchHitKind = "user"
 )
 
+// Defines values for SeedFromArchetypeRequestArchetype.
+const (
+	SeedFromArchetypeRequestArchetypeCaregiver SeedFromArchetypeRequestArchetype = "caregiver"
+	SeedFromArchetypeRequestArchetypeCreator   SeedFromArchetypeRequestArchetype = "creator"
+	SeedFromArchetypeRequestArchetypeEveryman  SeedFromArchetypeRequestArchetype = "everyman"
+	SeedFromArchetypeRequestArchetypeExplorer  SeedFromArchetypeRequestArchetype = "explorer"
+	SeedFromArchetypeRequestArchetypeHero      SeedFromArchetypeRequestArchetype = "hero"
+	SeedFromArchetypeRequestArchetypeInnocent  SeedFromArchetypeRequestArchetype = "innocent"
+	SeedFromArchetypeRequestArchetypeJester    SeedFromArchetypeRequestArchetype = "jester"
+	SeedFromArchetypeRequestArchetypeLover     SeedFromArchetypeRequestArchetype = "lover"
+	SeedFromArchetypeRequestArchetypeMagician  SeedFromArchetypeRequestArchetype = "magician"
+	SeedFromArchetypeRequestArchetypeRebel     SeedFromArchetypeRequestArchetype = "rebel"
+	SeedFromArchetypeRequestArchetypeRuler     SeedFromArchetypeRequestArchetype = "ruler"
+	SeedFromArchetypeRequestArchetypeSage      SeedFromArchetypeRequestArchetype = "sage"
+)
+
 // Defines values for SingleItemDetectionAuditEntryAction.
 const (
 	Approve         SingleItemDetectionAuditEntryAction = "approve"
@@ -199,6 +231,22 @@ const (
 	UserTierUpdateTierFounder UserTierUpdateTier = "founder"
 	UserTierUpdateTierFree    UserTierUpdateTier = "free"
 	UserTierUpdateTierPaid    UserTierUpdateTier = "paid"
+)
+
+// Defines values for AdminListArchetypeDefaultsParamsArchetype.
+const (
+	Caregiver AdminListArchetypeDefaultsParamsArchetype = "caregiver"
+	Creator   AdminListArchetypeDefaultsParamsArchetype = "creator"
+	Everyman  AdminListArchetypeDefaultsParamsArchetype = "everyman"
+	Explorer  AdminListArchetypeDefaultsParamsArchetype = "explorer"
+	Hero      AdminListArchetypeDefaultsParamsArchetype = "hero"
+	Innocent  AdminListArchetypeDefaultsParamsArchetype = "innocent"
+	Jester    AdminListArchetypeDefaultsParamsArchetype = "jester"
+	Lover     AdminListArchetypeDefaultsParamsArchetype = "lover"
+	Magician  AdminListArchetypeDefaultsParamsArchetype = "magician"
+	Rebel     AdminListArchetypeDefaultsParamsArchetype = "rebel"
+	Ruler     AdminListArchetypeDefaultsParamsArchetype = "ruler"
+	Sage      AdminListArchetypeDefaultsParamsArchetype = "sage"
 )
 
 // Defines values for AdminListHitlQueueParamsSort.
@@ -309,6 +357,65 @@ type Admin struct {
 
 // AdminRoles defines model for Admin.Roles.
 type AdminRoles string
+
+// ArchetypeDefaultItem Admin-curated wardrobe item that gets COPIED into a
+// user's wardrobe at signup (or via the seed endpoint),
+// keyed by archetype. Solves the cold-start problem —
+// new users with no uploaded items can immediately
+// generate outfits.
+type ArchetypeDefaultItem struct {
+	Archetype ArchetypeDefaultItemArchetype `json:"archetype"`
+	Category  string                        `json:"category"`
+	CreatedAt time.Time                     `json:"createdAt"`
+
+	// CreatedBy Admin id that authored the item.
+	CreatedBy *string `json:"createdBy,omitempty"`
+
+	// Description Free-form copy shown alongside the item in the
+	// user's wardrobe. Treated like the description an
+	// uploaded item would have — gives the user
+	// context for why this item exists in their
+	// wardrobe before they start uploading their own.
+	Description *string `json:"description,omitempty"`
+	Id          string  `json:"id"`
+	ImageUrl    string  `json:"imageUrl"`
+	Label       string  `json:"label"`
+
+	// PngImageUrl Background-removed PNG; populated when the curator supplies one.
+	PngImageUrl *string `json:"pngImageUrl,omitempty"`
+
+	// SeededCount Total user wardrobes that have received a copy of this row.
+	SeededCount *int `json:"seededCount,omitempty"`
+
+	// StructuredDescription Closed-enum attribute paths (same shape produced
+	// by the singleItemDetection pipeline). Free-form
+	// map so the spec doesn't pin to one schema version.
+	StructuredDescription *map[string]interface{} `json:"structuredDescription,omitempty"`
+	Traits                *map[string]string      `json:"traits,omitempty"`
+	UpdatedAt             *time.Time              `json:"updatedAt,omitempty"`
+}
+
+// ArchetypeDefaultItemArchetype defines model for ArchetypeDefaultItem.Archetype.
+type ArchetypeDefaultItemArchetype string
+
+// ArchetypeDefaultItemPatch Body for PATCH /admin/v1/archetype-defaults/{id}.
+// Every field optional — only the supplied keys are
+// updated, the rest stay as-is. Pass an explicit empty
+// string to clear a string field.
+type ArchetypeDefaultItemPatch struct {
+	Category              *string                 `json:"category,omitempty"`
+	Description           *string                 `json:"description,omitempty"`
+	ImageUrl              *string                 `json:"imageUrl,omitempty"`
+	Label                 *string                 `json:"label,omitempty"`
+	PngImageUrl           *string                 `json:"pngImageUrl,omitempty"`
+	StructuredDescription *map[string]interface{} `json:"structuredDescription,omitempty"`
+	Traits                *map[string]string      `json:"traits,omitempty"`
+}
+
+// ArchetypeDefaultItemsList defines model for ArchetypeDefaultItemsList.
+type ArchetypeDefaultItemsList struct {
+	Items []ArchetypeDefaultItem `json:"items"`
+}
 
 // AuditEntry One row in the admin_audit collection. Append-only; every
 // non-read admin action writes one. Adminemail is denormalised
@@ -1135,6 +1242,29 @@ type SearchResponse struct {
 	Hits []SearchHit `json:"hits"`
 }
 
+// SeedFromArchetypeRequest Body for POST /admin/v1/users/seed-from-archetype/{userId}.
+// Triggers a copy of the curated defaults for `archetype`
+// into the user's wardrobe. `notes` lands in the audit
+// row alongside the seededCount.
+type SeedFromArchetypeRequest struct {
+	Archetype SeedFromArchetypeRequestArchetype `json:"archetype"`
+
+	// Notes Audit-trail rationale; required.
+	Notes string `json:"notes"`
+}
+
+// SeedFromArchetypeRequestArchetype defines model for SeedFromArchetypeRequest.Archetype.
+type SeedFromArchetypeRequestArchetype string
+
+// SeedFromArchetypeResponse defines model for SeedFromArchetypeResponse.
+type SeedFromArchetypeResponse struct {
+	Archetype string `json:"archetype"`
+
+	// SeededCount Number of items actually copied (may be less than the curated total if errors occurred).
+	SeededCount int    `json:"seededCount"`
+	UserId      string `json:"userId"`
+}
+
 // SessionDetail defines model for SessionDetail.
 type SessionDetail struct {
 	Events []SessionDetailEvent `json:"events"`
@@ -1801,6 +1931,14 @@ type InternalError = ErrorResponse
 // Unauthorized defines model for Unauthorized.
 type Unauthorized = ErrorResponse
 
+// AdminListArchetypeDefaultsParams defines parameters for AdminListArchetypeDefaults.
+type AdminListArchetypeDefaultsParams struct {
+	Archetype *AdminListArchetypeDefaultsParamsArchetype `form:"archetype,omitempty" json:"archetype,omitempty"`
+}
+
+// AdminListArchetypeDefaultsParamsArchetype defines parameters for AdminListArchetypeDefaults.
+type AdminListArchetypeDefaultsParamsArchetype string
+
 // AdminListAuditParams defines parameters for AdminListAudit.
 type AdminListAuditParams struct {
 	// Action Exact match. e.g. `traces.export`.
@@ -1968,6 +2106,12 @@ type AdminListUserWardrobeParams struct {
 	Limit  *int    `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// AdminCreateArchetypeDefaultJSONRequestBody defines body for AdminCreateArchetypeDefault for application/json ContentType.
+type AdminCreateArchetypeDefaultJSONRequestBody = ArchetypeDefaultItem
+
+// AdminUpdateArchetypeDefaultJSONRequestBody defines body for AdminUpdateArchetypeDefault for application/json ContentType.
+type AdminUpdateArchetypeDefaultJSONRequestBody = ArchetypeDefaultItemPatch
+
 // AdminAuditPIIRevealJSONRequestBody defines body for AdminAuditPIIReveal for application/json ContentType.
 type AdminAuditPIIRevealJSONRequestBody = PIIRevealRequest
 
@@ -2018,6 +2162,9 @@ type AdminPromotePromptVersionJSONRequestBody = PromptPromoteRequest
 
 // AdminRecordSessionEventJSONRequestBody defines body for AdminRecordSessionEvent for application/json ContentType.
 type AdminRecordSessionEventJSONRequestBody = SessionEventRequest
+
+// AdminSeedWardrobeFromArchetypeJSONRequestBody defines body for AdminSeedWardrobeFromArchetype for application/json ContentType.
+type AdminSeedWardrobeFromArchetypeJSONRequestBody = SeedFromArchetypeRequest
 
 // AdminUpdateUserBudgetJSONRequestBody defines body for AdminUpdateUserBudget for application/json ContentType.
 type AdminUpdateUserBudgetJSONRequestBody = UserBudgetUpdate

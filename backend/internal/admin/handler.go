@@ -42,6 +42,8 @@ type Handler struct {
 	retentionRepo RetentionRepository       // optional — when nil, /retention returns 503
 	userPurger    UserPurger                // optional — when nil, /users/{id}/purge returns 503
 	hitlProxy     *HitlProxy                // optional — when nil, /hitl-queue + /items/{id}/* return 503
+	archetypeDefaults ArchetypeDefaultsRepository // optional — when nil, /archetype-defaults returns 503
+	wardrobeSeeder    WardrobeSeeder              // optional — wired alongside archetypeDefaults so admin can preview seeding
 	secret        string
 }
 
