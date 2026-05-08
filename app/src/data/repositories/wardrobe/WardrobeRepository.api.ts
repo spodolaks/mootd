@@ -439,13 +439,48 @@ export class ApiWardrobeRepository implements IWardrobeRepository {
     console.log(`[Wardrobe] ✓ Outfits received — ${outfits.length} outfit(s)`, outfits);
     return outfits;
   }
+
+  async claimArchetypeDefault(defaultId: string): Promise<WardrobeItem> {
+    console.log(`[Wardrobe] → POST /v1/wardrobe/items/from-archetype-default ${defaultId}`);
+    const res = await apiClient.post<{ item: WardrobeItem }>(
+      '/v1/wardrobe/items/from-archetype-default',
+      { defaultId },
+    );
+    // Image URLs from the backend are server-relative; the mobile
+    // <Image> needs absolute URLs to fetch directly. Mirrors what
+    // getItems does for paginated wardrobe rows.
+    const item: WardrobeItem = {
+      ...res.item,
+      imageUrl: toAbsoluteImageURL(res.item.imageUrl),
+      pngImageUrl: toAbsoluteImageURL(res.item.pngImageUrl) || undefined,
+    };
+    console.log(`[Wardrobe] ✓ Claimed default ${defaultId} → ${item.id}`);
+    return item;
+  }
+
+  async rejectArchetypeDefault(defaultId: string): Promise<void> {
+    console.log(`[Wardrobe] → POST /v1/wardrobe/archetype-rejections ${defaultId}`);
+    await apiClient.post('/v1/wardrobe/archetype-rejections', { defaultId });
+    console.log(`[Wardrobe] ✓ Rejected default ${defaultId}`);
+  }
 }
 
 // hydrateOutfitUrls rewrites backend-relative image paths on an outfit into
 // absolute URLs so RN <Image> can fetch them directly. Mirrors the same
 // transform applied to wardrobe items, just extended to panelUrl/backgroundUrl.
-const hydrateOutfitUrls = (outfit: Outfit): Outfit => ({
-  ...outfit,
-  panelUrl: toAbsoluteImageURL(outfit.panelUrl) || undefined,
-  backgroundUrl: toAbsoluteImageURL(outfit.backgroundUrl) || undefined,
-});
+const hydrateOutfitUrls = (outfit: Outfit): Outfit => {
+  // ItemSnapshots arrive with server-relative imageUrl/pngImageUrl
+  // (e.g. /v1/wardrobe/items/ad_<hex>/image for fillers). The
+  // mobile <Image> component needs absolute URLs.
+  const hydratedSnapshots = outfit.itemSnapshots?.map((snap) => ({
+    ...snap,
+    imageUrl: toAbsoluteImageURL(snap.imageUrl) || snap.imageUrl,
+    pngImageUrl: snap.pngImageUrl ? (toAbsoluteImageURL(snap.pngImageUrl) || snap.pngImageUrl) : undefined,
+  }));
+  return {
+    ...outfit,
+    panelUrl: toAbsoluteImageURL(outfit.panelUrl) || undefined,
+    backgroundUrl: toAbsoluteImageURL(outfit.backgroundUrl) || undefined,
+    itemSnapshots: hydratedSnapshots,
+  };
+};

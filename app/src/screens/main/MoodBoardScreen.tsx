@@ -4,11 +4,11 @@ import {
   Modal,
 } from '@/src/components';
 import { useColorScheme, useWeather } from '@/src/hooks';
-import { backgrounds, fills, labels } from '@/src/theme/colors';
+import { backgrounds, button, fills, labels } from '@/src/theme/colors';
 import { typography } from '@/src/theme/typography';
 import { radius } from '@/src/theme/radius';
 import { wardrobeRepository, moodBoardRepository, feedbackRepository } from '@/src/data/repositories';
-import type { Outfit, SavedMoodBoard, WardrobeItem } from '@/src/domain';
+import type { Outfit, OutfitItem, SavedMoodBoard, WardrobeItem } from '@/src/domain';
 import { outfitToSnapshot, topArchetypeOf, weatherContextString } from '@/src/domain';
 import React, { useState, useCallback, useRef, useMemo } from 'react';
 import {
@@ -62,6 +62,15 @@ export const MoodBoardScreen: React.FC = () => {
 
   // Swap item modal state
   const [swapTarget, setSwapTarget] = useState<{ outfitIndex: number; itemId: string } | null>(null);
+  // Filler tap-resolve sheet state. Backend returns ad_<hex> ids on
+  // archetype-default suggestions; the user picks "in wardrobe"
+  // (claim → seed) or "not in wardrobe" (reject → never offer
+  // again). Owned items still go through the swap modal above.
+  const [fillerTarget, setFillerTarget] = useState<{
+    outfitIndex: number;
+    snapshot: OutfitItem;
+  } | null>(null);
+  const [fillerActionPending, setFillerActionPending] = useState(false);
 
   // Per-outfit thumbs state, immutable-per-render once set. Keyed by the
   // client-assigned outfit.id generated at receive time. Cleared on every
@@ -266,6 +275,102 @@ export const MoodBoardScreen: React.FC = () => {
     );
   }, [swapTarget, outfitOptions, itemMap]);
 
+  // Routes a tile tap to either the swap modal (owned items, the
+  // pre-existing flow) or the filler sheet (archetype-default
+  // suggestions the user hasn't claimed yet). Decision is purely
+  // by the snapshot's source tag — every item the LLM picks now
+  // arrives with an entry in itemSnapshots, so the lookup is O(1).
+  const handleItemPress = useCallback((outfitIndex: number, itemId: string) => {
+    const outfit = outfitOptions[outfitIndex];
+    if (!outfit) return;
+    const snapshot = (outfit.itemSnapshots ?? outfit.snapshots ?? []).find((s) => s.id === itemId);
+    if (snapshot && snapshot.source === 'filler') {
+      setFillerTarget({ outfitIndex, snapshot });
+      return;
+    }
+    setSwapTarget({ outfitIndex, itemId });
+  }, [outfitOptions]);
+
+  // "I have this in my wardrobe" → seed the default into the user's
+  // wardrobe and rewrite this outfit's reference to the new wi_<hex>
+  // id so the next render uses the real wardrobe item. Idempotent
+  // server-side: a previous claim returns the existing wi_ id.
+  const handleClaimFiller = useCallback(async () => {
+    if (!fillerTarget || fillerActionPending) return;
+    const { outfitIndex, snapshot } = fillerTarget;
+    setFillerActionPending(true);
+    try {
+      const newItem = await wardrobeRepository.claimArchetypeDefault(snapshot.id);
+      setOutfitOptions((prev) => {
+        const next = [...prev];
+        const o = { ...next[outfitIndex] };
+        o.items = o.items.map((id) => (id === snapshot.id ? newItem.id : id));
+        if (o.itemSnapshots) {
+          o.itemSnapshots = o.itemSnapshots.map((s) =>
+            s.id === snapshot.id
+              ? { id: newItem.id, category: newItem.category, label: newItem.label, imageUrl: newItem.imageUrl, pngImageUrl: newItem.pngImageUrl, source: 'owned' }
+              : s,
+          );
+        }
+        if (o.layoutRoles && o.layoutRoles[snapshot.id]) {
+          const role = o.layoutRoles[snapshot.id];
+          const { [snapshot.id]: _drop, ...rest } = o.layoutRoles;
+          o.layoutRoles = { ...rest, [newItem.id]: role };
+        }
+        if (o.visualWeights && o.visualWeights[snapshot.id]) {
+          const w = o.visualWeights[snapshot.id];
+          const { [snapshot.id]: _drop, ...rest } = o.visualWeights;
+          o.visualWeights = { ...rest, [newItem.id]: w };
+        }
+        next[outfitIndex] = o;
+        return next;
+      });
+      // Refresh wardrobe so the new item is in itemMap on next render.
+      void loadData();
+      setFillerTarget(null);
+    } catch (err) {
+      Alert.alert('Could not add', err instanceof Error ? err.message : 'Try again.');
+    } finally {
+      setFillerActionPending(false);
+    }
+  }, [fillerTarget, fillerActionPending, loadData]);
+
+  // "Not in my wardrobe" → record a per-user rejection so the same
+  // suggestion never resurfaces. Locally drop the filler from this
+  // outfit's items list so the current card refreshes immediately
+  // (the LLM will pick a different filler on the next regenerate).
+  const handleRejectFiller = useCallback(async () => {
+    if (!fillerTarget || fillerActionPending) return;
+    const { outfitIndex, snapshot } = fillerTarget;
+    setFillerActionPending(true);
+    try {
+      await wardrobeRepository.rejectArchetypeDefault(snapshot.id);
+      setOutfitOptions((prev) => {
+        const next = [...prev];
+        const o = { ...next[outfitIndex] };
+        o.items = o.items.filter((id) => id !== snapshot.id);
+        if (o.itemSnapshots) {
+          o.itemSnapshots = o.itemSnapshots.filter((s) => s.id !== snapshot.id);
+        }
+        if (o.layoutRoles) {
+          const { [snapshot.id]: _drop, ...rest } = o.layoutRoles;
+          o.layoutRoles = rest;
+        }
+        if (o.visualWeights) {
+          const { [snapshot.id]: _drop, ...rest } = o.visualWeights;
+          o.visualWeights = rest;
+        }
+        next[outfitIndex] = o;
+        return next;
+      });
+      setFillerTarget(null);
+    } catch (err) {
+      Alert.alert('Could not dismiss', err instanceof Error ? err.message : 'Try again.');
+    } finally {
+      setFillerActionPending(false);
+    }
+  }, [fillerTarget, fillerActionPending]);
+
   const handleSwapItem = (replacementId: string) => {
     if (!swapTarget) return;
     const removedItemId = swapTarget.itemId;
@@ -347,7 +452,7 @@ export const MoodBoardScreen: React.FC = () => {
       total={outfitOptions.length}
       itemMap={itemMap}
       onSelect={() => { void handleSelectOutfit(item); }}
-      onItemPress={(itemId) => setSwapTarget({ outfitIndex: index, itemId })}
+      onItemPress={(itemId) => handleItemPress(index, itemId)}
       isSaving={isSaving}
       colorScheme={colorScheme}
       cardHeight={cardHeight}
@@ -363,7 +468,7 @@ export const MoodBoardScreen: React.FC = () => {
           }
         : undefined}
     />
-  ), [outfitOptions.length, itemMap, handleSelectOutfit, isSaving, colorScheme, cardHeight, weatherDetail, handleRateOutfit, ratings]);
+  ), [outfitOptions.length, itemMap, handleSelectOutfit, isSaving, colorScheme, cardHeight, weatherDetail, handleRateOutfit, ratings, handleItemPress]);
 
   const renderContent = () => {
     switch (screenState) {
@@ -524,6 +629,73 @@ export const MoodBoardScreen: React.FC = () => {
           </ScrollView>
         )}
       </Modal>
+
+      {/* Filler tap-resolve sheet (archetype-default suggestions).
+          Two choices keep the closet honest: "in wardrobe" seeds the
+          item permanently, "not in wardrobe" rejects it forever. */}
+      <Modal
+        visible={fillerTarget !== null}
+        title="Stylist suggestion"
+        onDismiss={() => { if (!fillerActionPending) setFillerTarget(null); }}
+      >
+        {fillerTarget && (
+          <View style={styles.fillerSheet}>
+            <View style={[styles.fillerPreview, { backgroundColor: fills.tertiary[colorScheme] }]}>
+              {fillerTarget.snapshot.imageUrl ? (
+                <Image
+                  source={{ uri: fillerTarget.snapshot.pngImageUrl || fillerTarget.snapshot.imageUrl }}
+                  style={styles.fillerImage}
+                  contentFit="contain"
+                  cachePolicy="memory-disk"
+                />
+              ) : (
+                <Icon name="closet" size={32} color={labels.tertiary[colorScheme]} />
+              )}
+              <Text
+                style={[styles.fillerLabel, { color: textColor }]}
+                numberOfLines={2}
+              >
+                {fillerTarget.snapshot.label}
+              </Text>
+              <Text
+                style={[styles.fillerCategory, { color: labels.tertiary[colorScheme] }]}
+              >
+                {fillerTarget.snapshot.category}
+              </Text>
+            </View>
+            <Text style={[styles.fillerExplain, { color: labels.secondary[colorScheme] }]}>
+              This is a stylist suggestion, not yet in your wardrobe.
+              Tell us if you actually own it.
+            </Text>
+            <Pressable
+              style={[styles.fillerAction, styles.fillerActionPrimary, { backgroundColor: button.primary.background[colorScheme] }]}
+              onPress={() => { void handleClaimFiller(); }}
+              disabled={fillerActionPending}
+              accessibilityRole="button"
+              accessibilityLabel="I have this in my wardrobe"
+              accessibilityHint="Adds the item to your closet so it stays in future outfits"
+              testID="filler-claim"
+            >
+              <Text style={[styles.fillerActionLabel, { color: button.primary.foreground[colorScheme] }]}>
+                {fillerActionPending ? 'Adding…' : "I have this — add to wardrobe"}
+              </Text>
+            </Pressable>
+            <Pressable
+              style={[styles.fillerAction, styles.fillerActionSecondary, { borderColor: labels.tertiary[colorScheme] }]}
+              onPress={() => { void handleRejectFiller(); }}
+              disabled={fillerActionPending}
+              accessibilityRole="button"
+              accessibilityLabel="Not in my wardrobe"
+              accessibilityHint="Hides this item from future outfit suggestions"
+              testID="filler-reject"
+            >
+              <Text style={[styles.fillerActionLabel, { color: textColor }]}>
+                {fillerActionPending ? '…' : 'Not in my wardrobe'}
+              </Text>
+            </Pressable>
+          </View>
+        )}
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -606,5 +778,47 @@ const styles = StyleSheet.create({
   swapEmpty: {
     ...typography.subheadline.regular,
     paddingVertical: 20,
+  },
+
+  // Filler tap-resolve sheet
+  fillerSheet: {
+    gap: 14,
+    paddingVertical: 8,
+  },
+  fillerPreview: {
+    alignItems: 'center',
+    padding: 16,
+    borderRadius: radius.md,
+    gap: 8,
+  },
+  fillerImage: {
+    width: 120,
+    height: 120,
+  },
+  fillerLabel: {
+    ...typography.subheadline.semiBold,
+    textAlign: 'center',
+  },
+  fillerCategory: {
+    ...typography.caption1.regular,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+  },
+  fillerExplain: {
+    ...typography.footnote.regular,
+    textAlign: 'center',
+    paddingHorizontal: 4,
+  },
+  fillerAction: {
+    paddingVertical: 12,
+    borderRadius: radius.md,
+    alignItems: 'center',
+  },
+  fillerActionPrimary: {},
+  fillerActionSecondary: {
+    borderWidth: 1,
+  },
+  fillerActionLabel: {
+    ...typography.body.semiBold,
   },
 });

@@ -144,4 +144,21 @@ export class MockWardrobeRepository implements IWardrobeRepository {
     await this.delay(300);
     return [];
   }
+
+  async claimArchetypeDefault(defaultId: string): Promise<WardrobeItem> {
+    await this.delay(150);
+    return {
+      id: `wi_mock_${defaultId.slice(3, 11)}`,
+      userId: 'mock-user',
+      category: 'tops',
+      label: 'Mock claimed item',
+      imageUrl: '',
+      traits: { seededFromArchetype: 'creator', seededFromDefaultId: defaultId },
+      createdAt: new Date().toISOString(),
+    };
+  }
+
+  async rejectArchetypeDefault(_defaultId: string): Promise<void> {
+    await this.delay(80);
+  }
 }

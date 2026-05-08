@@ -197,6 +197,7 @@ const OutfitCardBase: React.FC<OutfitCardProps> = ({
             <Collage
               itemIds={outfit.items}
               itemMap={itemMap}
+              snapshots={outfit.itemSnapshots ?? outfit.snapshots}
               layoutRoles={outfit.layoutRoles}
               visualWeights={outfit.visualWeights}
               onItemPress={onItemPress}
@@ -217,6 +218,7 @@ const OutfitCardBase: React.FC<OutfitCardProps> = ({
             <Collage
               itemIds={outfit.items}
               itemMap={itemMap}
+              snapshots={outfit.itemSnapshots ?? outfit.snapshots}
               layoutRoles={outfit.layoutRoles}
               visualWeights={outfit.visualWeights}
               onItemPress={onItemPress}

@@ -129,4 +129,24 @@ export interface IWardrobeRepository {
    * @param brand  - brand name entered by the user
    */
   searchByBrand(itemId: string, brand: string): Promise<ClothingSearchProduct[]>;
+
+  /**
+   * "I have this IRL." Promotes a virtual archetype-default item
+   * (id starts with `ad_`) into the user's wardrobe, returning the
+   * resulting WardrobeItem with a freshly-minted `wi_<hex>` id.
+   * Idempotent — calling twice for the same default returns the
+   * SAME wardrobe row, never a duplicate. Use this when the user
+   * taps the "in wardrobe" choice on a filler tile in a moodboard.
+   * @param defaultId - the ad_<hex> id from the OutfitItem snapshot
+   */
+  claimArchetypeDefault(defaultId: string): Promise<WardrobeItem>;
+
+  /**
+   * "Not in my wardrobe." Records a per-user rejection so the
+   * default never reappears in this user's outfit pool. Idempotent
+   * — re-rejecting is a no-op 200. Use this when the user taps the
+   * "not in wardrobe" choice on a filler tile.
+   * @param defaultId - the ad_<hex> id from the OutfitItem snapshot
+   */
+  rejectArchetypeDefault(defaultId: string): Promise<void>;
 }
