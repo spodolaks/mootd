@@ -374,7 +374,8 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 	// when the index ensure fails the /admin/v1/archetype-defaults
 	// endpoints return 503. The seeder reaches into both
 	// userRepo + wardrobeRepo via the wardrobeSeederAdapter.
-	if archetypeRepo, err := admin.NewArchetypeDefaultsMongoRepository(context.Background(), a.MongoClient, a.MongoDB); err == nil {
+	archetypeRepo, archetypeRepoErr := admin.NewArchetypeDefaultsMongoRepository(context.Background(), a.MongoClient, a.MongoDB)
+	if archetypeRepoErr == nil {
 		adminHandler.WithArchetypeDefaults(archetypeRepo)
 		adminHandler.WithWardrobeSeeder(&wardrobeSeederAdapter{
 			defaults:     archetypeRepo,
@@ -411,7 +412,7 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 			a.Logger.Printf("admin: archetype-defaults autodetect disabled (no Claude key or wardrobe detector wired)")
 		}
 	} else {
-		a.Logger.Printf("admin: archetype_default_items repo init failed: %v (continuing without /archetype-defaults)", err)
+		a.Logger.Printf("admin: archetype_default_items repo init failed: %v (continuing without /archetype-defaults)", archetypeRepoErr)
 	}
 	// Async detection uses Redis for job state. Same fallback pattern as
 	// outfit generation: when Redis is down, the async endpoints return 503
@@ -803,7 +804,14 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 		legacy.WithRecorder(observability.NewWardrobeRecorderAdapter(coreLLMRec))
 	}
 
-	outfitService := outfit.NewService(a.Logger, outfit.ServiceConfig{
+	// Wire archetype-default fillers into the outfit pool when the
+	// admin-side repo came up cleanly. The two adapters share the
+	// same archetypeRepo handle so the ad_<hex> id minted on the
+	// admin side flows through into wardrobe seeding without going
+	// via the wire format. nil-safe: when archetypeRepo failed to
+	// init, both fields stay nil and outfit gen falls back to the
+	// pre-fillers behaviour.
+	outfitCfg := outfit.ServiceConfig{
 		Generator:      generator,
 		Wardrobe:       wardrobeRepo,
 		Recent:         recentProvider,
@@ -813,7 +821,17 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 		Cache:          outfitCache,
 		LLMRecorder:    llmRecorder,
 		BudgetEnforcer: budgetEnforcer,
-	})
+	}
+	if archetypeRepoErr == nil {
+		outfitCfg.ArchetypeDefaults = &archetypeDefaultsLoaderAdapter{repo: archetypeRepo}
+		outfitCfg.FillerSeeder = &fillerSeederAdapter{
+			defaults:     archetypeRepo,
+			wardrobeRepo: wardrobeRepo,
+			logger:       a.Logger,
+		}
+	}
+
+	outfitService := outfit.NewService(a.Logger, outfitCfg)
 
 	outfit.NewHandler(a.Logger, outfit.HandlerConfig{
 		Service:   outfitService,
@@ -1070,6 +1088,116 @@ func (a *wardrobeItemDetectorAdapter) DetectFromBytes(ctx context.Context, image
 		Traits:                traits,
 		StructuredDescription: structured,
 	}, nil
+}
+
+// archetypeDefaultsLoaderAdapter satisfies outfit's archetypeDefaultsLoader
+// by wrapping the admin defaults repo. Converts each
+// ArchetypeDefaultItem into a wardrobe.ClothingItem so the outfit
+// service can fold them into the same items slice it already reasons
+// about (validation, archetype scoring, layout). The id keeps its
+// "ad_<hex>" prefix; the outfit service is what later rewrites those
+// to "wi_<hex>" ids via the fillerSeeder when an outfit picks one.
+type archetypeDefaultsLoaderAdapter struct {
+	repo admin.ArchetypeDefaultsRepository
+}
+
+func (a *archetypeDefaultsLoaderAdapter) LoadFor(ctx context.Context, archetypeName string, cap int) ([]wardrobe.ClothingItem, error) {
+	rows, err := a.repo.List(ctx, archetypeName)
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) > cap {
+		rows = rows[:cap]
+	}
+	out := make([]wardrobe.ClothingItem, 0, len(rows))
+	for _, d := range rows {
+		traits := map[string]string{}
+		for k, v := range d.Traits {
+			traits[k] = v
+		}
+		// Stamp a marker trait so prompts + downstream debugging
+		// can tell the source apart even before the Preferred flag
+		// gets stripped by serialisation.
+		traits["seededFromArchetype"] = d.Archetype
+		traits["seededFromDefaultId"] = d.ID
+		out = append(out, wardrobe.ClothingItem{
+			ID:          d.ID, // ad_<hex> — rewritten downstream when picked
+			UserID:      "",   // intentionally blank: not yet owned
+			Category:    d.Category,
+			Label:       d.Label,
+			ImageURL:    d.ImageURL,
+			PngImageURL: d.PngImageURL,
+			Traits:      traits,
+			CreatedAt:   d.CreatedAt,
+		})
+	}
+	return out, nil
+}
+
+// fillerSeederAdapter satisfies outfit's fillerSeeder. Idempotent:
+// looks up the user's existing wardrobe for an item already seeded
+// from the same default (matched on traits.seededFromDefaultId)
+// before minting a new wi_<hex>. Re-running outfit gen for the same
+// user+archetype therefore reuses the same wardrobe row instead of
+// piling up duplicates.
+type fillerSeederAdapter struct {
+	defaults     admin.ArchetypeDefaultsRepository
+	wardrobeRepo *wardrobe.MongoRepository
+	logger       *log.Logger
+}
+
+func (a *fillerSeederAdapter) SeedForUser(ctx context.Context, userID, defaultID string) (string, error) {
+	if userID == "" || defaultID == "" {
+		return "", fmt.Errorf("filler seeder: userID and defaultID required (got %q / %q)", userID, defaultID)
+	}
+	// Idempotency: scan the user's wardrobe for an existing seed of
+	// this default. The wardrobe stays small enough (~100 items
+	// upper bound for the cohort we care about) that a linear scan
+	// is fine; an index on (userId, traits.seededFromDefaultId)
+	// would be a future optimisation if profiles say otherwise.
+	existing, err := a.wardrobeRepo.FindByUser(ctx, userID)
+	if err != nil {
+		return "", fmt.Errorf("filler seeder: load user wardrobe: %w", err)
+	}
+	for _, it := range existing {
+		if it.Traits["seededFromDefaultId"] == defaultID {
+			return it.ID, nil
+		}
+	}
+	// First time seeing this default for this user — copy it.
+	def, err := a.defaults.Get(ctx, defaultID)
+	if err != nil {
+		return "", fmt.Errorf("filler seeder: load default %s: %w", defaultID, err)
+	}
+	if def == nil {
+		return "", fmt.Errorf("filler seeder: default %s not found", defaultID)
+	}
+	traits := map[string]string{}
+	for k, v := range def.Traits {
+		traits[k] = v
+	}
+	traits["seededFromArchetype"] = def.Archetype
+	traits["seededFromDefaultId"] = def.ID
+	newID := "wi_" + randomHex(16)
+	item := wardrobe.ClothingItem{
+		ID:          newID,
+		UserID:      userID,
+		Category:    def.Category,
+		Label:       def.Label,
+		ImageURL:    def.ImageURL,
+		PngImageURL: def.PngImageURL,
+		Traits:      traits,
+		CreatedAt:   time.Now().UTC(),
+	}
+	if err := a.wardrobeRepo.Save(ctx, item); err != nil {
+		return "", fmt.Errorf("filler seeder: save wardrobe item: %w", err)
+	}
+	// Best-effort observability bump on the default row so admins
+	// can see which fillers are landing in real outfits.
+	_ = a.defaults.IncrementSeeded(ctx, def.ID, 1)
+	a.logger.Printf("outfit-filler: seeded default %s as %s for user %s (archetype=%s, label=%q)",
+		def.ID, newID, userID, def.Archetype, def.Label)
+	return newID, nil
 }
 
 // redisHeartbeat polls Redis every 15s and updates

@@ -119,6 +119,15 @@ type GenItem struct {
 	Category string
 	Label    string
 	Traits   map[string]string
+	// Preferred is true for items the user actually owns (their
+	// uploads). False for archetype-default fillers injected to widen
+	// the pool when the user's wardrobe is sparse or skewed. The
+	// system prompt tells the LLM to lean on Preferred items first
+	// and reach for fillers only when needed to complete an outfit.
+	// Default-valued (false) is preserved when the wardrobe-only
+	// path runs without archetype-defaults wiring, so existing
+	// behaviour is byte-identical when no fillers are present.
+	Preferred bool
 }
 
 // Weather is the optional weather context for outfit selection.

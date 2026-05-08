@@ -425,15 +425,29 @@ func BuildSystemPromptForEval(weather Weather, recentBoards []RecentBoard, topAr
 // <<USER_DATA>>...<</USER_DATA>> tags that the system prompt instructs
 // the LLM to treat as data only — defence-in-depth against prompt
 // injection via crafted item labels.
+//
+// Items with Preferred=false are archetype-default fillers added to
+// widen the pool. They're prefixed with `[filler]` in the inventory so
+// the LLM can spot them at a glance, paired with an explicit rule in
+// the message body that owned items take priority.
 func BuildUserMessage(items []GenItem) string {
-	type itemRef struct{ ID, Label string }
+	type itemRef struct {
+		ID     string
+		Label  string
+		Filler bool
+	}
 	groups := map[string][]itemRef{
 		"TOPS": {}, "BOTTOMS": {}, "OUTERWEAR": {}, "FOOTWEAR": {}, "ACCESSORIES": {},
 	}
+	hasFillers := false
 	for _, item := range items {
 		role := ClassifyRole(item.Category)
 		// Sanitise once at ingest; later writes don't need to re-sanitise.
-		groups[role] = append(groups[role], itemRef{item.ID, sanitiseUserText(item.Label)})
+		filler := !item.Preferred
+		if filler {
+			hasFillers = true
+		}
+		groups[role] = append(groups[role], itemRef{item.ID, sanitiseUserText(item.Label), filler})
 	}
 
 	var inventory strings.Builder
@@ -444,7 +458,11 @@ func BuildUserMessage(items []GenItem) string {
 		}
 		fmt.Fprintf(&inventory, "\n%s:\n", role)
 		for _, ref := range refs {
-			fmt.Fprintf(&inventory, "  - %s (%s)\n", ref.ID, ref.Label)
+			marker := ""
+			if ref.Filler {
+				marker = " [filler]"
+			}
+			fmt.Fprintf(&inventory, "  - %s (%s)%s\n", ref.ID, ref.Label, marker)
 		}
 	}
 
@@ -453,7 +471,11 @@ func BuildUserMessage(items []GenItem) string {
 	// enum) so we leave it raw. Label + trait values are user-influenced.
 	var details strings.Builder
 	for _, item := range items {
-		fmt.Fprintf(&details, "%s | %s | %s", item.ID, item.Category, sanitiseUserText(item.Label))
+		marker := ""
+		if !item.Preferred {
+			marker = " [filler]"
+		}
+		fmt.Fprintf(&details, "%s | %s | %s%s", item.ID, item.Category, sanitiseUserText(item.Label), marker)
 		if len(item.Traits) > 0 {
 			details.WriteString(" |")
 			for _, k := range []string{"color", "fabric", "style", "occasion", "overall_style"} {
@@ -467,10 +489,16 @@ func BuildUserMessage(items []GenItem) string {
 		details.WriteString("\n")
 	}
 
+	preferenceRule := ""
+	if hasFillers {
+		preferenceRule = " Items marked [filler] are stylistic suggestions matching the user's archetype, NOT items they own — prefer the user's own (unmarked) items, and reach for fillers only when needed to complete an outfit (e.g. they lack footwear)."
+	}
+
 	return fmt.Sprintf(
-		"Wardrobe grouped by role:\n%s\n%s%s\nItem details:\n%s%s\n%s\nCreate 3-4 unique outfit combinations. Each MUST include a top + bottom + footwear + at least one accessory. Use only IDs from this list.",
+		"Wardrobe grouped by role:\n%s\n%s%s\nItem details:\n%s%s\n%s\nCreate 3-4 unique outfit combinations. Each MUST include a top + bottom + footwear + at least one accessory. Use only IDs from this list.%s",
 		userDataOpen, inventory.String(), userDataClose,
 		userDataOpen, details.String(), userDataClose,
+		preferenceRule,
 	)
 }
 

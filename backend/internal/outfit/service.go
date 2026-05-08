@@ -29,6 +29,43 @@ type userProfileProvider interface {
 	GetArchetypeProfile(ctx context.Context, userID string) (map[string]float64, error)
 }
 
+// archetypeDefaultsLoader is the small surface the outfit service
+// needs from the admin-side `archetype_default_items` collection.
+// Defined as an interface so outfit/ doesn't import admin/ — same
+// one-way-dep pattern as the rest of the package's optional plug
+// points. nil is fine; the wardrobe-only fallback runs unchanged.
+//
+// Implementations (app/) wrap admin.ArchetypeDefaultsRepository.List
+// and convert the rows into the wardrobe-shaped items the outfit
+// service already knows how to consume (so we don't need a parallel
+// "filler item" type leaking through every layer).
+type archetypeDefaultsLoader interface {
+	// LoadFor returns curated items for the given archetype, capped
+	// to `cap` rows (latest first). The returned items are
+	// wardrobe-shaped but their IDs use the "ad_<hex>" prefix the
+	// admin layer mints. The caller is responsible for marking them
+	// non-Preferred when they're folded into the LLM-facing pool.
+	LoadFor(ctx context.Context, archetype string, cap int) ([]wardrobe.ClothingItem, error)
+}
+
+// fillerSeeder materialises an archetype-default item into the
+// user's own wardrobe when the LLM ends up picking it for an
+// outfit. Idempotent: a default already seeded for this user
+// returns the existing wardrobe-item id instead of creating a new
+// row, so re-running outfit generation doesn't pile up duplicates.
+//
+// The contract is decoupled from admin/ via this interface — the
+// app/-side adapter is the only place that touches both the admin
+// defaults repo and the wardrobe repo at the same time.
+type fillerSeeder interface {
+	// SeedForUser copies the archetype default identified by
+	// defaultID into the user's wardrobe (or returns the previous
+	// seed when already present). Returns the resulting wardrobe
+	// item id (wi_<hex>) so the outfit service can rewrite outfit
+	// references.
+	SeedForUser(ctx context.Context, userID, defaultID string) (string, error)
+}
+
 // creativityProvider is an optional extension of userProfileProvider
 // (mootd#67). When the wired implementation satisfies it, the
 // outfit service reads the user's preference and threads it through
@@ -100,16 +137,18 @@ type SurfaceOption struct {
 // Service encapsulates the outfit generation business logic, separated from
 // HTTP concerns which live in Handler.
 type Service struct {
-	generator      Generator
-	wardrobe       wardrobeRepository
-	recent         recentOutfitProvider
-	userProfile    userProfileProvider
-	surfaces       surfaceProvider
-	useVision      bool
-	cache          Cache
-	llmRecorder    llmRecorder    // optional — nil disables LLM call logging
-	budgetEnforcer BudgetEnforcer // optional — nil disables P4-02 budget gate
-	logger         *log.Logger
+	generator         Generator
+	wardrobe          wardrobeRepository
+	recent            recentOutfitProvider
+	userProfile       userProfileProvider
+	surfaces          surfaceProvider
+	useVision         bool
+	cache             Cache
+	llmRecorder       llmRecorder             // optional — nil disables LLM call logging
+	budgetEnforcer    BudgetEnforcer          // optional — nil disables P4-02 budget gate
+	archetypeDefaults archetypeDefaultsLoader // optional — when nil, only user wardrobe feeds the LLM
+	fillerSeeder      fillerSeeder            // optional — pairs with archetypeDefaults; materialises picked fillers into user wardrobe
+	logger            *log.Logger
 }
 
 // llmRecorder is the narrow interface the outfit service needs from
@@ -192,30 +231,34 @@ type LLMRecorderObservation struct {
 
 // ServiceConfig holds the dependencies needed to construct a Service.
 type ServiceConfig struct {
-	Generator      Generator
-	Wardrobe       wardrobeRepository
-	Recent         recentOutfitProvider
-	UserProfile    userProfileProvider
-	Surfaces       surfaceProvider // optional — when nil, outfits ship without panel/background URLs
-	UseVision      bool
-	Cache          Cache
-	LLMRecorder    llmRecorder    // optional — nil disables LLM call logging
-	BudgetEnforcer BudgetEnforcer // optional — nil disables P4-02 budget gate
+	Generator         Generator
+	Wardrobe          wardrobeRepository
+	Recent            recentOutfitProvider
+	UserProfile       userProfileProvider
+	Surfaces          surfaceProvider // optional — when nil, outfits ship without panel/background URLs
+	UseVision         bool
+	Cache             Cache
+	LLMRecorder       llmRecorder             // optional — nil disables LLM call logging
+	BudgetEnforcer    BudgetEnforcer          // optional — nil disables P4-02 budget gate
+	ArchetypeDefaults archetypeDefaultsLoader // optional — when set, the LLM pool is widened with archetype-default fillers (lower preference)
+	FillerSeeder      fillerSeeder            // optional — when set, fillers picked by the LLM materialise as wi_<hex> items in the user's wardrobe before the outfit response leaves the service
 }
 
 // NewService creates an outfit Service.
 func NewService(logger *log.Logger, cfg ServiceConfig) *Service {
 	return &Service{
-		generator:      cfg.Generator,
-		wardrobe:       cfg.Wardrobe,
-		recent:         cfg.Recent,
-		userProfile:    cfg.UserProfile,
-		surfaces:       cfg.Surfaces,
-		useVision:      cfg.UseVision,
-		cache:          cfg.Cache,
-		llmRecorder:    cfg.LLMRecorder,
-		budgetEnforcer: cfg.BudgetEnforcer,
-		logger:         logger,
+		generator:         cfg.Generator,
+		wardrobe:          cfg.Wardrobe,
+		recent:            cfg.Recent,
+		userProfile:       cfg.UserProfile,
+		surfaces:          cfg.Surfaces,
+		useVision:         cfg.UseVision,
+		cache:             cfg.Cache,
+		llmRecorder:       cfg.LLMRecorder,
+		budgetEnforcer:    cfg.BudgetEnforcer,
+		archetypeDefaults: cfg.ArchetypeDefaults,
+		fillerSeeder:      cfg.FillerSeeder,
+		logger:            logger,
 	}
 }
 
@@ -300,17 +343,21 @@ func (s *Service) GenerateOutfitsWithProgress(
 // private so GenerateOutfitsWithProgress can wrap it without
 // callers seeing the signature shift.
 func (s *Service) generateOutfitsImpl(ctx context.Context, userID string, weather Weather) ([]Outfit, error) {
-	items, err := s.wardrobe.FindByUser(ctx, userID)
+	userItems, err := s.wardrobe.FindByUser(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("fetch wardrobe: %w", err)
 	}
 
-	if len(items) == 0 {
+	if len(userItems) == 0 {
 		return []Outfit{}, nil
 	}
 
-	// Archetype context.
-	wardrobeScores := archetype.ScoreItems(itemsToTraits(items))
+	// Archetype context. Scoring is computed off the user's own
+	// items only — fillers we add below shouldn't bias the user's
+	// archetype profile, otherwise loading defaults for archetype X
+	// would push their profile further toward X regardless of what
+	// they've actually uploaded.
+	wardrobeScores := archetype.ScoreItems(itemsToTraits(userItems))
 
 	var effectiveScores archetype.Scores
 	if s.userProfile != nil {
@@ -328,6 +375,37 @@ func (s *Service) generateOutfitsImpl(ctx context.Context, userID string, weathe
 	}
 	topArchetypes := archetype.TopN(effectiveScores, 2)
 
+	// Widen the LLM-facing pool with archetype-default fillers
+	// curated in admin. Only the top-1 archetype contributes to keep
+	// the prompt lean; cap matches the system prompt's "use sparingly"
+	// guidance — pool size shouldn't dwarf the user's own items.
+	//
+	// Items are folded into the same `items` slice the rest of the
+	// pipeline already understands, but their Preferred flag is set
+	// to false (vs true for user-owned). The system prompt + the
+	// star-marked user-message inventory tell the LLM to lean on
+	// Preferred items first and reach for fillers only when needed
+	// to complete an outfit.
+	items := userItems
+	preferredIDs := make(map[string]bool, len(userItems))
+	for _, it := range userItems {
+		preferredIDs[it.ID] = true
+	}
+	if s.archetypeDefaults != nil && len(topArchetypes) > 0 {
+		const fillerCap = 24
+		topArche := topArchetypes[0].Name
+		fillers, err := s.archetypeDefaults.LoadFor(ctx, topArche, fillerCap)
+		if err != nil {
+			s.logger.Printf("outfit: archetype-defaults load for %s/%s failed: %v (proceeding with user wardrobe only)", userID, topArche, err)
+		} else if len(fillers) > 0 {
+			items = make([]wardrobe.ClothingItem, 0, len(userItems)+len(fillers))
+			items = append(items, userItems...)
+			items = append(items, fillers...)
+			s.logger.Printf("outfit: pool widened for user %s — own=%d, fillers=%d (archetype=%s)",
+				userID, len(userItems), len(fillers), topArche)
+		}
+	}
+
 	// Recent outfits — feeds both the "avoid repeating" anti-list and the
 	// positive few-shot examples built in buildSystemPrompt.
 	var recentBoards []RecentBoard
@@ -339,7 +417,7 @@ func (s *Service) generateOutfitsImpl(ctx context.Context, userID string, weathe
 		recentBoards = recent
 	}
 
-	genItems := itemsToGenItems(items)
+	genItems := itemsToGenItemsWithPreference(items, preferredIDs)
 
 	// attachWeather stamps the current weather onto each outfit so the UI can
 	// render a weather chip. Applied after cache resolution so cached outfits
@@ -526,6 +604,19 @@ func (s *Service) generateOutfitsImpl(ctx context.Context, userID string, weathe
 		if len(filtered) > 0 {
 			s.logger.Printf("outfit: fallback fired for user %s — %d outfits returned", userID, len(filtered))
 		}
+	}
+
+	// Materialise any archetype-default fillers the LLM ended up
+	// picking. Each ad_<hex> id in a filtered outfit is seeded into
+	// the user's own wardrobe (idempotent) and the outfit's items /
+	// layoutRoles / visualWeights are rewritten to the resulting
+	// wi_<hex> ids. After this step the outfit response, and any
+	// cache entry built from it, references only items the user
+	// owns — downstream code (mobile FE, moodboard save, calendar
+	// snapshot resolution) doesn't need to know about ad_<hex> at
+	// all.
+	if s.fillerSeeder != nil {
+		filtered = s.materializeFillers(ctx, userID, filtered)
 	}
 
 	// Attach per-item color palettes before caching so cache hits serve the
@@ -718,15 +809,102 @@ func itemsToTraits(items []wardrobe.ClothingItem) []archetype.ItemTraits {
 	return traits
 }
 
-// itemsToGenItems trims wardrobe items down to the generator-facing GenItem shape.
+// materializeFillers walks `outfits` and rewrites every ad_<hex>
+// reference to the wi_<hex> id of a freshly-seeded (or previously-
+// seeded) wardrobe item the user now owns. Idempotency lives in
+// fillerSeeder.SeedForUser — calling it twice with the same default
+// returns the same wi_<hex>.
+//
+// Behaviour notes:
+//   - Failures are logged and the offending id is left unchanged so
+//     the outfit doesn't get dropped — ValidateOutfits would re-reject
+//     the stale id, which is the correct degraded behaviour.
+//   - The translation map is shared across all outfits so the same
+//     filler appearing in two outfits seeds exactly once and resolves
+//     to the same wardrobe row.
+//   - LayoutRoles + VisualWeights maps are rewritten so the FE's
+//     collage layout still finds each item by its new id.
+func (s *Service) materializeFillers(ctx context.Context, userID string, outfits []Outfit) []Outfit {
+	if s.fillerSeeder == nil || len(outfits) == 0 {
+		return outfits
+	}
+	translate := map[string]string{}
+	rewriteID := func(old string) string {
+		if !strings.HasPrefix(old, "ad_") {
+			return old
+		}
+		if mapped, ok := translate[old]; ok {
+			return mapped
+		}
+		newID, err := s.fillerSeeder.SeedForUser(ctx, userID, old)
+		if err != nil {
+			s.logger.Printf("outfit: seed filler %s for user %s failed: %v (leaving id unchanged)", old, userID, err)
+			translate[old] = old
+			return old
+		}
+		translate[old] = newID
+		return newID
+	}
+	for i := range outfits {
+		o := &outfits[i]
+		for j, id := range o.Items {
+			o.Items[j] = rewriteID(id)
+		}
+		if len(o.LayoutRoles) > 0 {
+			rewritten := make(map[string]string, len(o.LayoutRoles))
+			for id, role := range o.LayoutRoles {
+				rewritten[rewriteID(id)] = role
+			}
+			o.LayoutRoles = rewritten
+		}
+		if len(o.VisualWeights) > 0 {
+			rewritten := make(map[string]string, len(o.VisualWeights))
+			for id, weight := range o.VisualWeights {
+				rewritten[rewriteID(id)] = weight
+			}
+			o.VisualWeights = rewritten
+		}
+	}
+	if len(translate) > 0 {
+		s.logger.Printf("outfit: materialised %d filler(s) into user %s wardrobe", len(translate), userID)
+	}
+	return outfits
+}
+
+// itemsToGenItems trims wardrobe items down to the generator-facing
+// GenItem shape. Every item is marked Preferred (the "wardrobe is the
+// only source" path); kept for tests + callers that don't fold in
+// archetype-default fillers. The runtime pipeline goes through
+// itemsToGenItemsWithPreference instead.
 func itemsToGenItems(items []wardrobe.ClothingItem) []GenItem {
 	out := make([]GenItem, len(items))
 	for i, item := range items {
 		out[i] = GenItem{
-			ID:       item.ID,
-			Category: item.Category,
-			Label:    item.Label,
-			Traits:   item.Traits,
+			ID:        item.ID,
+			Category:  item.Category,
+			Label:     item.Label,
+			Traits:    item.Traits,
+			Preferred: true,
+		}
+	}
+	return out
+}
+
+// itemsToGenItemsWithPreference is itemsToGenItems with explicit
+// preference control. preferredIDs is the set of IDs that should be
+// flagged Preferred=true (typically the user's own wardrobe). Items
+// whose ID isn't in the set come through with Preferred=false
+// (archetype-default fillers); the prompt + system message then tell
+// the LLM to lean on the preferred set first.
+func itemsToGenItemsWithPreference(items []wardrobe.ClothingItem, preferredIDs map[string]bool) []GenItem {
+	out := make([]GenItem, len(items))
+	for i, item := range items {
+		out[i] = GenItem{
+			ID:        item.ID,
+			Category:  item.Category,
+			Label:     item.Label,
+			Traits:    item.Traits,
+			Preferred: preferredIDs[item.ID],
 		}
 	}
 	return out
