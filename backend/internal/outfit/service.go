@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log"
+	"math/rand/v2"
 	"sort"
 	"strconv"
 	"strings"
@@ -14,6 +15,30 @@ import (
 	"mootd/backend/internal/archetype"
 	"mootd/backend/internal/wardrobe"
 )
+
+// sampleFillers returns up to `n` items drawn from `pool` in
+// randomised order. Used to rotate which archetype defaults reach
+// the LLM across successive generations so a small wardrobe doesn't
+// keep producing the same 3-4 outfit permutations.
+//
+// Randomness is intentionally non-deterministic — the per-call
+// freshness IS the feature. Cache hits will be rare when fillers are
+// in play; that's fine, the cost of a regen is small (~$0.01) and
+// the user explicitly traded the cache hit for variety.
+func sampleFillers(pool []wardrobe.ClothingItem, n int) []wardrobe.ClothingItem {
+	if len(pool) <= n {
+		out := make([]wardrobe.ClothingItem, len(pool))
+		copy(out, pool)
+		rand.Shuffle(len(out), func(i, j int) { out[i], out[j] = out[j], out[i] })
+		return out
+	}
+	idx := rand.Perm(len(pool))[:n]
+	out := make([]wardrobe.ClothingItem, n)
+	for i, j := range idx {
+		out[i] = pool[j]
+	}
+	return out
+}
 
 // wardrobeRepository is the subset of the wardrobe repo the outfit service needs.
 // GetImage is required for vision-capable generators (Claude); generators that
@@ -392,16 +417,26 @@ func (s *Service) generateOutfitsImpl(ctx context.Context, userID string, weathe
 		preferredIDs[it.ID] = true
 	}
 	if s.archetypeDefaults != nil && len(topArchetypes) > 0 {
-		const fillerCap = 24
+		// Load a generous pool, then sample a smaller subset so that
+		// successive generations see different fillers. Without this,
+		// even a user with 24 fillers + 4 own items would lock onto
+		// the same combinations once the LLM picked a "favourite"
+		// stylistic mix; rotating the visible subset forces it to
+		// reach for fresh items each call.
+		const (
+			fillerLoadCap   = 60 // upper bound we read from Mongo
+			fillerVisibleCap = 18 // bound that actually reaches the LLM
+		)
 		topArche := topArchetypes[0].Name
-		fillers, err := s.archetypeDefaults.LoadFor(ctx, topArche, fillerCap)
+		fillers, err := s.archetypeDefaults.LoadFor(ctx, topArche, fillerLoadCap)
 		if err != nil {
 			s.logger.Printf("outfit: archetype-defaults load for %s/%s failed: %v (proceeding with user wardrobe only)", userID, topArche, err)
 		} else if len(fillers) > 0 {
+			fillers = sampleFillers(fillers, fillerVisibleCap)
 			items = make([]wardrobe.ClothingItem, 0, len(userItems)+len(fillers))
 			items = append(items, userItems...)
 			items = append(items, fillers...)
-			s.logger.Printf("outfit: pool widened for user %s — own=%d, fillers=%d (archetype=%s)",
+			s.logger.Printf("outfit: pool widened for user %s — own=%d, fillers=%d (archetype=%s, sampled from a larger pool for variety)",
 				userID, len(userItems), len(fillers), topArche)
 		}
 	}
@@ -885,6 +920,7 @@ func itemsToGenItems(items []wardrobe.ClothingItem) []GenItem {
 			Label:     item.Label,
 			Traits:    item.Traits,
 			Preferred: true,
+			Weight:    1.0,
 		}
 	}
 	return out
@@ -893,18 +929,26 @@ func itemsToGenItems(items []wardrobe.ClothingItem) []GenItem {
 // itemsToGenItemsWithPreference is itemsToGenItems with explicit
 // preference control. preferredIDs is the set of IDs that should be
 // flagged Preferred=true (typically the user's own wardrobe). Items
-// whose ID isn't in the set come through with Preferred=false
-// (archetype-default fillers); the prompt + system message then tell
-// the LLM to lean on the preferred set first.
+// whose ID isn't in the set come through with Preferred=false +
+// Weight=FillerWeight (archetype-default fillers); the prompt + system
+// message then tell the LLM to balance the numeric weights when
+// composing each outfit, with a target filler count per outfit that
+// scales inversely with wardrobe size.
 func itemsToGenItemsWithPreference(items []wardrobe.ClothingItem, preferredIDs map[string]bool) []GenItem {
 	out := make([]GenItem, len(items))
 	for i, item := range items {
+		preferred := preferredIDs[item.ID]
+		weight := FillerWeight
+		if preferred {
+			weight = 1.0
+		}
 		out[i] = GenItem{
 			ID:        item.ID,
 			Category:  item.Category,
 			Label:     item.Label,
 			Traits:    item.Traits,
-			Preferred: preferredIDs[item.ID],
+			Preferred: preferred,
+			Weight:    weight,
 		}
 	}
 	return out

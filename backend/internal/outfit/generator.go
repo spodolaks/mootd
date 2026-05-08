@@ -121,14 +121,25 @@ type GenItem struct {
 	Traits   map[string]string
 	// Preferred is true for items the user actually owns (their
 	// uploads). False for archetype-default fillers injected to widen
-	// the pool when the user's wardrobe is sparse or skewed. The
-	// system prompt tells the LLM to lean on Preferred items first
-	// and reach for fillers only when needed to complete an outfit.
-	// Default-valued (false) is preserved when the wardrobe-only
-	// path runs without archetype-defaults wiring, so existing
-	// behaviour is byte-identical when no fillers are present.
+	// the pool. Kept alongside Weight as a fast boolean for callers
+	// that just need to know the source. Backwards-compatible —
+	// existing tests that build GenItems directly continue to work.
 	Preferred bool
+	// Weight is the LLM-facing preference signal, in [0,1]. Owned
+	// items default to 1.0, fillers to FillerWeight (currently 0.5).
+	// The prompt prints this number inline and includes a per-outfit
+	// filler quota that scales with wardrobe size — small wardrobes
+	// get a higher target filler count so the LLM keeps producing
+	// fresh combinations even with only 3-4 owned items, instead of
+	// looping over the same permutations.
+	Weight float64
 }
+
+// FillerWeight is the default weight assigned to archetype-default
+// fillers in the LLM-facing pool. 0.5 — half the weight of an owned
+// item — turns "filler" from a binary "use only when needed" hint
+// into a real preference signal the LLM can balance numerically.
+const FillerWeight = 0.5
 
 // Weather is the optional weather context for outfit selection.
 type Weather struct {

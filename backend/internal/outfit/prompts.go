@@ -426,28 +426,38 @@ func BuildSystemPromptForEval(weather Weather, recentBoards []RecentBoard, topAr
 // the LLM to treat as data only — defence-in-depth against prompt
 // injection via crafted item labels.
 //
-// Items with Preferred=false are archetype-default fillers added to
-// widen the pool. They're prefixed with `[filler]` in the inventory so
-// the LLM can spot them at a glance, paired with an explicit rule in
-// the message body that owned items take priority.
+// When the pool contains archetype-default fillers (Preferred=false),
+// weights and a per-outfit filler quota are surfaced inline so the
+// LLM has a numeric target rather than just a soft "use sparingly"
+// hint. The quota scales inversely with the user's owned-item count:
+// small wardrobes get a higher target so each outfit pulls in fresh
+// items instead of the LLM looping over the same 3-4 permutations.
 func BuildUserMessage(items []GenItem) string {
 	type itemRef struct {
 		ID     string
 		Label  string
+		Weight float64
 		Filler bool
 	}
 	groups := map[string][]itemRef{
 		"TOPS": {}, "BOTTOMS": {}, "OUTERWEAR": {}, "FOOTWEAR": {}, "ACCESSORIES": {},
 	}
-	hasFillers := false
+	ownCount, fillerCount := 0, 0
 	for _, item := range items {
 		role := ClassifyRole(item.Category)
-		// Sanitise once at ingest; later writes don't need to re-sanitise.
 		filler := !item.Preferred
 		if filler {
-			hasFillers = true
+			fillerCount++
+		} else {
+			ownCount++
 		}
-		groups[role] = append(groups[role], itemRef{item.ID, sanitiseUserText(item.Label), filler})
+		// Sanitise once at ingest; later writes don't need to re-sanitise.
+		groups[role] = append(groups[role], itemRef{
+			ID:     item.ID,
+			Label:  sanitiseUserText(item.Label),
+			Weight: item.Weight,
+			Filler: filler,
+		})
 	}
 
 	var inventory strings.Builder
@@ -458,11 +468,17 @@ func BuildUserMessage(items []GenItem) string {
 		}
 		fmt.Fprintf(&inventory, "\n%s:\n", role)
 		for _, ref := range refs {
-			marker := ""
-			if ref.Filler {
-				marker = " [filler]"
+			if fillerCount > 0 {
+				marker := ""
+				if ref.Filler {
+					marker = " [filler]"
+				}
+				fmt.Fprintf(&inventory, "  - %s (%s) w=%.2f%s\n", ref.ID, ref.Label, ref.Weight, marker)
+			} else {
+				// No fillers in pool — keep the original byte-shape so
+				// the existing prompt_test golden assertions pass.
+				fmt.Fprintf(&inventory, "  - %s (%s)\n", ref.ID, ref.Label)
 			}
-			fmt.Fprintf(&inventory, "  - %s (%s)%s\n", ref.ID, ref.Label, marker)
 		}
 	}
 
@@ -472,7 +488,7 @@ func BuildUserMessage(items []GenItem) string {
 	var details strings.Builder
 	for _, item := range items {
 		marker := ""
-		if !item.Preferred {
+		if fillerCount > 0 && !item.Preferred {
 			marker = " [filler]"
 		}
 		fmt.Fprintf(&details, "%s | %s | %s%s", item.ID, item.Category, sanitiseUserText(item.Label), marker)
@@ -490,8 +506,12 @@ func BuildUserMessage(items []GenItem) string {
 	}
 
 	preferenceRule := ""
-	if hasFillers {
-		preferenceRule = " Items marked [filler] are stylistic suggestions matching the user's archetype, NOT items they own — prefer the user's own (unmarked) items, and reach for fillers only when needed to complete an outfit (e.g. they lack footwear)."
+	if fillerCount > 0 {
+		quota := fillerQuotaPerOutfit(ownCount, fillerCount)
+		preferenceRule = fmt.Sprintf(
+			" Each item has a `w=` weight: 1.00 means the user owns it, %.2f means it's an archetype-default supplement marked [filler]. Aim for variety: include AROUND %d [filler] item(s) per outfit, with the remaining slots drawn from the user's owned (w=1.00) items. NEVER repeat the same 3-4 owned items across every outfit when fillers are available — the user's pool of own items is small and they want fresh combinations. Owned items are still the foundation; fillers complement them.",
+			FillerWeight, quota,
+		)
 	}
 
 	return fmt.Sprintf(
@@ -500,6 +520,40 @@ func BuildUserMessage(items []GenItem) string {
 		userDataOpen, details.String(), userDataClose,
 		preferenceRule,
 	)
+}
+
+// fillerQuotaPerOutfit returns the suggested number of [filler] items
+// the LLM should include per generated outfit, based on how many items
+// the user actually owns. Heuristic — we want a strong filler signal
+// when the wardrobe is small (so suggestions stay fresh) and almost no
+// fillers once the user has built up a real wardrobe.
+//
+//	own ≤ 3   → 3 fillers   (cold start: outfit is mostly archetype suggestions)
+//	own ≤ 7   → 2 fillers   (early user: half the outfit is filler-driven)
+//	own ≤ 14  → 1 filler    (regular user: occasional fresh additions)
+//	own ≥ 15  → 0 fillers   (wardrobe is rich enough to stand on its own)
+//
+// Bounded by the actual filler count in the pool — we don't ask for
+// more fillers than exist.
+func fillerQuotaPerOutfit(ownCount, fillerCount int) int {
+	target := 0
+	switch {
+	case ownCount <= 3:
+		target = 3
+	case ownCount <= 7:
+		target = 2
+	case ownCount <= 14:
+		target = 1
+	default:
+		target = 0
+	}
+	if target > fillerCount {
+		target = fillerCount
+	}
+	if target < 0 {
+		target = 0
+	}
+	return target
 }
 
 // writeSurfaceList formats `- id: Name — description. Mood: m1/m2. Archetypes: k1(0.8),k2(0.4).`
