@@ -84,6 +84,16 @@ services:
       # ANTHROPIC_VISION defaults to "true" — set to "false" to disable image input
       ANTHROPIC_MODEL: "${ANTHROPIC_MODEL:-}"
       ANTHROPIC_VISION: "${ANTHROPIC_VISION:-}"
+      # mootd#64 — outfit critic pass. "true" runs a cheap Haiku-tier
+      # QA pass after Generate; outfits scoring <5 trigger one regen.
+      # Default OFF until eval shows quality lift.
+      OUTFIT_CRITIC_ENABLED: "${OUTFIT_CRITIC_ENABLED:-}"
+      OUTFIT_CRITIC_MODEL: "${OUTFIT_CRITIC_MODEL:-}"
+      # mootd#65 — per-archetype prompt routing. "true" makes
+      # buildSystemPrompt prefer a template named
+      # outfit_system_base.<archetype> for the user's top-1 archetype,
+      # falling back to the universal one when not curated. Default OFF.
+      OUTFIT_PER_ARCHETYPE_PROMPTS: "${OUTFIT_PER_ARCHETYPE_PROMPTS:-}"
       REDIS_URL: "redis://redis:6379"
       # OpenAI DALL-E for generating moodboard backgrounds + surface textures
       OPENAI_API_KEY: "${OPENAI_API_KEY:-}"

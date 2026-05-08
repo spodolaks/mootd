@@ -235,9 +235,29 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 			outfit.SetPromptTemplateProvider(newPromptTemplateAdapter(cache, abCache, templatesRepo))
 			adminHandler.WithPromptTemplates(templatesRepo, cache)
 			a.Logger.Print("admin: prompt templates wired (outfit_system_base + outfit_safety seeded)")
+
+			// mootd#65 — per-archetype prompt routing flag. When on,
+			// buildSystemPrompt prefers a template named
+			// outfit_system_base.<archetype> for the user's top-1
+			// archetype, falling back to the universal one when the
+			// archetype-specific row hasn't been curated yet.
+			// Default OFF so the prompt stays byte-identical pre-eval.
+			if strings.EqualFold(os.Getenv("OUTFIT_PER_ARCHETYPE_PROMPTS"), "true") {
+				outfit.SetPerArchetypeRoutingEnabled(true)
+				a.Logger.Print("admin: prompts: per-archetype routing ENABLED (mootd#65)")
+			}
 		}
 	} else {
 		a.Logger.Printf("admin: prompt_templates repo init failed: %v (continuing with hardcoded constants)", err)
+	}
+
+	// mootd#64 — outfit critic pass. Cheap Haiku-tier QA pass
+	// after Generate; if any outfit scores below threshold the
+	// service regenerates ONCE. Adds ~1¢/gen, catches ~5% bad-
+	// output tail. Default OFF until eval shows quality lift.
+	if strings.EqualFold(os.Getenv("OUTFIT_CRITIC_ENABLED"), "true") {
+		outfit.SetCriticEnabled(true)
+		a.Logger.Print("admin: outfit critic ENABLED (mootd#64) — Generate calls now run a Haiku-tier QA pass")
 	}
 
 	// Funnels (P2-04 / mootd-admin#21). Best-effort wiring;

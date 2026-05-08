@@ -70,13 +70,42 @@ func DefaultSafetyTemplate() string { return defaultSafetyPrompt }
 // hasn't been promoted. Acceptance criterion for #24:
 // byte-identical to the pre-migration constant when no
 // provider is wired.
-func getSystemBaseTemplate(userID string) string {
+//
+// mootd#65 — when OUTFIT_PER_ARCHETYPE_PROMPTS=true and the
+// caller supplies a topArchetype, the lookup also tries an
+// archetype-specific template name first
+// ("outfit_system_base.<archetype>", e.g.
+// "outfit_system_base.creator"). Operators curate those via
+// the existing /admin/v1/prompts surface; absence falls back
+// silently to the universal template. Backwards compatible —
+// when topArchetype is empty or the flag is off the call is
+// byte-identical to the pre-migration path.
+func getSystemBaseTemplate(userID, topArchetype string) string {
 	if promptTemplates != nil {
+		if perArchetypeRoutingEnabled && topArchetype != "" {
+			if body := promptTemplates.BodyForUser("outfit_system_base."+topArchetype, userID); body != "" {
+				return body
+			}
+		}
 		if body := promptTemplates.BodyForUser("outfit_system_base", userID); body != "" {
 			return body
 		}
 	}
 	return baseSystemPrompt
+}
+
+// perArchetypeRoutingEnabled gates the mootd#65 routing layer.
+// Default false so the prompt remains byte-identical until an
+// operator opts in via OUTFIT_PER_ARCHETYPE_PROMPTS=true. Set
+// at boot from app/ via SetPerArchetypeRoutingEnabled.
+var perArchetypeRoutingEnabled bool
+
+// SetPerArchetypeRoutingEnabled flips the per-archetype routing
+// flag. Called from app.go at boot when
+// OUTFIT_PER_ARCHETYPE_PROMPTS=true. Idempotent — safe to call
+// from tests too.
+func SetPerArchetypeRoutingEnabled(on bool) {
+	perArchetypeRoutingEnabled = on
 }
 
 // getSafetyTemplate returns the template body for
@@ -250,7 +279,14 @@ OUTPUT:
 //     user's actual taste trail.
 func buildSystemPrompt(userID string, weather Weather, recentBoards []RecentBoard, topArchetypes []archetype.ScoredArchetype, panels, backgrounds []SurfaceOption) string {
 	var sb strings.Builder
-	sb.WriteString(getSystemBaseTemplate(userID))
+	// mootd#65 — when per-archetype routing is on, pass the top-1
+	// archetype name so the template lookup can prefer
+	// outfit_system_base.<archetype> over the universal one.
+	topArche := ""
+	if len(topArchetypes) > 0 {
+		topArche = topArchetypes[0].Name
+	}
+	sb.WriteString(getSystemBaseTemplate(userID, topArche))
 
 	// Tell the LLM how to treat the data block. Defence-in-depth alongside
 	// per-string sanitisation in sanitiseUserText. v3.

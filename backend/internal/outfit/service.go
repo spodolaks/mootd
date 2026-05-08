@@ -19,6 +19,104 @@ import (
 // down to Mongo via $sample so the loader returns a pre-shuffled
 // page directly. The Go-side shuffle is no longer needed.)
 
+// criticEnabled is the mootd#64 feature flag — off by default.
+// app.go flips it via SetCriticEnabled when OUTFIT_CRITIC_ENABLED=true.
+// Service-level so a single boot decision applies to every outfit-gen.
+var criticEnabled bool
+
+// SetCriticEnabled toggles the critic gate. Idempotent; called
+// from app.go at boot, plus tests that want to flip behaviour
+// per-case.
+func SetCriticEnabled(on bool) {
+	criticEnabled = on
+}
+
+// criticGate runs the proposed outfits through Critic.Critique
+// when the underlying generator implements it. If any score is
+// below LowScoreThreshold the gate kicks off ONE regeneration
+// pass and accepts the second batch when it has at least as
+// many surviving outfits as the first. mootd#64.
+//
+// All failures are soft: critic API down, generator doesn't
+// implement Critic, regenerate returns nothing — every branch
+// returns the original `filtered` slice so the user always sees
+// outfits, even when the QA pass is unhealthy.
+func (s *Service) criticGate(
+	ctx context.Context,
+	userID string,
+	filtered []Outfit,
+	items []wardrobe.ClothingItem,
+	preferredIDs map[string]bool,
+	topArchetypes []archetype.ScoredArchetype,
+	weather Weather,
+	recentBoards []RecentBoard,
+	panels, backgrounds []SurfaceOption,
+) []Outfit {
+	critic, ok := s.generator.(Critic)
+	if !ok {
+		// Generator doesn't implement Critic — no-op. Logged at
+		// boot once, not per call.
+		return filtered
+	}
+	if len(filtered) == 0 {
+		return filtered
+	}
+
+	topArche := ""
+	if len(topArchetypes) > 0 {
+		topArche = topArchetypes[0].Name
+	}
+
+	res, err := critic.Critique(ctx, CritiqueRequest{
+		Outfits:      filtered,
+		TopArchetype: topArche,
+		Weather:      weather,
+		UserID:       userID,
+	})
+	if err != nil {
+		s.logger.Printf("outfit-critic: skipping QA for user %s — Critique failed: %v", userID, err)
+		return filtered
+	}
+	if !AnyBelowThreshold(res.Scores) {
+		s.logger.Printf("outfit-critic: user %s passed QA — %s", userID, FormatScores(res.Scores))
+		return filtered
+	}
+
+	s.logger.Printf("outfit-critic: user %s — low score detected, regenerating: %s", userID, FormatScores(res.Scores))
+
+	// Second pass — same generator, same prompt scaffolding (each
+	// generator builds its own from GeneratorRequest internally).
+	// We don't pass the critic's reasons back to the prompt today;
+	// that's a future optimisation. For now the simple "try
+	// again" works ~50% of the time per Anthropic's tool-use
+	// nondeterminism.
+	regenItems := itemsToGenItemsWithPreference(items, preferredIDs)
+	regenReq := GeneratorRequest{
+		UserID:        userID,
+		Items:         regenItems,
+		TopArchetypes: topArchetypes,
+		Weather:       weather,
+		RecentBoards:  recentBoards,
+		Panels:        panels,
+		Backgrounds:   backgrounds,
+		Creativity:    0.5, // mid-tier; eval can tune via OUTFIT_CRITIC_REGEN_CREATIVITY later
+	}
+	regenOutfits, _, regenErr := s.generator.Generate(ctx, regenReq)
+	if regenErr != nil {
+		s.logger.Printf("outfit-critic: regenerate failed for user %s: %v (keeping original batch)", userID, regenErr)
+		return filtered
+	}
+	regenValidated := s.ValidateOutfits(regenOutfits, items, archetype.ScoreItems(itemsToTraits(items)))
+	regenValidated = attachItemSnapshots(regenValidated, items, preferredIDs)
+	if len(regenValidated) < len(filtered) {
+		s.logger.Printf("outfit-critic: regenerate returned %d valid outfits (orig=%d) — keeping original batch",
+			len(regenValidated), len(filtered))
+		return filtered
+	}
+	s.logger.Printf("outfit-critic: regenerate accepted for user %s — %d outfits", userID, len(regenValidated))
+	return regenValidated
+}
+
 // wardrobeRepository is the subset of the wardrobe repo the outfit service needs.
 // GetImage is required for vision-capable generators (Claude); generators that
 // don't use it ignore the method.
@@ -629,6 +727,19 @@ func (s *Service) generateOutfitsImpl(ctx context.Context, userID string, weathe
 	// the FE doesn't need to reconcile them against /v1/wardrobe.
 	// Source ("owned" | "filler") tells the FE which UX to show.
 	filtered = attachItemSnapshots(filtered, items, preferredIDs)
+
+	// mootd#64 — optional QA gate. When OUTFIT_CRITIC_ENABLED is on
+	// AND the underlying generator implements Critic, run the
+	// proposals through a cheap Haiku-tier scoring pass. If any
+	// outfit scores below LowScoreThreshold (5 by default),
+	// regenerate ONCE — the second batch replaces the first iff it
+	// has at least as many surviving outfits. We never regenerate
+	// twice: a persistent low-quality streak signals an upstream
+	// issue (model down, prompt regression) that the critic can't
+	// fix and shouldn't paper over.
+	if criticEnabled {
+		filtered = s.criticGate(ctx, userID, filtered, items, preferredIDs, topArchetypes, weather, recentBoards, panels, backgrounds)
+	}
 
 	// Attach per-item color palettes before caching so cache hits serve the
 	// same enriched payload on subsequent reads.

@@ -25,6 +25,12 @@ type ClaudeConfig struct {
 	BaseURL string
 	APIKey  string
 	Model   string
+	// CriticModel optionally pins a different model for the
+	// mootd#64 critic pass — typically a cheaper Haiku-tier
+	// model (~10× less per token than Sonnet) so the QA gate
+	// doesn't double the cost per generation. Empty falls
+	// back to CriticModelDefault.
+	CriticModel string
 	// Vision turns on image input. When true, the generator loads each item's
 	// PNG bytes from the wardrobe repository and sends them alongside the text
 	// prompt so Claude can reason about color, texture, and silhouette.
