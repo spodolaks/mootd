@@ -327,14 +327,16 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		h.logger.Printf("admin login: update last-active: %v", err)
 	}
 
+	roles := admin.RolesAsStrings()
 	response.WriteJSON(w, http.StatusOK, LoginResponse{
 		AccessToken:  access,
 		RefreshToken: rawRefresh,
 		ExpiresAt:    now.Add(config.DefaultAdminJWTExpiry).Format(time.RFC3339),
 		Admin: AdminInfo{
-			ID:    admin.ID,
-			Email: admin.Email,
-			Roles: admin.RolesAsStrings(),
+			ID:          admin.ID,
+			Email:       admin.Email,
+			Roles:       roles,
+			Permissions: PermissionsFor(roles),
 		},
 	})
 }
@@ -425,14 +427,16 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 		h.logger.Printf("admin refresh: update last-active: %v", err)
 	}
 
+	roles := admin.RolesAsStrings()
 	response.WriteJSON(w, http.StatusOK, LoginResponse{
 		AccessToken:  access,
 		RefreshToken: rawRefresh,
 		ExpiresAt:    now.Add(config.DefaultAdminJWTExpiry).Format(time.RFC3339),
 		Admin: AdminInfo{
-			ID:    admin.ID,
-			Email: admin.Email,
-			Roles: admin.RolesAsStrings(),
+			ID:          admin.ID,
+			Email:       admin.Email,
+			Roles:       roles,
+			Permissions: PermissionsFor(roles),
 		},
 	})
 }
