@@ -382,6 +382,18 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 			userRepo:     userRepo,
 			logger:       a.Logger,
 		})
+		// Upload + autodetect: lets curators drop a real photo
+		// into /archetype-defaults and have label/category/traits
+		// prefilled by the same detection pipeline the mobile app
+		// hits. Generation output is intentionally discarded —
+		// curated defaults always show the operator's upload.
+		adminHandler.WithImageStore(&wardrobeImageStoreAdapter{repo: wardrobeRepo})
+		if detector != nil {
+			adminHandler.WithItemDetector(&wardrobeItemDetectorAdapter{
+				backend: detector,
+				logger:  a.Logger,
+			})
+		}
 	} else {
 		a.Logger.Printf("admin: archetype_default_items repo init failed: %v (continuing without /archetype-defaults)", err)
 	}
@@ -975,6 +987,73 @@ func randomHex(bytes int) string {
 	buf := make([]byte, bytes)
 	_, _ = cryptoRand.Read(buf)
 	return hex.EncodeToString(buf)
+}
+
+// wardrobeImageStoreAdapter satisfies admin.ImageStore by writing
+// to the same GridFS bucket that wardrobe.ServeImage already serves
+// on /v1/wardrobe/items/{id}/image. The serve route is unauthed and
+// looks up by GridFS filename, so saving under "ad_<hex>" is enough
+// to make the file publicly fetchable from the mobile app — exactly
+// what we want for seeded items rendered on a user's moodboard.
+type wardrobeImageStoreAdapter struct {
+	repo *wardrobe.MongoRepository
+}
+
+func (a *wardrobeImageStoreAdapter) Save(ctx context.Context, key string, data []byte, contentType string) error {
+	return a.repo.SaveImage(ctx, key, data, contentType)
+}
+
+// wardrobeItemDetectorAdapter satisfies admin.ItemDetector by calling
+// the configured detection backend (legacy or singleitem). The
+// backend's Detect signature is keyed on userID + runID so it can
+// archive a detection_runs row; for admin curating we synthesise a
+// stable user id ("admin_default_curator") and a fresh run id per
+// call so the archive trail still works without leaking the
+// orchestrator's image lifecycle into the default.
+//
+// The backend returns a flattened jobItem; we map its category,
+// label, confidence, and string-valued traits into the
+// admin.DetectionPrefill. The orchestrator's full
+// `structuredDescription` is lost in the flatten step (only top-level
+// string fields survive) — acceptable for now since the curator can
+// edit the prefill before saving.
+type wardrobeItemDetectorAdapter struct {
+	backend wardrobe.DetectorBackend
+	logger  *log.Logger
+}
+
+const adminDetectCuratorUserID = "admin_default_curator"
+
+func (a *wardrobeItemDetectorAdapter) DetectFromBytes(ctx context.Context, imageData []byte, filename string) (admin.DetectionPrefill, error) {
+	runID := "drun_admin_" + randomHex(8)
+	items, _, err := a.backend.Detect(ctx, adminDetectCuratorUserID, runID, imageData, filename)
+	if err != nil {
+		return admin.DetectionPrefill{}, err
+	}
+	if len(items) == 0 {
+		return admin.DetectionPrefill{}, fmt.Errorf("detector returned no items")
+	}
+	it := items[0]
+	traits := map[string]string{}
+	for k, v := range it.Traits {
+		traits[k] = v
+	}
+	// Defensive copy of structuredDescription so admin/ can't
+	// accidentally mutate the detector's internal map.
+	var structured map[string]any
+	if len(it.StructuredDescription) > 0 {
+		structured = make(map[string]any, len(it.StructuredDescription))
+		for k, v := range it.StructuredDescription {
+			structured[k] = v
+		}
+	}
+	return admin.DetectionPrefill{
+		Label:                 it.Label,
+		Category:              it.Category,
+		Confidence:            it.Confidence,
+		Traits:                traits,
+		StructuredDescription: structured,
+	}, nil
 }
 
 // redisHeartbeat polls Redis every 15s and updates

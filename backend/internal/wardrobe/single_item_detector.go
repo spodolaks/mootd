@@ -306,15 +306,16 @@ func itemToJobItem(it *singleItemClothingItem) jobItem {
 		imgURL = it.GenerationImageURL
 	}
 	return jobItem{
-		ID:         it.ID,
-		Category:   it.Category,
-		Label:      it.Label,
-		Family:     it.Category, // legacy alias
-		Type:       it.Label,    // legacy alias
-		ImageURL:   imgURL,
-		Confidence: it.ConfidenceOverall,
-		Skipped:    false,
-		Traits:     flattenTraits(it.StructuredDescription),
+		ID:                    it.ID,
+		Category:              it.Category,
+		Label:                 it.Label,
+		Family:                it.Category, // legacy alias
+		Type:                  it.Label,    // legacy alias
+		ImageURL:              imgURL,
+		Confidence:            it.ConfidenceOverall,
+		Skipped:               false,
+		Traits:                flattenTraits(it.StructuredDescription),
+		StructuredDescription: it.StructuredDescription,
 	}
 }
 

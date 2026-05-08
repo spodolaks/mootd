@@ -190,6 +190,15 @@ type jobItem struct {
 	Traits     map[string]string `json:"traits"`
 	Category   string            `json:"category"`
 	Label      string            `json:"label"`
+	// StructuredDescription is the rich (potentially nested)
+	// per-attribute description produced by the orchestrator's
+	// stage 2 — e.g. {"color": "indigo", "fit": "slim",
+	// "material_top": "cotton"}. Lossy compared to the wardrobe
+	// row's flat traits, but useful for admin tools that want to
+	// surface the full LLM-derived description (e.g. the
+	// archetype-defaults curator's auto-detect prefill). nil for
+	// the legacy detector — only the singleitem backend populates it.
+	StructuredDescription map[string]any `json:"-"`
 	// PromptUsed + GenerateCostUSD bubble up the per-item generation
 	// metadata so the wardrobe handler can stamp them onto the
 	// detection_run archive (P1-04 / mootd-admin#16). Empty when the

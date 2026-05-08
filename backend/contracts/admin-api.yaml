@@ -2514,6 +2514,45 @@ components:
           type: object
           additionalProperties: true
 
+    ArchetypeDefaultDetectionResult:
+      description: |
+        Wire shape returned by POST /admin/v1/archetype-defaults/detect.
+        The FE uses these fields to prefill the new-default modal so
+        the curator only has to confirm/edit (and pick an archetype +
+        save). The image bytes are already persisted under `id` — the
+        subsequent POST /admin/v1/archetype-defaults call should pass
+        the same `imageUrl` straight through.
+      type: object
+      required: [id, imageUrl, category, label]
+      properties:
+        id:
+          type: string
+          description: |
+            Future archetype_default_items._id. Pre-minted on detect
+            so the upload bytes can be keyed against it.
+          example: ad_b689d52d4f7b4b9d84a3c6e0b6f12c34
+        imageUrl:
+          type: string
+          description: |
+            Path the FE renders + the value to send back on create.
+            Resolves via the public wardrobe ServeImage route, so
+            seeded copies on user wardrobes also load without auth.
+          example: /v1/wardrobe/items/ad_b689d52d4f7b4b9d84a3c6e0b6f12c34/image
+        category:
+          type: string
+        label:
+          type: string
+        confidence:
+          type: number
+          format: float
+        traits:
+          type: object
+          additionalProperties:
+            type: string
+        structuredDescription:
+          type: object
+          additionalProperties: true
+
     SeedFromArchetypeRequest:
       description: |
         Body for POST /admin/v1/users/seed-from-archetype/{userId}.
@@ -4619,6 +4658,53 @@ paths:
           description: Missing prompts:write permission.
         "409":
           description: Duplicate (archetype + category + label) already exists.
+
+  /admin/v1/archetype-defaults/detect:
+    post:
+      operationId: adminDetectArchetypeDefault
+      summary: |
+        Upload a photo and run it through the same single-item
+        detection pipeline used by the mobile wardrobe upload, but
+        return ONLY the description (label / category / traits /
+        structuredDescription). The generated ghost-mannequin image
+        is intentionally discarded — curated defaults always show
+        the operator's upload, so users see real photos on first
+        sign-in. The bytes are saved to the wardrobe-side image
+        store under the returned id; the FE uses imageUrl for the
+        modal preview AND passes the same imageUrl back when
+        creating the archetype-default row.
+        Permission: prompts:write.
+      tags: [archetype-defaults]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [image]
+              properties:
+                image:
+                  type: string
+                  format: binary
+      responses:
+        "200":
+          description: Detection prefill.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ArchetypeDefaultDetectionResult"
+        "400":
+          description: Missing or empty image field.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Missing prompts:write permission.
+        "413":
+          description: Image exceeds size limit.
+        "502":
+          description: Detection backend error.
+        "503":
+          description: Detect not wired (image store or detector unavailable).
 
   /admin/v1/archetype-defaults/{id}:
     parameters:

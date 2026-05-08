@@ -50,6 +50,14 @@ func (h *Handler) ArchetypeDefaultsRouter(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// Sub-paths come before id-based dispatch. "detect" is the
+	// upload-and-autodescribe endpoint — keep adding new ones here
+	// as the surface grows.
+	if rest == "detect" {
+		h.detectArchetypeDefault(w, r)
+		return
+	}
+
 	id := rest
 	switch r.Method {
 	case http.MethodGet:

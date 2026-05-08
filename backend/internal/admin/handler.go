@@ -44,6 +44,8 @@ type Handler struct {
 	hitlProxy     *HitlProxy                // optional — when nil, /hitl-queue + /items/{id}/* return 503
 	archetypeDefaults ArchetypeDefaultsRepository // optional — when nil, /archetype-defaults returns 503
 	wardrobeSeeder    WardrobeSeeder              // optional — wired alongside archetypeDefaults so admin can preview seeding
+	imageStore        ImageStore                  // optional — pairs with itemDetector for upload+autodetect
+	itemDetector      ItemDetector                // optional — pairs with imageStore; when either nil, /archetype-defaults/detect → 503
 	secret        string
 }
 

@@ -358,6 +358,29 @@ type Admin struct {
 // AdminRoles defines model for Admin.Roles.
 type AdminRoles string
 
+// ArchetypeDefaultDetectionResult Wire shape returned by POST /admin/v1/archetype-defaults/detect.
+// The FE uses these fields to prefill the new-default modal so
+// the curator only has to confirm/edit (and pick an archetype +
+// save). The image bytes are already persisted under `id` — the
+// subsequent POST /admin/v1/archetype-defaults call should pass
+// the same `imageUrl` straight through.
+type ArchetypeDefaultDetectionResult struct {
+	Category   string   `json:"category"`
+	Confidence *float32 `json:"confidence,omitempty"`
+
+	// Id Future archetype_default_items._id. Pre-minted on detect
+	// so the upload bytes can be keyed against it.
+	Id string `json:"id"`
+
+	// ImageUrl Path the FE renders + the value to send back on create.
+	// Resolves via the public wardrobe ServeImage route, so
+	// seeded copies on user wardrobes also load without auth.
+	ImageUrl              string                  `json:"imageUrl"`
+	Label                 string                  `json:"label"`
+	StructuredDescription *map[string]interface{} `json:"structuredDescription,omitempty"`
+	Traits                *map[string]string      `json:"traits,omitempty"`
+}
+
 // ArchetypeDefaultItem Admin-curated wardrobe item that gets COPIED into a
 // user's wardrobe at signup (or via the seed endpoint),
 // keyed by archetype. Solves the cold-start problem —
@@ -1939,6 +1962,11 @@ type AdminListArchetypeDefaultsParams struct {
 // AdminListArchetypeDefaultsParamsArchetype defines parameters for AdminListArchetypeDefaults.
 type AdminListArchetypeDefaultsParamsArchetype string
 
+// AdminDetectArchetypeDefaultMultipartBody defines parameters for AdminDetectArchetypeDefault.
+type AdminDetectArchetypeDefaultMultipartBody struct {
+	Image openapi_types.File `json:"image"`
+}
+
 // AdminListAuditParams defines parameters for AdminListAudit.
 type AdminListAuditParams struct {
 	// Action Exact match. e.g. `traces.export`.
@@ -2108,6 +2136,9 @@ type AdminListUserWardrobeParams struct {
 
 // AdminCreateArchetypeDefaultJSONRequestBody defines body for AdminCreateArchetypeDefault for application/json ContentType.
 type AdminCreateArchetypeDefaultJSONRequestBody = ArchetypeDefaultItem
+
+// AdminDetectArchetypeDefaultMultipartRequestBody defines body for AdminDetectArchetypeDefault for multipart/form-data ContentType.
+type AdminDetectArchetypeDefaultMultipartRequestBody AdminDetectArchetypeDefaultMultipartBody
 
 // AdminUpdateArchetypeDefaultJSONRequestBody defines body for AdminUpdateArchetypeDefault for application/json ContentType.
 type AdminUpdateArchetypeDefaultJSONRequestBody = ArchetypeDefaultItemPatch
