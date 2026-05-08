@@ -18,6 +18,16 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, authMiddleware func(http.Ha
 	mux.HandleFunc("/v1/wardrobe/detect-jobs/", authMiddleware(http.HandlerFunc(h.PollDetectJob)).ServeHTTP)
 
 	mux.Handle("/v1/wardrobe/items", authMiddleware(http.HandlerFunc(h.Items)))
+
+	// Archetype-default plumbing: filler tap-resolve flow. The two
+	// endpoints turn moodboard generic-item taps into either
+	//   "I have this IRL"   → POST /v1/wardrobe/items/from-archetype-default (seeds)
+	//   "Not in my wardrobe" → POST /v1/wardrobe/archetype-rejections (excludes from future runs)
+	// Registered BEFORE the /v1/wardrobe/items/ catch-all so the
+	// concrete subpath wins over the generic prefix match.
+	mux.Handle("/v1/wardrobe/items/from-archetype-default", authMiddleware(http.HandlerFunc(h.FromArchetypeDefault)))
+	mux.Handle("/v1/wardrobe/archetype-rejections", authMiddleware(http.HandlerFunc(h.ArchetypeRejection)))
+
 	// Image serving is public (item IDs are non-guessable UUIDs).
 	// Must be registered before the auth-wrapped /v1/wardrobe/items/ catch-all.
 	mux.HandleFunc("/v1/wardrobe/items/", func(w http.ResponseWriter, r *http.Request) {

@@ -64,30 +64,33 @@ type userProfileProvider interface {
 // and convert the rows into the wardrobe-shaped items the outfit
 // service already knows how to consume (so we don't need a parallel
 // "filler item" type leaking through every layer).
+//
+// `userID` parameter lets the implementation filter out per-user
+// rejections (defaults the user has already marked as "not in my
+// wardrobe"); without that filter, the same dismissed item would
+// keep coming back on every regeneration.
 type archetypeDefaultsLoader interface {
 	// LoadFor returns curated items for the given archetype, capped
-	// to `cap` rows (latest first). The returned items are
-	// wardrobe-shaped but their IDs use the "ad_<hex>" prefix the
-	// admin layer mints. The caller is responsible for marking them
-	// non-Preferred when they're folded into the LLM-facing pool.
-	LoadFor(ctx context.Context, archetype string, cap int) ([]wardrobe.ClothingItem, error)
+	// to `cap` rows. The returned items are wardrobe-shaped but
+	// their IDs use the "ad_<hex>" prefix the admin layer mints. The
+	// caller is responsible for marking them non-Preferred when they
+	// fold into the LLM-facing pool. Rejected defaults for `userID`
+	// are excluded.
+	LoadFor(ctx context.Context, userID, archetype string, cap int) ([]wardrobe.ClothingItem, error)
 }
 
-// fillerSeeder materialises an archetype-default item into the
-// user's own wardrobe when the LLM ends up picking it for an
-// outfit. Idempotent: a default already seeded for this user
-// returns the existing wardrobe-item id instead of creating a new
-// row, so re-running outfit generation doesn't pile up duplicates.
-//
-// The contract is decoupled from admin/ via this interface — the
-// app/-side adapter is the only place that touches both the admin
-// defaults repo and the wardrobe repo at the same time.
+// fillerSeeder kept for now as an unexported abstraction even
+// though outfit/ no longer auto-seeds fillers — the same primitive
+// is what the wardrobe handler will call when the user explicitly
+// claims a filler ("I have this IRL"). Defined here so the
+// app/-side adapter can satisfy a single interface used from two
+// callers (wardrobe handler today; outfit service if/when we
+// re-enable auto-seed behind a flag).
 type fillerSeeder interface {
 	// SeedForUser copies the archetype default identified by
 	// defaultID into the user's wardrobe (or returns the previous
 	// seed when already present). Returns the resulting wardrobe
-	// item id (wi_<hex>) so the outfit service can rewrite outfit
-	// references.
+	// item id (wi_<hex>).
 	SeedForUser(ctx context.Context, userID, defaultID string) (string, error)
 }
 
@@ -428,7 +431,7 @@ func (s *Service) generateOutfitsImpl(ctx context.Context, userID string, weathe
 			fillerVisibleCap = 18 // bound that actually reaches the LLM
 		)
 		topArche := topArchetypes[0].Name
-		fillers, err := s.archetypeDefaults.LoadFor(ctx, topArche, fillerLoadCap)
+		fillers, err := s.archetypeDefaults.LoadFor(ctx, userID, topArche, fillerLoadCap)
 		if err != nil {
 			s.logger.Printf("outfit: archetype-defaults load for %s/%s failed: %v (proceeding with user wardrobe only)", userID, topArche, err)
 		} else if len(fillers) > 0 {
@@ -641,18 +644,26 @@ func (s *Service) generateOutfitsImpl(ctx context.Context, userID string, weathe
 		}
 	}
 
-	// Materialise any archetype-default fillers the LLM ended up
-	// picking. Each ad_<hex> id in a filtered outfit is seeded into
-	// the user's own wardrobe (idempotent) and the outfit's items /
-	// layoutRoles / visualWeights are rewritten to the resulting
-	// wi_<hex> ids. After this step the outfit response, and any
-	// cache entry built from it, references only items the user
-	// owns — downstream code (mobile FE, moodboard save, calendar
-	// snapshot resolution) doesn't need to know about ad_<hex> at
-	// all.
-	if s.fillerSeeder != nil {
-		filtered = s.materializeFillers(ctx, userID, filtered)
-	}
+	// Fillers are intentionally NOT auto-seeded into the user's
+	// wardrobe. Picked ad_<hex> ids stay in the outfit response so
+	// the FE can render them as "stylist suggestions" with a tap-
+	// to-resolve affordance: the user explicitly chooses whether
+	// each filler is something they own IRL (→ POST
+	// /v1/wardrobe/items/from-archetype-default seeds it), or not
+	// (→ POST /v1/wardrobe/archetype-rejections, then the loader
+	// excludes it from this user's pool forever).
+	//
+	// This keeps the user's closet honest — only items they've
+	// claimed appear there — and the rejection list closes the
+	// loop so the same suggestion doesn't keep coming back.
+
+	// Resolve per-item snapshots inline so the FE renders without a
+	// second roundtrip. Built from the combined `items` slice
+	// (user wardrobe + archetype-default fillers loaded above) so
+	// virtual ad_<hex> ids resolve to label + imageUrl right here —
+	// the FE doesn't need to reconcile them against /v1/wardrobe.
+	// Source ("owned" | "filler") tells the FE which UX to show.
+	filtered = attachItemSnapshots(filtered, items, preferredIDs)
 
 	// Attach per-item color palettes before caching so cache hits serve the
 	// same enriched payload on subsequent reads.
@@ -844,64 +855,48 @@ func itemsToTraits(items []wardrobe.ClothingItem) []archetype.ItemTraits {
 	return traits
 }
 
-// materializeFillers walks `outfits` and rewrites every ad_<hex>
-// reference to the wi_<hex> id of a freshly-seeded (or previously-
-// seeded) wardrobe item the user now owns. Idempotency lives in
-// fillerSeeder.SeedForUser — calling it twice with the same default
-// returns the same wi_<hex>.
-//
-// Behaviour notes:
-//   - Failures are logged and the offending id is left unchanged so
-//     the outfit doesn't get dropped — ValidateOutfits would re-reject
-//     the stale id, which is the correct degraded behaviour.
-//   - The translation map is shared across all outfits so the same
-//     filler appearing in two outfits seeds exactly once and resolves
-//     to the same wardrobe row.
-//   - LayoutRoles + VisualWeights maps are rewritten so the FE's
-//     collage layout still finds each item by its new id.
-func (s *Service) materializeFillers(ctx context.Context, userID string, outfits []Outfit) []Outfit {
-	if s.fillerSeeder == nil || len(outfits) == 0 {
+// attachItemSnapshots fills outfit.ItemSnapshots from the combined
+// items slice. The FE renders moodboard tiles straight from these
+// snapshots (no /v1/wardrobe lookup needed), so virtual ad_<hex>
+// fillers resolve correctly even though they live outside the user's
+// wardrobe collection. Source = "owned" when the item is in
+// preferredIDs (the user uploaded it), "filler" otherwise.
+func attachItemSnapshots(outfits []Outfit, allItems []wardrobe.ClothingItem, preferredIDs map[string]bool) []Outfit {
+	if len(outfits) == 0 || len(allItems) == 0 {
 		return outfits
 	}
-	translate := map[string]string{}
-	rewriteID := func(old string) string {
-		if !strings.HasPrefix(old, "ad_") {
-			return old
-		}
-		if mapped, ok := translate[old]; ok {
-			return mapped
-		}
-		newID, err := s.fillerSeeder.SeedForUser(ctx, userID, old)
-		if err != nil {
-			s.logger.Printf("outfit: seed filler %s for user %s failed: %v (leaving id unchanged)", old, userID, err)
-			translate[old] = old
-			return old
-		}
-		translate[old] = newID
-		return newID
+	byID := make(map[string]wardrobe.ClothingItem, len(allItems))
+	for _, it := range allItems {
+		byID[it.ID] = it
 	}
 	for i := range outfits {
 		o := &outfits[i]
-		for j, id := range o.Items {
-			o.Items[j] = rewriteID(id)
+		if len(o.Items) == 0 {
+			continue
 		}
-		if len(o.LayoutRoles) > 0 {
-			rewritten := make(map[string]string, len(o.LayoutRoles))
-			for id, role := range o.LayoutRoles {
-				rewritten[rewriteID(id)] = role
+		snaps := make([]OutfitItemSnapshot, 0, len(o.Items))
+		for _, id := range o.Items {
+			it, ok := byID[id]
+			if !ok {
+				// Should never happen post-ValidateOutfits, but
+				// failing soft preserves the existing item id list
+				// so the FE can degrade.
+				continue
 			}
-			o.LayoutRoles = rewritten
-		}
-		if len(o.VisualWeights) > 0 {
-			rewritten := make(map[string]string, len(o.VisualWeights))
-			for id, weight := range o.VisualWeights {
-				rewritten[rewriteID(id)] = weight
+			source := "filler"
+			if preferredIDs[id] {
+				source = "owned"
 			}
-			o.VisualWeights = rewritten
+			snaps = append(snaps, OutfitItemSnapshot{
+				ID:          it.ID,
+				Category:    it.Category,
+				Label:       it.Label,
+				ImageURL:    it.ImageURL,
+				PngImageURL: it.PngImageURL,
+				Source:      source,
+			})
 		}
-	}
-	if len(translate) > 0 {
-		s.logger.Printf("outfit: materialised %d filler(s) into user %s wardrobe", len(translate), userID)
+		o.ItemSnapshots = snaps
 	}
 	return outfits
 }

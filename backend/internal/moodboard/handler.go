@@ -44,16 +44,39 @@ type SaveEventFn func(ctx context.Context, userID string, req SaveRequest, saved
 
 // Handler handles moodboard HTTP endpoints.
 type Handler struct {
-	logger        *log.Logger
-	repo          Repository
-	wardrobeRepo  wardrobeRepository
-	profileUpdate profileUpdater
-	onSave        SaveEventFn
+	logger          *log.Logger
+	repo            Repository
+	wardrobeRepo    wardrobeRepository
+	archetypeLookup archetypeDefaultsLookup // optional — when nil, ad_<hex> ids in saved outfits don't resolve to a snapshot.
+	profileUpdate   profileUpdater
+	onSave          SaveEventFn
 }
 
 // wardrobeRepository is the subset of the wardrobe repo needed to snapshot items.
 type wardrobeRepository interface {
 	FindByUser(ctx context.Context, userID string) ([]wardrobe.ClothingItem, error)
+}
+
+// archetypeDefaultsLookup is the small surface moodboard needs to
+// resolve filler ids (ad_<hex>) into OutfitItem snapshots when an
+// outfit references one. Decoupled via interface so moodboard/
+// doesn't import admin/. nil-safe — when missing, filler ids in a
+// saved outfit just don't get a snapshot row (degraded rendering,
+// not a crash).
+type archetypeDefaultsLookup interface {
+	GetByID(ctx context.Context, id string) (*ArchetypeDefaultSnapshot, error)
+}
+
+// ArchetypeDefaultSnapshot is the trimmed shape moodboard needs.
+// Mirrors the admin row but only the fields we actually display
+// (id, category, label, imageUrl, pngImageUrl) — keeps the
+// dependency surface tight.
+type ArchetypeDefaultSnapshot struct {
+	ID          string
+	Category    string
+	Label       string
+	ImageURL    string
+	PngImageURL string
 }
 
 // profileUpdater reads and updates the user's archetype profile.
@@ -81,6 +104,14 @@ func (f ProfileUpdaterFunc) UpdateArchetypeProfile(ctx context.Context, userID s
 // where the feedback event is emitted (see app.go for the wiring).
 func NewHandler(logger *log.Logger, repo Repository, wardrobeRepo wardrobeRepository, profileUpdate profileUpdater, onSave SaveEventFn) *Handler {
 	return &Handler{logger: logger, repo: repo, wardrobeRepo: wardrobeRepo, profileUpdate: profileUpdate, onSave: onSave}
+}
+
+// WithArchetypeDefaultsLookup wires the optional ad_<hex> resolver
+// so saved outfits that reference fillers still produce snapshots.
+// Returns the handler for builder-style chaining at boot.
+func (h *Handler) WithArchetypeDefaultsLookup(l archetypeDefaultsLookup) *Handler {
+	h.archetypeLookup = l
+	return h
 }
 
 // Save handles POST /v1/moodboards.
@@ -202,6 +233,27 @@ func (h *Handler) resolveSnapshots(ctx context.Context, userID string, itemIDs [
 				ImageURL:    item.ImageURL,
 				PngImageURL: item.PngImageURL,
 			})
+			continue
+		}
+		// Filler fallback: archetype-default ids (ad_<hex>) aren't in
+		// the user's wardrobe — they're virtual stylist suggestions.
+		// When the optional lookup is wired, we resolve them so the
+		// saved moodboard still renders a real tile in the calendar.
+		if h.archetypeLookup != nil && strings.HasPrefix(itemID, "ad_") {
+			def, err := h.archetypeLookup.GetByID(ctx, itemID)
+			if err != nil {
+				h.logger.Printf("moodboard: resolve filler %s: %v (skipping)", itemID, err)
+				continue
+			}
+			if def != nil {
+				snapshots = append(snapshots, OutfitItem{
+					ID:          def.ID,
+					Category:    def.Category,
+					Label:       def.Label,
+					ImageURL:    def.ImageURL,
+					PngImageURL: def.PngImageURL,
+				})
+			}
 		}
 	}
 	return snapshots

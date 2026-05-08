@@ -12,6 +12,7 @@ type Outfit struct {
 	Name            string             `json:"name"`
 	Description     string             `json:"description"`
 	Items           []string           `json:"items"`                     // wardrobe item IDs (tops, bottoms, shoes, accessories)
+	ItemSnapshots   []OutfitItemSnapshot `json:"itemSnapshots,omitempty"` // resolved per-item metadata (id, label, imageUrl, source). FE renders directly from these so it doesn't have to look up filler ad_<hex> ids in the wardrobe response.
 	Rationale       string             `json:"rationale,omitempty"`       // 1-line stylist explanation tied to archetype/weather
 	LayoutRoles     map[string]string  `json:"layoutRoles,omitempty"`     // itemID → "hero" | "support" | "accent"
 	VisualWeights   map[string]string  `json:"visualWeights,omitempty"`   // itemID → "statement" | "supporting" | "minor"; marks the signature piece per outfit (P1-H)
@@ -24,6 +25,27 @@ type Outfit struct {
 	BackgroundID    string             `json:"backgroundId,omitempty"`    // LLM-picked surface id; read on input, kept on output for debug
 	PanelURL        string             `json:"panelUrl,omitempty"`        // resolved URL for the panel texture
 	BackgroundURL   string             `json:"backgroundUrl,omitempty"`   // resolved URL for the ambient background
+}
+
+// OutfitItemSnapshot is the resolved per-item metadata returned
+// alongside an outfit's ID list, so the FE doesn't have to do a
+// second lookup against /v1/wardrobe/items (which doesn't include
+// archetype-default fillers — those live virtually under ad_<hex>
+// and are only resolvable through this snapshot).
+//
+// Source tells the FE how to render:
+//   - "owned" — user's own wardrobe item, normal rendering.
+//   - "filler" — archetype-default suggestion. The FE shows the
+//     "tap to mark in wardrobe / not in wardrobe" affordance the
+//     user explicitly asked for (we never auto-add fillers to the
+//     closet — the user is the only one who promotes them).
+type OutfitItemSnapshot struct {
+	ID          string `json:"id"`
+	Category    string `json:"category"`
+	Label       string `json:"label"`
+	ImageURL    string `json:"imageUrl,omitempty"`
+	PngImageURL string `json:"pngImageUrl,omitempty"`
+	Source      string `json:"source"` // "owned" | "filler"
 }
 
 // GenerateResponse is returned from GET /v1/outfits.

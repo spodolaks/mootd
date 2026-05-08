@@ -23,14 +23,16 @@ const maxImageSize = 10 << 20 // 10 MB
 
 // Handler handles wardrobe HTTP endpoints.
 type Handler struct {
-	logger        *log.Logger
-	detector      DetectorBackend
-	searcher      *Searcher
-	repo          Repository
-	bgRemover     *BackgroundRemover
-	workerCtx     context.Context // server-scoped context for background goroutines
-	detectJobs    *DetectJobStore // optional — when nil, the async path is unavailable
-	detectionRuns DetectionRunRepository // optional — when nil, runs aren't archived (P1-04)
+	logger              *log.Logger
+	detector            DetectorBackend
+	searcher            *Searcher
+	repo                Repository
+	bgRemover           *BackgroundRemover
+	workerCtx           context.Context // server-scoped context for background goroutines
+	detectJobs          *DetectJobStore // optional — when nil, the async path is unavailable
+	detectionRuns       DetectionRunRepository // optional — when nil, runs aren't archived (P1-04)
+	archetypeSeeder     ArchetypeFillerSeeder         // optional — pairs with archetypeRejections to power the FE filler tap-resolve flow
+	archetypeRejections ArchetypeRejectionsRepository // optional — when nil, /archetype-rejections returns 503
 }
 
 // NewHandler creates a Handler with the given dependencies.

@@ -435,6 +435,27 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 		// Same archive readable from the admin side via the wardrobe→admin adapter.
 		adminHandler.WithDetectionRuns(newDetectionRunAdapter(detectionRunRepo, detector))
 	}
+
+	// Per-user archetype-default rejections: backs the
+	// /v1/wardrobe/archetype-rejections endpoint and is read by the
+	// outfit-side filler loader to skip dismissed defaults.
+	rejectionsRepo, rejErr := wardrobe.NewArchetypeRejectionsMongoRepository(context.Background(), a.MongoClient, a.MongoDB)
+	if rejErr != nil {
+		a.Logger.Printf("wardrobe: archetype_rejections repo init failed: %v (continuing — rejections endpoint will 503)", rejErr)
+	}
+	if archetypeRepoErr == nil {
+		// Wire the wardrobe-side endpoints whenever the admin
+		// defaults repo is up. Seeder is reused as the wardrobe
+		// handler's "I have this IRL" engine.
+		wardrobeHandler.WithArchetypeEndpoints(wardrobe.ArchetypeEndpointsConfig{
+			Seeder: &fillerSeederAdapter{
+				defaults:     archetypeRepo,
+				wardrobeRepo: wardrobeRepo,
+				logger:       a.Logger,
+			},
+			Rejections: rejectionsRepo,
+		})
+	}
 	wardrobeHandler.RegisterRoutes(mux, authMiddleware)
 
 	brands.NewHandler(a.Logger, brands.NewMongoRepository(a.MongoClient, a.MongoDB)).RegisterRoutes(mux, authMiddleware)
@@ -505,7 +526,14 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 			a.Logger.Printf("moodboard: emit saved-feedback for user %s board %s: %v", userID, saved.ID, err)
 		}
 	})
-	moodboard.NewHandler(a.Logger, moodboardRepo, wardrobeRepo, profileUpdater, moodboardOnSave).RegisterRoutes(mux, authMiddleware)
+	moodboardHandler := moodboard.NewHandler(a.Logger, moodboardRepo, wardrobeRepo, profileUpdater, moodboardOnSave)
+	if archetypeRepoErr == nil {
+		// When a saved moodboard references a virtual filler
+		// (ad_<hex>), resolveSnapshots falls through to this
+		// adapter so the calendar still renders a real tile.
+		moodboardHandler.WithArchetypeDefaultsLookup(&moodboardArchetypeLookupAdapter{repo: archetypeRepo})
+	}
+	moodboardHandler.RegisterRoutes(mux, authMiddleware)
 
 	// Wire the user-deletion cascade now that we have all the owning repos.
 	// Order: images + items → moodboards → feedback → user doc. The user doc
@@ -823,7 +851,10 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 		BudgetEnforcer: budgetEnforcer,
 	}
 	if archetypeRepoErr == nil {
-		outfitCfg.ArchetypeDefaults = &archetypeDefaultsLoaderAdapter{repo: archetypeRepo}
+		outfitCfg.ArchetypeDefaults = &archetypeDefaultsLoaderAdapter{
+			repo:       archetypeRepo,
+			rejections: rejectionsRepo, // nil-safe; loader degrades to no-filter
+		}
 		outfitCfg.FillerSeeder = &fillerSeederAdapter{
 			defaults:     archetypeRepo,
 			wardrobeRepo: wardrobeRepo,
@@ -1091,26 +1122,49 @@ func (a *wardrobeItemDetectorAdapter) DetectFromBytes(ctx context.Context, image
 }
 
 // archetypeDefaultsLoaderAdapter satisfies outfit's archetypeDefaultsLoader
-// by wrapping the admin defaults repo. Converts each
-// ArchetypeDefaultItem into a wardrobe.ClothingItem so the outfit
-// service can fold them into the same items slice it already reasons
-// about (validation, archetype scoring, layout). The id keeps its
-// "ad_<hex>" prefix; the outfit service is what later rewrites those
-// to "wi_<hex>" ids via the fillerSeeder when an outfit picks one.
+// by wrapping the admin defaults repo + the per-user rejections
+// repo. Converts each ArchetypeDefaultItem into a wardrobe.ClothingItem
+// so the outfit service can fold them into the same items slice it
+// already reasons about (validation, archetype scoring, layout). The
+// id keeps its "ad_<hex>" prefix and stays virtual through the entire
+// outfit pipeline — the user explicitly claims a filler ("I have this
+// IRL") via POST /v1/wardrobe/items/from-archetype-default before
+// anything materialises in their wardrobe.
+//
+// rejections may be nil; when nil the filter is a no-op (all defaults
+// for the archetype come through). In production it's always wired so
+// "not in my wardrobe" sticks across regenerations.
 type archetypeDefaultsLoaderAdapter struct {
-	repo admin.ArchetypeDefaultsRepository
+	repo       admin.ArchetypeDefaultsRepository
+	rejections wardrobe.ArchetypeRejectionsRepository
 }
 
-func (a *archetypeDefaultsLoaderAdapter) LoadFor(ctx context.Context, archetypeName string, cap int) ([]wardrobe.ClothingItem, error) {
+func (a *archetypeDefaultsLoaderAdapter) LoadFor(ctx context.Context, userID, archetypeName string, cap int) ([]wardrobe.ClothingItem, error) {
 	rows, err := a.repo.List(ctx, archetypeName)
 	if err != nil {
 		return nil, err
 	}
-	if len(rows) > cap {
-		rows = rows[:cap]
+	// Per-user rejection filter. Best-effort: a Mongo error here
+	// degrades to "no rejections" rather than failing the whole
+	// outfit generation — a stale rejection re-appearing once is
+	// kinder than the user seeing zero suggestions.
+	rejected := map[string]bool{}
+	if a.rejections != nil && userID != "" {
+		ids, rerr := a.rejections.ListIDs(ctx, userID)
+		if rerr == nil {
+			for _, id := range ids {
+				rejected[id] = true
+			}
+		}
 	}
 	out := make([]wardrobe.ClothingItem, 0, len(rows))
 	for _, d := range rows {
+		if rejected[d.ID] {
+			continue
+		}
+		if len(out) >= cap {
+			break
+		}
 		traits := map[string]string{}
 		for k, v := range d.Traits {
 			traits[k] = v
@@ -1121,7 +1175,7 @@ func (a *archetypeDefaultsLoaderAdapter) LoadFor(ctx context.Context, archetypeN
 		traits["seededFromArchetype"] = d.Archetype
 		traits["seededFromDefaultId"] = d.ID
 		out = append(out, wardrobe.ClothingItem{
-			ID:          d.ID, // ad_<hex> — rewritten downstream when picked
+			ID:          d.ID, // ad_<hex> — kept virtual; never auto-materialised
 			UserID:      "",   // intentionally blank: not yet owned
 			Category:    d.Category,
 			Label:       d.Label,
@@ -1132,6 +1186,30 @@ func (a *archetypeDefaultsLoaderAdapter) LoadFor(ctx context.Context, archetypeN
 		})
 	}
 	return out, nil
+}
+
+// moodboardArchetypeLookupAdapter satisfies the moodboard handler's
+// archetypeDefaultsLookup so saved boards with virtual filler ids
+// (ad_<hex>) still resolve to displayable snapshots.
+type moodboardArchetypeLookupAdapter struct {
+	repo admin.ArchetypeDefaultsRepository
+}
+
+func (a *moodboardArchetypeLookupAdapter) GetByID(ctx context.Context, id string) (*moodboard.ArchetypeDefaultSnapshot, error) {
+	def, err := a.repo.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if def == nil {
+		return nil, nil
+	}
+	return &moodboard.ArchetypeDefaultSnapshot{
+		ID:          def.ID,
+		Category:    def.Category,
+		Label:       def.Label,
+		ImageURL:    def.ImageURL,
+		PngImageURL: def.PngImageURL,
+	}, nil
 }
 
 // fillerSeederAdapter satisfies outfit's fillerSeeder. Idempotent:
