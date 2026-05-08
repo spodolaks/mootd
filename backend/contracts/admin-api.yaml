@@ -2435,7 +2435,7 @@ components:
           example: ad_a1b2c3d4
         archetype:
           type: string
-          enum: [ruler, rebel, creator, lover, caregiver, hero, magician, jester, sage, innocent, explorer, everyman]
+          enum: [ruler, rebel, creator, lover, caregiver, hero, magician, jester, sage, innocent, explorer, orphan]
         category:
           type: string
           example: outerwear
@@ -2564,7 +2564,7 @@ components:
       properties:
         archetype:
           type: string
-          enum: [ruler, rebel, creator, lover, caregiver, hero, magician, jester, sage, innocent, explorer, everyman]
+          enum: [ruler, rebel, creator, lover, caregiver, hero, magician, jester, sage, innocent, explorer, orphan]
         notes:
           type: string
           description: Audit-trail rationale; required.
@@ -4618,7 +4618,7 @@ paths:
           required: false
           schema:
             type: string
-            enum: [ruler, rebel, creator, lover, caregiver, hero, magician, jester, sage, innocent, explorer, everyman]
+            enum: [ruler, rebel, creator, lover, caregiver, hero, magician, jester, sage, innocent, explorer, orphan]
       responses:
         "200":
           description: Items.

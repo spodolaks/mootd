@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log"
-	"math/rand/v2"
 	"sort"
 	"strconv"
 	"strings"
@@ -16,29 +15,9 @@ import (
 	"mootd/backend/internal/wardrobe"
 )
 
-// sampleFillers returns up to `n` items drawn from `pool` in
-// randomised order. Used to rotate which archetype defaults reach
-// the LLM across successive generations so a small wardrobe doesn't
-// keep producing the same 3-4 outfit permutations.
-//
-// Randomness is intentionally non-deterministic — the per-call
-// freshness IS the feature. Cache hits will be rare when fillers are
-// in play; that's fine, the cost of a regen is small (~$0.01) and
-// the user explicitly traded the cache hit for variety.
-func sampleFillers(pool []wardrobe.ClothingItem, n int) []wardrobe.ClothingItem {
-	if len(pool) <= n {
-		out := make([]wardrobe.ClothingItem, len(pool))
-		copy(out, pool)
-		rand.Shuffle(len(out), func(i, j int) { out[i], out[j] = out[j], out[i] })
-		return out
-	}
-	idx := rand.Perm(len(pool))[:n]
-	out := make([]wardrobe.ClothingItem, n)
-	for i, j := range idx {
-		out[i] = pool[j]
-	}
-	return out
-}
+// (sampleFillers used to live here. mootd#72 pushed the random subset
+// down to Mongo via $sample so the loader returns a pre-shuffled
+// page directly. The Go-side shuffle is no longer needed.)
 
 // wardrobeRepository is the subset of the wardrobe repo the outfit service needs.
 // GetImage is required for vision-capable generators (Claude); generators that
@@ -79,20 +58,13 @@ type archetypeDefaultsLoader interface {
 	LoadFor(ctx context.Context, userID, archetype string, cap int) ([]wardrobe.ClothingItem, error)
 }
 
-// fillerSeeder kept for now as an unexported abstraction even
-// though outfit/ no longer auto-seeds fillers — the same primitive
-// is what the wardrobe handler will call when the user explicitly
-// claims a filler ("I have this IRL"). Defined here so the
-// app/-side adapter can satisfy a single interface used from two
-// callers (wardrobe handler today; outfit service if/when we
-// re-enable auto-seed behind a flag).
-type fillerSeeder interface {
-	// SeedForUser copies the archetype default identified by
-	// defaultID into the user's wardrobe (or returns the previous
-	// seed when already present). Returns the resulting wardrobe
-	// item id (wi_<hex>).
-	SeedForUser(ctx context.Context, userID, defaultID string) (string, error)
-}
+// (fillerSeeder lived here pre-mootd#2dad4df when the outfit pipeline
+// auto-seeded picked fillers. Pivoted to user-driven tap-to-resolve
+// instead, so the interface — and its `Service.fillerSeeder` field +
+// `ServiceConfig.FillerSeeder` plumbing — moved to wardrobe/ where the
+// /v1/wardrobe/items/from-archetype-default endpoint lives. Kept the
+// note here as a breadcrumb for anyone resurrecting auto-seed behind
+// a feature flag in future. mootd#74 removed the dead wiring.)
 
 // creativityProvider is an optional extension of userProfileProvider
 // (mootd#67). When the wired implementation satisfies it, the
@@ -175,7 +147,6 @@ type Service struct {
 	llmRecorder       llmRecorder             // optional — nil disables LLM call logging
 	budgetEnforcer    BudgetEnforcer          // optional — nil disables P4-02 budget gate
 	archetypeDefaults archetypeDefaultsLoader // optional — when nil, only user wardrobe feeds the LLM
-	fillerSeeder      fillerSeeder            // optional — pairs with archetypeDefaults; materialises picked fillers into user wardrobe
 	logger            *log.Logger
 }
 
@@ -269,7 +240,6 @@ type ServiceConfig struct {
 	LLMRecorder       llmRecorder             // optional — nil disables LLM call logging
 	BudgetEnforcer    BudgetEnforcer          // optional — nil disables P4-02 budget gate
 	ArchetypeDefaults archetypeDefaultsLoader // optional — when set, the LLM pool is widened with archetype-default fillers (lower preference)
-	FillerSeeder      fillerSeeder            // optional — when set, fillers picked by the LLM materialise as wi_<hex> items in the user's wardrobe before the outfit response leaves the service
 }
 
 // NewService creates an outfit Service.
@@ -285,7 +255,6 @@ func NewService(logger *log.Logger, cfg ServiceConfig) *Service {
 		llmRecorder:       cfg.LLMRecorder,
 		budgetEnforcer:    cfg.BudgetEnforcer,
 		archetypeDefaults: cfg.ArchetypeDefaults,
-		fillerSeeder:      cfg.FillerSeeder,
 		logger:            logger,
 	}
 }
@@ -420,26 +389,22 @@ func (s *Service) generateOutfitsImpl(ctx context.Context, userID string, weathe
 		preferredIDs[it.ID] = true
 	}
 	if s.archetypeDefaults != nil && len(topArchetypes) > 0 {
-		// Load a generous pool, then sample a smaller subset so that
-		// successive generations see different fillers. Without this,
-		// even a user with 24 fillers + 4 own items would lock onto
-		// the same combinations once the LLM picked a "favourite"
-		// stylistic mix; rotating the visible subset forces it to
-		// reach for fresh items each call.
-		const (
-			fillerLoadCap   = 60 // upper bound we read from Mongo
-			fillerVisibleCap = 18 // bound that actually reaches the LLM
-		)
+		// Mongo's $sample picks a random subset for us at query time
+		// (mootd#72) — so a user with 60 archetype defaults sees a
+		// different 18-item subset on each regenerate without
+		// shuffling 60 rows in Go memory. This is why the cache is
+		// effectively bypassed when fillers are in play: the pool
+		// changes per call by design.
+		const fillerVisibleCap = 18
 		topArche := topArchetypes[0].Name
-		fillers, err := s.archetypeDefaults.LoadFor(ctx, userID, topArche, fillerLoadCap)
+		fillers, err := s.archetypeDefaults.LoadFor(ctx, userID, topArche, fillerVisibleCap)
 		if err != nil {
 			s.logger.Printf("outfit: archetype-defaults load for %s/%s failed: %v (proceeding with user wardrobe only)", userID, topArche, err)
 		} else if len(fillers) > 0 {
-			fillers = sampleFillers(fillers, fillerVisibleCap)
 			items = make([]wardrobe.ClothingItem, 0, len(userItems)+len(fillers))
 			items = append(items, userItems...)
 			items = append(items, fillers...)
-			s.logger.Printf("outfit: pool widened for user %s — own=%d, fillers=%d (archetype=%s, sampled from a larger pool for variety)",
+			s.logger.Printf("outfit: pool widened for user %s — own=%d, fillers=%d (archetype=%s, sampled at DB layer)",
 				userID, len(userItems), len(fillers), topArche)
 		}
 	}
@@ -791,14 +756,37 @@ func (s *Service) ValidateOutfits(outfits []Outfit, items []wardrobe.ClothingIte
 		}
 		seen[key] = true
 
-		// Score this outfit against archetypes.
-		outfitItems := make([]wardrobe.ClothingItem, 0, len(validItems))
+		// Score this outfit against archetypes — but ONLY using items
+		// the user actually owns. Archetype-default fillers (id prefix
+		// "ad_") are stylistic supplements, not the user's choices, so
+		// counting them here would slowly drift the user's archetype
+		// profile toward whatever the curator favours when an outfit
+		// containing fillers is later saved (the moodboard handler
+		// blends ArchetypeScores into users.archetypeProfile via EMA).
+		// See mootd#70 for the failure mode this guards against.
+		outfitOwnedItems := make([]wardrobe.ClothingItem, 0, len(validItems))
 		for _, id := range validItems {
+			if strings.HasPrefix(id, "ad_") {
+				continue
+			}
 			if item, ok := itemByID[id]; ok {
-				outfitItems = append(outfitItems, item)
+				outfitOwnedItems = append(outfitOwnedItems, item)
 			}
 		}
-		o.ArchetypeScores = archetype.ScoreItems(itemsToTraits(outfitItems))
+		// Edge case: outfit composed entirely of fillers (sparse cold-
+		// start wardrobe). Fall back to the full set so we don't ship
+		// an empty score map; the user has zero owned items in this
+		// outfit so any drift it might cause via save is mathematically
+		// proportional to what they see, which is acceptable.
+		scoringItems := outfitOwnedItems
+		if len(scoringItems) == 0 {
+			for _, id := range validItems {
+				if item, ok := itemByID[id]; ok {
+					scoringItems = append(scoringItems, item)
+				}
+			}
+		}
+		o.ArchetypeScores = archetype.ScoreItems(itemsToTraits(scoringItems))
 
 		// Strip layoutRoles entries that reference dropped items.
 		if len(o.LayoutRoles) > 0 {

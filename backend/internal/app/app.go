@@ -369,6 +369,14 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 	}
 	searcher := wardrobe.NewSearcher(a.DetectionAPIBaseURL, a.DetectionAPIKey)
 	wardrobeRepo := wardrobe.NewMongoRepository(a.MongoClient, a.MongoDB)
+	// Best-effort: create the (userId, traits.seededFromDefaultId)
+	// compound index that backs FindBySeededDefault. Skipped silently
+	// when Mongo isn't reachable yet — the production startup checks
+	// already gate that — but logged so operators can spot a stale
+	// connection at boot.
+	if err := wardrobeRepo.EnsureWardrobeIndexes(context.Background()); err != nil {
+		a.Logger.Printf("wardrobe: ensure indexes: %v (continuing — claim flow falls back to slower path if the index is missing)", err)
+	}
 
 	// Archetype defaults (cold-start fix). Best-effort wiring;
 	// when the index ensure fails the /admin/v1/archetype-defaults
@@ -854,12 +862,15 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 		outfitCfg.ArchetypeDefaults = &archetypeDefaultsLoaderAdapter{
 			repo:       archetypeRepo,
 			rejections: rejectionsRepo, // nil-safe; loader degrades to no-filter
+			logger:     a.Logger,
 		}
-		outfitCfg.FillerSeeder = &fillerSeederAdapter{
-			defaults:     archetypeRepo,
-			wardrobeRepo: wardrobeRepo,
-			logger:       a.Logger,
-		}
+		// Note: outfit gen used to also wire a FillerSeeder for the
+		// auto-seed step removed in mootd@2dad4df. Fillers now stay
+		// virtual until the user explicitly claims one via the
+		// /v1/wardrobe/items/from-archetype-default endpoint, so the
+		// outfit service no longer needs a seeder. The same
+		// fillerSeederAdapter is still wired into the wardrobe handler
+		// above for that user-driven path. mootd#74.
 	}
 
 	outfitService := outfit.NewService(a.Logger, outfitCfg)
@@ -1137,34 +1148,32 @@ func (a *wardrobeItemDetectorAdapter) DetectFromBytes(ctx context.Context, image
 type archetypeDefaultsLoaderAdapter struct {
 	repo       admin.ArchetypeDefaultsRepository
 	rejections wardrobe.ArchetypeRejectionsRepository
+	logger     *log.Logger
 }
 
 func (a *archetypeDefaultsLoaderAdapter) LoadFor(ctx context.Context, userID, archetypeName string, cap int) ([]wardrobe.ClothingItem, error) {
-	rows, err := a.repo.List(ctx, archetypeName)
+	// Per-user rejection list — fed straight into the aggregation's
+	// $nin so rejected ids never reach the application. Best-effort:
+	// a Mongo error here degrades to "no rejections" rather than
+	// failing the whole outfit generation — a stale rejection re-
+	// appearing once is kinder than the user seeing zero suggestions
+	// (logged so operators see the regression instead of silently
+	// degrading forever, mootd#72).
+	var excludeIDs []string
+	if a.rejections != nil && userID != "" {
+		ids, rerr := a.rejections.ListIDs(ctx, userID)
+		if rerr != nil {
+			a.logger.Printf("outfit-fillers: load rejections for user %s failed: %v (proceeding with no rejection filter)", userID, rerr)
+		} else {
+			excludeIDs = ids
+		}
+	}
+	rows, err := a.repo.SampleForOutfitGen(ctx, archetypeName, excludeIDs, cap)
 	if err != nil {
 		return nil, err
 	}
-	// Per-user rejection filter. Best-effort: a Mongo error here
-	// degrades to "no rejections" rather than failing the whole
-	// outfit generation — a stale rejection re-appearing once is
-	// kinder than the user seeing zero suggestions.
-	rejected := map[string]bool{}
-	if a.rejections != nil && userID != "" {
-		ids, rerr := a.rejections.ListIDs(ctx, userID)
-		if rerr == nil {
-			for _, id := range ids {
-				rejected[id] = true
-			}
-		}
-	}
 	out := make([]wardrobe.ClothingItem, 0, len(rows))
 	for _, d := range rows {
-		if rejected[d.ID] {
-			continue
-		}
-		if len(out) >= cap {
-			break
-		}
 		traits := map[string]string{}
 		for k, v := range d.Traits {
 			traits[k] = v
@@ -1228,19 +1237,15 @@ func (a *fillerSeederAdapter) SeedForUser(ctx context.Context, userID, defaultID
 	if userID == "" || defaultID == "" {
 		return "", fmt.Errorf("filler seeder: userID and defaultID required (got %q / %q)", userID, defaultID)
 	}
-	// Idempotency: scan the user's wardrobe for an existing seed of
-	// this default. The wardrobe stays small enough (~100 items
-	// upper bound for the cohort we care about) that a linear scan
-	// is fine; an index on (userId, traits.seededFromDefaultId)
-	// would be a future optimisation if profiles say otherwise.
-	existing, err := a.wardrobeRepo.FindByUser(ctx, userID)
-	if err != nil {
-		return "", fmt.Errorf("filler seeder: load user wardrobe: %w", err)
-	}
-	for _, it := range existing {
-		if it.Traits["seededFromDefaultId"] == defaultID {
-			return it.ID, nil
-		}
+	// Idempotency: a previous claim of the same default returns the
+	// existing wardrobe row. Backed by the (userId,
+	// traits.seededFromDefaultId) compound index ensured at boot
+	// (mootd#71) — constant-time vs the previous FindByUser+linear
+	// scan that grew with the user's wardrobe size.
+	if existing, err := a.wardrobeRepo.FindBySeededDefault(ctx, userID, defaultID); err != nil {
+		return "", fmt.Errorf("filler seeder: lookup existing seed: %w", err)
+	} else if existing != nil {
+		return existing.ID, nil
 	}
 	// First time seeing this default for this user — copy it.
 	def, err := a.defaults.Get(ctx, defaultID)

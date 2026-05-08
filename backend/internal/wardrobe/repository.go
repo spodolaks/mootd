@@ -20,6 +20,14 @@ type Repository interface {
 	// FindByUserPaginated returns a page of clothing items for the given user using cursor-based pagination.
 	// The caller should request limit+1 items; if len(result) > limit there is a next page.
 	FindByUserPaginated(ctx context.Context, userID string, limit int, cursor *pagination.Cursor) ([]ClothingItem, error)
+	// FindBySeededDefault looks up a single wardrobe item that the
+	// user previously claimed from an archetype default. Used by the
+	// "I have this IRL" claim flow for idempotency — calling claim
+	// twice for the same defaultId returns the existing wi_<hex>
+	// instead of seeding a duplicate. Backed by the
+	// (userId, traits.seededFromDefaultId) compound index ensured at
+	// boot. Returns (nil, nil) when no row matches.
+	FindBySeededDefault(ctx context.Context, userID, defaultID string) (*ClothingItem, error)
 	// UpdateItem sets traits and optionally label and imageUrl. Empty strings are ignored.
 	UpdateItem(ctx context.Context, id, userID string, traits map[string]string, label, imageURL string) error
 	Delete(ctx context.Context, id, userID string) error
@@ -313,4 +321,51 @@ func (r *MongoRepository) FindByUser(ctx context.Context, userID string) ([]Clot
 		return nil, err
 	}
 	return items, nil
+}
+
+// FindBySeededDefault looks up a wardrobe row this user already
+// claimed from a given archetype default — backs the idempotency
+// guard in the "I have this IRL" claim flow. The (userId, traits.
+// seededFromDefaultId) compound index ensured by EnsureWardrobeIndexes
+// makes this constant-time vs the previous FindByUser+linear scan.
+//
+// Returns (nil, nil) when no row matches; non-nil errors only on
+// real Mongo failures.
+func (r *MongoRepository) FindBySeededDefault(ctx context.Context, userID, defaultID string) (*ClothingItem, error) {
+	if userID == "" || defaultID == "" {
+		return nil, errors.New("wardrobe: FindBySeededDefault requires userID + defaultID")
+	}
+	var item ClothingItem
+	err := r.collection().FindOne(ctx, bson.M{
+		"userId":                       userID,
+		"traits.seededFromDefaultId":   defaultID,
+	}).Decode(&item)
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &item, nil
+}
+
+// EnsureWardrobeIndexes creates the secondary indexes the wardrobe
+// path relies on — best-effort at boot. The compound
+// (userId, traits.seededFromDefaultId) index makes
+// FindBySeededDefault constant-time; before mootd#71 the
+// fillerSeederAdapter scanned the full wardrobe per claim.
+func (r *MongoRepository) EnsureWardrobeIndexes(ctx context.Context) error {
+	_, err := r.collection().Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{
+			{Key: "userId", Value: 1},
+			{Key: "traits.seededFromDefaultId", Value: 1},
+		},
+		Options: options.Index().
+			SetName("uniq_user_seeded_default").
+			SetSparse(true),
+	})
+	if err != nil {
+		return fmt.Errorf("ensure wardrobe seed index: %w", err)
+	}
+	return nil
 }

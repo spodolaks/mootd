@@ -73,6 +73,14 @@ type ArchetypeDefaultsRepository interface {
 	// logs and continues on error. Used by the seed hook so admins
 	// can see which defaults are landing.
 	IncrementSeeded(ctx context.Context, id string, n int) error
+	// SampleForOutfitGen returns up to `sampleSize` random rows for
+	// the given archetype, excluding ids in `excludeIDs`. Used by
+	// the outfit-side filler loader: replaces the previous
+	// "List(archetype) + Go-side filter + Go-side shuffle" with a
+	// single Mongo aggregation ($match → $nin → $sample). Index-
+	// backed via the (archetype, createdAt) compound index already
+	// in place.
+	SampleForOutfitGen(ctx context.Context, archetype string, excludeIDs []string, sampleSize int) ([]ArchetypeDefaultItem, error)
 }
 
 // ArchetypeDefaultItemPatch carries the optional update fields.
@@ -231,6 +239,40 @@ func (r *ArchetypeDefaultsMongoRepository) Delete(ctx context.Context, id string
 func (r *ArchetypeDefaultsMongoRepository) IncrementSeeded(ctx context.Context, id string, n int) error {
 	_, err := r.col().UpdateOne(ctx, bson.M{"_id": id}, bson.M{"$inc": bson.M{"seededCount": n}})
 	return err
+}
+
+// SampleForOutfitGen returns up to `sampleSize` random rows for
+// `archetype`, excluding any ids in `excludeIDs`. Single Mongo round-
+// trip: $match limits the scan to one archetype, $nin folds in the
+// per-user rejection list, $sample asks the server to randomise +
+// truncate. Replaces the previous List + Go-side filter + Go-side
+// shuffle path (mootd#72).
+//
+// `sampleSize <= 0` returns nil with no error (caller should not
+// query in that case); a non-existent archetype legitimately yields
+// an empty slice — the caller logs "no fillers" and proceeds.
+func (r *ArchetypeDefaultsMongoRepository) SampleForOutfitGen(ctx context.Context, arche string, excludeIDs []string, sampleSize int) ([]ArchetypeDefaultItem, error) {
+	if sampleSize <= 0 {
+		return nil, nil
+	}
+	match := bson.M{"archetype": arche}
+	if len(excludeIDs) > 0 {
+		match["_id"] = bson.M{"$nin": excludeIDs}
+	}
+	pipeline := mongo.Pipeline{
+		{{Key: "$match", Value: match}},
+		{{Key: "$sample", Value: bson.M{"size": sampleSize}}},
+	}
+	cursor, err := r.col().Aggregate(ctx, pipeline)
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(ctx)
+	var items []ArchetypeDefaultItem
+	if err := cursor.All(ctx, &items); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 // archetypeNames returns the canonical archetype keys. Only used

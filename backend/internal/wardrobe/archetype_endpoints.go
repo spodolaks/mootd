@@ -139,20 +139,15 @@ func (h *Handler) FromArchetypeDefault(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// User just claimed this item — they own it now, so any prior
-	// rejection is stale. Best-effort: failures here don't roll
-	// back the seed.
+	// User just claimed this item — they own it now, so clear any
+	// prior "not in wardrobe" rejection so the data model stays
+	// consistent (mootd#75). Best-effort: a failure here doesn't
+	// roll back the seed; we log and move on.
 	if h.archetypeRejections != nil {
-		// We don't have a Delete on the rejections repo; the next
-		// generation's filter is keyed on the default id so leaving
-		// a stale rejection would mean the user's CLAIMED item
-		// would still be filtered out — but it would only matter
-		// if the user later asked for a fresh suggestion and this
-		// same default came back through the loader, which can't
-		// happen now because the loader skips it. The wi_<hex>
-		// (in the user's wardrobe) is a different id space, so the
-		// rejection is harmless. Document and move on.
-		_ = h.archetypeRejections
+		if err := h.archetypeRejections.Delete(ctx, userID, defaultID); err != nil {
+			h.logger.Printf("wardrobe: from-archetype-default user=%s clear stale rejection %s: %v (continuing)",
+				userID, defaultID, err)
+		}
 	}
 
 	h.logger.Printf("wardrobe: user %s claimed default %s as %s", userID, defaultID, newID)

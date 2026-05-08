@@ -26,9 +26,6 @@ type ArchetypeRejection struct {
 }
 
 // ArchetypeRejectionsRepository is the persistence contract.
-// Add and List are the only two ops the runtime needs; a Delete
-// would be a future operator-tool addition (e.g. "user changed
-// their mind, undo the rejection").
 type ArchetypeRejectionsRepository interface {
 	// Add is idempotent — re-rejecting the same default is a
 	// no-op rather than a duplicate-key error so the FE can
@@ -37,6 +34,12 @@ type ArchetypeRejectionsRepository interface {
 	// ListIDs returns the set of defaultIds the user has
 	// rejected, suitable for a Mongo $nin filter.
 	ListIDs(ctx context.Context, userID string) ([]string, error)
+	// Delete clears one user's rejection of one default. Called
+	// after a successful "I have this IRL" claim (mootd#75) so
+	// the user's reject list doesn't leak stale entries for
+	// items they now own. Idempotent — deleting a row that isn't
+	// there returns nil.
+	Delete(ctx context.Context, userID, defaultID string) error
 }
 
 // ArchetypeRejectionsMongoRepository is the production
@@ -80,6 +83,17 @@ func (r *ArchetypeRejectionsMongoRepository) Add(ctx context.Context, userID, de
 	if err != nil && mongo.IsDuplicateKeyError(err) {
 		return nil
 	}
+	return err
+}
+
+// Delete removes one user's rejection of one default. Idempotent —
+// "delete a row that isn't there" returns nil. Used by the claim
+// flow to clear stale rejections (mootd#75).
+func (r *ArchetypeRejectionsMongoRepository) Delete(ctx context.Context, userID, defaultID string) error {
+	if userID == "" || defaultID == "" {
+		return errors.New("wardrobe: archetype rejection delete requires userID + defaultID")
+	}
+	_, err := r.col.DeleteOne(ctx, bson.M{"userId": userID, "defaultId": defaultID})
 	return err
 }
 
