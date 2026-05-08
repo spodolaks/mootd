@@ -384,15 +384,31 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 		})
 		// Upload + autodetect: lets curators drop a real photo
 		// into /archetype-defaults and have label/category/traits
-		// prefilled by the same detection pipeline the mobile app
-		// hits. Generation output is intentionally discarded —
+		// prefilled. Generation output is intentionally discarded —
 		// curated defaults always show the operator's upload.
+		//
+		// Detector preference order:
+		//   1. Claude (ANTHROPIC_API_KEY set) — direct vision call,
+		//      ~$0.005, full structured attributes.
+		//   2. Configured wardrobe detector (legacy or singleitem
+		//      orchestrator) — same pipeline the mobile app uses.
+		//      Returns mock data when the orchestrator is in default
+		//      USE_REAL_STAGE1=false mode, so we put Claude first.
 		adminHandler.WithImageStore(&wardrobeImageStoreAdapter{repo: wardrobeRepo})
-		if detector != nil {
+		switch {
+		case a.AnthropicAPIKey != "":
+			adminHandler.WithItemDetector(admin.NewClaudeItemDetector(
+				a.AnthropicBaseURL, a.AnthropicAPIKey, a.AnthropicModel, a.Logger,
+			))
+			a.Logger.Printf("admin: archetype-defaults autodetect using Claude (model=%s)", a.AnthropicModel)
+		case detector != nil:
 			adminHandler.WithItemDetector(&wardrobeItemDetectorAdapter{
 				backend: detector,
 				logger:  a.Logger,
 			})
+			a.Logger.Printf("admin: archetype-defaults autodetect using configured wardrobe detector")
+		default:
+			a.Logger.Printf("admin: archetype-defaults autodetect disabled (no Claude key or wardrobe detector wired)")
 		}
 	} else {
 		a.Logger.Printf("admin: archetype_default_items repo init failed: %v (continuing without /archetype-defaults)", err)
