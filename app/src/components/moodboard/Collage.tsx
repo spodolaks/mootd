@@ -243,13 +243,13 @@ export type ZonePos = { l: `${number}%`; t: `${number}%`; w: `${number}%`; h: `$
 // All items must stay within 0-100% to avoid overflowing the panel edges.
 export const FIVE_ZONE_POSITIONS: Record<ItemZone, [ZonePos, ZonePos, ZonePos]> = {
   outerwear: [
-    { l: '36%', t: '5%',  w: '55%', h: '42%' },
+    { l: '36%', t: '7%',  w: '55%', h: '42%' },
     { l: '30%', t: '7%',  w: '52%', h: '40%' },
     { l: '26%', t: '9%',  w: '48%', h: '38%' },
   ],
   tops: [
-    { l: '14%', t: '6%',  w: '52%', h: '40%' },
-    { l: '10%', t: '5%',  w: '50%', h: '38%' },
+    { l: '14%', t: '7%',  w: '52%', h: '40%' },
+    { l: '10%', t: '7%',  w: '50%', h: '38%' },
     { l: '8%',  t: '8%',  w: '46%', h: '36%' },
   ],
   bottoms: [
@@ -258,14 +258,14 @@ export const FIVE_ZONE_POSITIONS: Record<ItemZone, [ZonePos, ZonePos, ZonePos]> 
     { l: '12%', t: '42%', w: '44%', h: '40%' },
   ],
   shoes: [
-    { l: '5%',  t: '72%', w: '28%', h: '22%' },
-    { l: '5%',  t: '76%', w: '26%', h: '18%' },
-    { l: '5%',  t: '78%', w: '24%', h: '16%' },
+    { l: '7%',  t: '72%', w: '28%', h: '22%' },
+    { l: '7%',  t: '76%', w: '26%', h: '18%' },
+    { l: '7%',  t: '78%', w: '24%', h: '16%' },
   ],
   accessories: [
-    { l: '5%',  t: '5%',  w: '18%', h: '16%' },
-    { l: '5%',  t: '24%', w: '16%', h: '14%' },
-    { l: '5%',  t: '42%', w: '14%', h: '12%' },
+    { l: '7%',  t: '7%',  w: '18%', h: '16%' },
+    { l: '7%',  t: '24%', w: '16%', h: '14%' },
+    { l: '7%',  t: '42%', w: '14%', h: '12%' },
   ],
 };
 
@@ -280,13 +280,13 @@ export const FIVE_ZONE_POSITIONS: Record<ItemZone, [ZonePos, ZonePos, ZonePos]> 
 export const NO_OUTER_POSITIONS: Record<ItemZone, [ZonePos, ZonePos, ZonePos]> = {
   // unused in this layout but kept to satisfy the Record type
   outerwear: [
-    { l: '30%', t: '5%',  w: '50%', h: '40%' },
+    { l: '30%', t: '7%',  w: '50%', h: '40%' },
     { l: '28%', t: '7%',  w: '48%', h: '38%' },
     { l: '26%', t: '9%',  w: '46%', h: '36%' },
   ],
   tops: [
-    { l: '22%', t: '5%',  w: '56%', h: '44%' },
-    { l: '20%', t: '6%',  w: '52%', h: '42%' },
+    { l: '22%', t: '7%',  w: '56%', h: '44%' },
+    { l: '20%', t: '7%',  w: '52%', h: '42%' },
     { l: '18%', t: '8%',  w: '48%', h: '40%' },
   ],
   bottoms: [
@@ -300,9 +300,9 @@ export const NO_OUTER_POSITIONS: Record<ItemZone, [ZonePos, ZonePos, ZonePos]> =
     { l: '68%', t: '78%', w: '26%', h: '16%' },
   ],
   accessories: [
-    { l: '4%',  t: '6%',  w: '20%', h: '18%' },
-    { l: '4%',  t: '26%', w: '18%', h: '16%' },
-    { l: '4%',  t: '44%', w: '16%', h: '14%' },
+    { l: '7%',  t: '7%',  w: '20%', h: '18%' },
+    { l: '7%',  t: '26%', w: '18%', h: '16%' },
+    { l: '7%',  t: '44%', w: '16%', h: '14%' },
   ],
 };
 
@@ -310,14 +310,14 @@ export const NO_OUTER_POSITIONS: Record<ItemZone, [ZonePos, ZonePos, ZonePos]> =
 // right, top+bottom centered, shoes widen slightly to fill the lower edge.
 export const NO_ACCESSORY_POSITIONS: Record<ItemZone, [ZonePos, ZonePos, ZonePos]> = {
   outerwear: [
-    { l: '40%', t: '5%',  w: '55%', h: '42%' },
+    { l: '40%', t: '7%',  w: '55%', h: '42%' },
     { l: '34%', t: '7%',  w: '52%', h: '40%' },
     { l: '30%', t: '9%',  w: '48%', h: '38%' },
   ],
   tops: [
-    { l: '8%',  t: '6%',  w: '52%', h: '40%' },
-    { l: '6%',  t: '5%',  w: '50%', h: '38%' },
-    { l: '4%',  t: '8%',  w: '46%', h: '36%' },
+    { l: '8%',  t: '7%',  w: '52%', h: '40%' },
+    { l: '7%',  t: '7%',  w: '50%', h: '38%' },
+    { l: '7%',  t: '8%',  w: '46%', h: '36%' },
   ],
   bottoms: [
     { l: '18%', t: '38%', w: '50%', h: '44%' },
@@ -330,9 +330,9 @@ export const NO_ACCESSORY_POSITIONS: Record<ItemZone, [ZonePos, ZonePos, ZonePos
     { l: '10%', t: '78%', w: '28%', h: '16%' },
   ],
   accessories: [
-    { l: '5%',  t: '5%',  w: '18%', h: '16%' },
-    { l: '5%',  t: '24%', w: '16%', h: '14%' },
-    { l: '5%',  t: '42%', w: '14%', h: '12%' },
+    { l: '7%',  t: '7%',  w: '18%', h: '16%' },
+    { l: '7%',  t: '24%', w: '16%', h: '14%' },
+    { l: '7%',  t: '42%', w: '14%', h: '12%' },
   ],
 };
 
@@ -340,13 +340,13 @@ export const NO_ACCESSORY_POSITIONS: Record<ItemZone, [ZonePos, ZonePos, ZonePos
 // stacks centered with generous spacing so the panel doesn't look empty.
 export const MINIMAL_POSITIONS: Record<ItemZone, [ZonePos, ZonePos, ZonePos]> = {
   outerwear: [
-    { l: '30%', t: '5%',  w: '50%', h: '40%' },
+    { l: '30%', t: '7%',  w: '50%', h: '40%' },
     { l: '28%', t: '7%',  w: '48%', h: '38%' },
     { l: '26%', t: '9%',  w: '46%', h: '36%' },
   ],
   tops: [
-    { l: '20%', t: '4%',  w: '60%', h: '46%' },
-    { l: '18%', t: '6%',  w: '56%', h: '44%' },
+    { l: '20%', t: '7%',  w: '60%', h: '46%' },
+    { l: '18%', t: '7%',  w: '56%', h: '44%' },
     { l: '16%', t: '8%',  w: '52%', h: '42%' },
   ],
   bottoms: [
@@ -360,9 +360,9 @@ export const MINIMAL_POSITIONS: Record<ItemZone, [ZonePos, ZonePos, ZonePos]> = 
     { l: '38%', t: '78%', w: '28%', h: '18%' },
   ],
   accessories: [
-    { l: '5%',  t: '5%',  w: '18%', h: '16%' },
-    { l: '5%',  t: '24%', w: '16%', h: '14%' },
-    { l: '5%',  t: '42%', w: '14%', h: '12%' },
+    { l: '7%',  t: '7%',  w: '18%', h: '16%' },
+    { l: '7%',  t: '24%', w: '16%', h: '14%' },
+    { l: '7%',  t: '42%', w: '14%', h: '12%' },
   ],
 };
 
@@ -386,9 +386,9 @@ export const TRIANGULAR_POSITIONS: Record<ItemZone, [ZonePos, ZonePos, ZonePos]>
     { l: '30%', t: '17%', w: '48%', h: '38%' },
   ],
   tops: [
-    { l: '6%',  t: '28%', w: '48%', h: '38%' },
-    { l: '4%',  t: '30%', w: '46%', h: '36%' },
-    { l: '2%',  t: '32%', w: '42%', h: '34%' },
+    { l: '7%',  t: '28%', w: '48%', h: '38%' },
+    { l: '7%',  t: '30%', w: '46%', h: '36%' },
+    { l: '7%',  t: '32%', w: '42%', h: '34%' },
   ],
   bottoms: [
     { l: '28%', t: '54%', w: '50%', h: '40%' },
@@ -396,9 +396,9 @@ export const TRIANGULAR_POSITIONS: Record<ItemZone, [ZonePos, ZonePos, ZonePos]>
     { l: '24%', t: '58%', w: '42%', h: '36%' },
   ],
   shoes: [
-    { l: '6%',  t: '78%', w: '28%', h: '18%' },
-    { l: '6%',  t: '80%', w: '26%', h: '16%' },
-    { l: '6%',  t: '82%', w: '24%', h: '14%' },
+    { l: '7%',  t: '78%', w: '28%', h: '18%' },
+    { l: '7%',  t: '80%', w: '26%', h: '16%' },
+    { l: '7%',  t: '82%', w: '24%', h: '14%' },
   ],
   // P1-G: accessories clustered adjacent to the typical outerwear anchor
   // (top-right third) rather than isolated in a corner. When the outfit's
@@ -444,9 +444,9 @@ export const TRIANGULAR_MIRRORED_POSITIONS: Record<ItemZone, [ZonePos, ZonePos, 
     { l: '70%', t: '82%', w: '24%', h: '14%' },
   ],
   accessories: [
-    { l: '6%',  t: '58%', w: '22%', h: '18%' },
-    { l: '6%',  t: '62%', w: '20%', h: '16%' },
-    { l: '6%',  t: '66%', w: '18%', h: '14%' },
+    { l: '7%',  t: '58%', w: '22%', h: '18%' },
+    { l: '7%',  t: '62%', w: '20%', h: '16%' },
+    { l: '7%',  t: '66%', w: '18%', h: '14%' },
   ],
 };
 
@@ -500,7 +500,7 @@ export const RENDER_ORDER: ItemZone[] = ['outerwear', 'bottoms', 'tops', 'shoes'
 // supporting not competing, consistent 8–10% safe margin and 2–3% gutter.
 
 // Safe margin inside the canvas — no item's bounding box should extend into
-// the outer SAFE_MARGIN band. Currently enforced by the panel inset (3.5%)
+// the outer SAFE_MARGIN band. Currently enforced by the panel inset (7%)
 // plus per-zone l/t defaults; this constant is the reference for future
 // layout work and for the hero-thirds clamp below.
 export const SAFE_MARGIN = 0.09;
@@ -597,18 +597,30 @@ export const scalePos = (
 
   if (role === 'hero') {
     // Re-center on the zone's thirds intersection. Clamp within the
-    // panel bounds (3.5% – 96.5%) so the item doesn't overflow the
-    // textured surface onto the visible background strip.
+    // panel bounds (7% – 93%) so the hero — the most visually
+    // prominent item — stays fully on the textured surface and
+    // doesn't overflow onto the visible background matte. Keep this
+    // range in sync with the collagePanelWrapper inset below.
     const { cx, cy } = HERO_THIRDS_CENTER[zone];
-    const l = Math.max(3.5, Math.min(96.5 - w, cx - w / 2));
-    const t = Math.max(3.5, Math.min(96.5 - h, cy - h / 2));
+    const l = Math.max(7, Math.min(93 - w, cx - w / 2));
+    const t = Math.max(7, Math.min(93 - h, cy - h / 2));
     return { l: `${l}%`, t: `${t}%`, w: `${w}%`, h: `${h}%` };
   }
 
-  // Support + accent: keep the zone's default anchor, just scale w/h.
+  // Support + accent: keep the zone's default anchor, just scale w/h —
+  // but clamp into the same 7%–93% panel safe band the hero branch
+  // uses. The scale factors (ZONE_WEIGHT × VISUAL_WEIGHT_SCALE × REFLOW)
+  // can grow an item enough that its right/bottom edge would otherwise
+  // overflow onto the visible background matte; the clamp keeps every
+  // garment on the textured surface. Mirrors the rule baked into the
+  // accessory-cluster pass + hero re-center.
+  const baseL = parsePct(basePos.l);
+  const baseT = parsePct(basePos.t);
+  const l = Math.max(7, Math.min(93 - w, baseL));
+  const t = Math.max(7, Math.min(93 - h, baseT));
   return {
-    l: basePos.l,
-    t: basePos.t,
+    l: `${l}%`,
+    t: `${t}%`,
     w: `${w}%`,
     h: `${h}%`,
   };
@@ -756,10 +768,11 @@ export const Collage: React.FC<CollageProps> = ({ itemIds, itemMap, snapshots, l
         const verticalOffset = accessoryIdx * (accH * 0.7 + gutterPct);
         const targetL = anchorX;
         const targetT = anchorY + verticalOffset;
-        // Clamp inside the panel's 3.5–96.5% safe band so the cluster
-        // doesn't overflow onto the background strip.
-        const l = Math.max(3.5, Math.min(96.5 - accW, targetL));
-        const t = Math.max(3.5, Math.min(96.5 - accH, targetT));
+        // Clamp inside the panel's 7–93% safe band so the cluster
+        // doesn't overflow onto the background matte. Range matches
+        // collagePanelWrapper's inset.
+        const l = Math.max(7, Math.min(93 - accW, targetL));
+        const t = Math.max(7, Math.min(93 - accH, targetT));
         p.pos = {
           l: `${l}%`,
           t: `${t}%`,
@@ -820,8 +833,8 @@ export const Collage: React.FC<CollageProps> = ({ itemIds, itemMap, snapshots, l
 
   return (
     <View style={[fill ? styles.collageFill : styles.collage, { backgroundColor: collageBg }]}>
-      {/* Environment behind the panel. Fully opaque; the visible strip
-          around the panel is the 3.5% inset applied below. The backend's
+      {/* Environment behind the panel. Fully opaque; the visible matte
+          around the panel is the 7% inset applied below. The backend's
           LLM-chosen background URL takes priority; falls back to a bundled
           texture for offline dev or cache entries predating the feature. */}
       <Image
@@ -978,12 +991,18 @@ const styles = StyleSheet.create({
   // Positioning + shadow host for the panel. Kept separate from the image so
   // the image can carry borderRadius (rounded corners) while the wrapper
   // casts an unclipped shadow onto the background.
+  //
+  // 7% inset on each side leaves an 86% × 86% panel inside the frame — a
+  // visible 14% background "matte" around the flat-lay. Items whose zone-
+  // table position sits near the frame edges (e.g. shoes/accessories at
+  // l≈5–6%) intentionally bleed onto that strip; hero items stay clamped
+  // inside the panel via the 7%/93% bounds enforced in scalePos.
   collagePanelWrapper: {
     position: 'absolute',
-    left: '3.5%',
-    top: '3.5%',
-    width: '93%',
-    height: '93%',
+    left: '7%',
+    top: '7%',
+    width: '86%',
+    height: '86%',
     borderRadius: 12,
   },
   // Panel texture itself — fills its shadow wrapper.
