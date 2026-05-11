@@ -68,11 +68,20 @@ services:
       # Set DETECTION_BACKEND=legacy to fall back to the on-host
       # service at DETECTION_API_BASE_URL.
       # The host.docker.internal default targets a singleitem
-      # orchestrator running on the host (e.g. `npm run dev`
-      # outside Docker on port 8080). Override via shell export
+      # orchestrator running on the host (e.g. `make run`
+      # outside Docker on port 8090). Port 8090 is the local-dev
+      # convention because :8080 is commonly held by other dev
+      # containers (sf-sql-sync etc.). Override via shell export
       # for production / k8s deployments.
       DETECTION_BACKEND: "${DETECTION_BACKEND:-singleitem}"
-      SINGLEITEM_BASE_URL: "${SINGLEITEM_BASE_URL:-http://host.docker.internal:8080}"
+      SINGLEITEM_BASE_URL: "${SINGLEITEM_BASE_URL:-http://host.docker.internal:8090}"
+      # Authorisation forwarded to the orchestrator's /v1/admin/*
+      # endpoints (HITL queue, single-item moderation). MUST match
+      # one of the orchestrator's SID_ADMIN_API_KEYS values, or the
+      # admin UI gets 401s while the user-side detection (public
+      # /v1/single-item/process) still works without it. Pull the
+      # value from your singleItemDetection/.env file's
+      # SID_ADMIN_API_KEYS (comma-separated; first one is fine).
       SINGLEITEM_API_KEY: "${SINGLEITEM_API_KEY:-}"
       # OLLAMA_BASE_URL defaults to http://host.docker.internal:11434
       # OLLAMA_MODEL defaults to qwen3:14b
