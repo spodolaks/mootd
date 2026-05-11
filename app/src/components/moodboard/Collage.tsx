@@ -513,12 +513,16 @@ export const ITEM_GUTTER = 0.025;
 // small anchor boost (editorial convention). Shoes are explicitly reduced —
 // rendering footwear at realistic proportion is the #1 amateur flat-lay
 // mistake; pros render shoes 60–75% of what proportional math gives you.
+// Bottoms get the same treatment: pants/skirts are inherently the tallest
+// garment in the frame, so without a downward weight they balloon when
+// the LLM marks them statement (1.35×) and crowd the panel. 0.88 keeps
+// them clearly the largest single item without consuming the canvas.
 // Accessories are slightly tucked (the cluster should read as supporting,
 // not competing).
 export const ZONE_WEIGHT: Record<ItemZone, number> = {
   outerwear:   1.05,
   tops:        1.00,
-  bottoms:     1.00,
+  bottoms:     0.88,
   shoes:       0.85,
   accessories: 0.92,
 };
