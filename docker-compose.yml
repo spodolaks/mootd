@@ -83,6 +83,14 @@ services:
       # value from your singleItemDetection/.env file's
       # SID_ADMIN_API_KEYS (comma-separated; first one is fine).
       SINGLEITEM_API_KEY: "${SINGLEITEM_API_KEY:-}"
+      # Flatlay backend (DETECTION_BACKEND=flatlay). Synchronous
+      # third-party detect+generate+bg-remove service. Both vars
+      # required when the backend is selected; either empty →
+      # boot logs a warning and falls back to legacy. Format:
+      #   FLATLAY_BASE_URL=http://35.222.97.101:8001
+      #   FLATLAY_API_KEY=<token shared in 1Password / secrets store>
+      FLATLAY_BASE_URL: "${FLATLAY_BASE_URL:-}"
+      FLATLAY_API_KEY: "${FLATLAY_API_KEY:-}"
       # OLLAMA_BASE_URL defaults to http://host.docker.internal:11434
       # OLLAMA_MODEL defaults to qwen3:14b
       # Outfit generator. Set OUTFIT_PROVIDER=claude to use Anthropic Claude

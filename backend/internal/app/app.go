@@ -370,6 +370,21 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 			a.Logger.Printf("detection backend: singleitem orchestrator at %s", base)
 			detector = wardrobe.NewSingleItemDetector(base, os.Getenv("SINGLEITEM_API_KEY"), a.Logger)
 		}
+	case "flatlay":
+		// Synchronous third-party flat-lay service: one
+		// multipart POST → blocking ~19s response carrying a
+		// full description + base64-encoded bg-removed PNG. The
+		// mobile app's async /v1/wardrobe/detect-jobs path keeps
+		// the UX consistent across backends.
+		base := os.Getenv("FLATLAY_BASE_URL")
+		key := os.Getenv("FLATLAY_API_KEY")
+		if base == "" || key == "" {
+			a.Logger.Print("WARNING: DETECTION_BACKEND=flatlay but FLATLAY_BASE_URL or FLATLAY_API_KEY is empty — falling back to legacy")
+			detector = wardrobe.NewDetector(a.DetectionAPIBaseURL, a.DetectionAPIKey, a.Logger)
+		} else {
+			a.Logger.Printf("detection backend: flatlay service at %s", base)
+			detector = wardrobe.NewFlatlayDetector(base, key, a.Logger)
+		}
 	case "legacy":
 		a.Logger.Printf("detection backend: legacy (%s)", a.DetectionAPIBaseURL)
 		detector = wardrobe.NewDetector(a.DetectionAPIBaseURL, a.DetectionAPIKey, a.Logger)
