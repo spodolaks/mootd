@@ -13,6 +13,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -107,7 +108,27 @@ func (d *SingleItemDetector) Detect(
 	}
 
 	endedAt := time.Now().UTC()
-	jobItems := []jobItem{itemToJobItem(item)}
+	ji := itemToJobItem(item)
+
+	// Hydrate the image bytes by fetching the orchestrator's
+	// GridFS-backed blob endpoint. Without this step the
+	// jobItem only carries an opaque "gridfs://sid_<bucket>/<id>"
+	// URL that the wardrobe handler can't HTTP-download — and the
+	// item lands in mootd's DB with an empty imageUrl, which the
+	// mobile app renders as a blank tile. Best-effort: a fetch
+	// failure logs + leaves ImageData empty (legacy behaviour),
+	// so the bug is regression-bound, not a hard 500.
+	if data, err := d.fetchBlobBytes(ctx, ji.ImageURL); err != nil {
+		d.logger.Printf("singleitem: blob fetch for %s failed: %v (item will land with empty imageUrl)", ji.ImageURL, err)
+	} else {
+		ji.ImageData = data
+		// Clear ImageURL so the handler's branch picks ImageData
+		// rather than re-trying a download against the gridfs://
+		// scheme.
+		ji.ImageURL = ""
+	}
+
+	jobItems := []jobItem{ji}
 	runData := &DetectionRunData{
 		StartedAt: startedAt,
 		EndedAt:   endedAt,
@@ -120,11 +141,51 @@ func (d *SingleItemDetector) Detect(
 		TotalCostUSD: pipelineCostFromItem(item),
 	}
 
-	d.logger.Printf("singleitem: user=%s run=%s sid_request_id=%s item=%s/%s cost=$%.4f latency=%dms",
+	d.logger.Printf("singleitem: user=%s run=%s sid_request_id=%s item=%s/%s cost=$%.4f latency=%dms bytes=%d",
 		userID, runID, requestID, item.Category, item.Label,
-		runData.TotalCostUSD, endedAt.Sub(startedAt).Milliseconds())
+		runData.TotalCostUSD, endedAt.Sub(startedAt).Milliseconds(), len(ji.ImageData))
 
 	return jobItems, runData, nil
+}
+
+// fetchBlobBytes translates an orchestrator-internal
+// "gridfs://sid_<bucket>/<id>" URL into a real HTTP call against
+// the orchestrator's GET /v1/single-item/blob/{bucket}/{id}
+// route and returns the raw bytes. Empty / non-gridfs URLs
+// surface a friendly error so callers can degrade rather than
+// panic. Required because the mootd wardrobe handler expects
+// either inline ImageData or a fetchable HTTP URL — the
+// orchestrator's gridfs:// scheme satisfies neither.
+func (d *SingleItemDetector) fetchBlobBytes(ctx context.Context, gridfsURL string) ([]byte, error) {
+	const prefix = "gridfs://sid_"
+	if !strings.HasPrefix(gridfsURL, prefix) {
+		return nil, fmt.Errorf("expected gridfs://sid_<bucket>/<id> url, got %q", gridfsURL)
+	}
+	rest := gridfsURL[len(prefix):]
+	slash := strings.IndexByte(rest, '/')
+	if slash <= 0 || slash == len(rest)-1 {
+		return nil, fmt.Errorf("malformed gridfs url %q (need bucket/id after sid_)", gridfsURL)
+	}
+	bucket, blobID := rest[:slash], rest[slash+1:]
+
+	url := d.baseURL + "/v1/single-item/blob/" + bucket + "/" + blobID
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	if d.apiKey != "" {
+		req.Header.Set("X-API-Key", d.apiKey)
+	}
+	resp, err := d.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("blob GET: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return nil, fmt.Errorf("blob GET %s returned %d: %s", url, resp.StatusCode, string(body))
+	}
+	return io.ReadAll(resp.Body)
 }
 
 // submitProcess fires POST /v1/single-item/process with the
