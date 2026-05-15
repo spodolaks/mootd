@@ -89,9 +89,10 @@ func TestValidateToken_Expired(t *testing.T) {
 	}
 }
 
-// TestValidateToken_WrongIssuer documents the contract: auth should treat a
-// valid-but-foreign token as unusable. ValidateToken parses it, but callers
-// must check Issuer == "mootd" — this test locks in that expectation.
+// TestValidateToken_WrongIssuer locks in the contract: a token signed with the
+// right secret but bearing a foreign `iss` claim is rejected. Defends against
+// accidental secret reuse with services that mint tokens under a different
+// issuer.
 func TestValidateToken_WrongIssuer(t *testing.T) {
 	now := time.Now().UTC()
 	foreign := jwt.NewWithClaims(jwt.SigningMethodHS256, jwtutil.Claims{
@@ -108,12 +109,8 @@ func TestValidateToken_WrongIssuer(t *testing.T) {
 		t.Fatalf("sign foreign token: %v", err)
 	}
 
-	claims, err := jwtutil.ValidateToken(signed, testSecret)
-	if err != nil {
-		t.Fatalf("ValidateToken returned error on valid signature: %v", err)
-	}
-	if claims.Issuer == "mootd" {
-		t.Errorf("Issuer unexpectedly %q — callers would accept a foreign token", claims.Issuer)
+	if _, err := jwtutil.ValidateToken(signed, testSecret); err == nil {
+		t.Fatal("expected ValidateToken to reject foreign issuer, got nil")
 	}
 }
 

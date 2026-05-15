@@ -41,6 +41,8 @@ rsync -az --delete \
     --exclude '.claude/' \
     --exclude 'app/' \
     --exclude '*.log' \
+    --exclude '.env' \
+    --exclude '.env.*' \
     ./ "$HOST:$REMOTE_DIR/"
 
 echo "==> Building + restarting backend stack"
