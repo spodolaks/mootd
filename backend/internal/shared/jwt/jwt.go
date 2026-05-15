@@ -11,6 +11,11 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
+// Issuer is the value placed in the `iss` claim of every user-side JWT minted
+// by GenerateToken; ValidateToken rejects tokens with any other issuer. Mirrors
+// the admin-side issuer separation (see internal/admin/jwt.go).
+const Issuer = "mootd"
+
 // Claims holds the payload embedded in a mootd JWT.
 type Claims struct {
 	Email string `json:"email"`
@@ -26,7 +31,7 @@ func GenerateToken(userID, email, secret string, expiry time.Duration) (string, 
 			Subject:   userID,
 			IssuedAt:  jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(now.Add(expiry)),
-			Issuer:    "mootd",
+			Issuer:    Issuer,
 		},
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
@@ -64,6 +69,9 @@ func ValidateToken(tokenString, secret string) (*Claims, error) {
 	claims, ok := token.Claims.(*Claims)
 	if !ok || !token.Valid {
 		return nil, fmt.Errorf("invalid token claims")
+	}
+	if claims.Issuer != Issuer {
+		return nil, fmt.Errorf("invalid token issuer: %q", claims.Issuer)
 	}
 	return claims, nil
 }
