@@ -23,7 +23,25 @@ api.spodolaks.id.lv {
     encode gzip
 
     log {
-        output file /var/log/caddy/access.log
+        output file /var/log/caddy/api.log
+        format json
+    }
+}
+
+admin.spodolaks.id.lv {
+    # mootd-admin (Next.js) runs in the same compose stack as the backend,
+    # built from ../mootd-admin/apps/admin/Dockerfile and bound to
+    # 127.0.0.1:3001. Caddy is the only public ingress.
+    reverse_proxy 127.0.0.1:3001
+
+    # Same client-IP forwarding as the api block so the admin's own
+    # request-log middleware sees real users behind Cloudflare.
+    request_header X-Forwarded-For {http.request.header.CF-Connecting-IP}
+
+    encode gzip
+
+    log {
+        output file /var/log/caddy/admin.log
         format json
     }
 }

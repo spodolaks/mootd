@@ -288,49 +288,45 @@ Save the password somewhere safe — it's the only way back in.
 
 ## 6 · Stage C — mootd-admin (admin.spodolaks.id.lv)
 
-> ⚠️ **Status:** the admin doesn't have a production Dockerfile yet —
-> it's currently only run on developer machines via `npm run dev`.
-> The minimum bring-up below is what to add when you deploy it.
-> Track this in [mootd-admin#TODO](https://github.com/spodolaks/mootd-admin).
+The admin is a Next.js standalone build packaged as a sibling
+Docker service in mootd's compose stack — no separate `docker run`
+needed. The Dockerfile (`mootd-admin/apps/admin/Dockerfile`) and
+the `admin:` entry in `docker-compose.production.yml` are already
+in the repos; the production overlay's build context points at
+the sibling repo checkout, so the layout from §3
+(`/home/mootd/src/mootd/` + `/home/mootd/src/mootd-admin/`) is
+what makes the relative `../mootd-admin/apps/admin/` path resolve.
 
-### Build artefacts you need
-
-Create `mootd-admin/apps/admin/Dockerfile` (Next.js standalone build):
-
-```dockerfile
-# build stage
-FROM node:20-alpine AS build
-WORKDIR /app
-COPY . .
-RUN npm ci && npm --prefix apps/admin run build
-
-# runtime
-FROM node:20-alpine AS runtime
-WORKDIR /app
-COPY --from=build /app/apps/admin/.next/standalone ./
-COPY --from=build /app/apps/admin/.next/static ./apps/admin/.next/static
-COPY --from=build /app/apps/admin/public ./apps/admin/public
-ENV PORT=3001 HOSTNAME=0.0.0.0
-EXPOSE 3001
-CMD ["node", "apps/admin/server.js"]
-```
-
-Build + run alongside the backend stack:
+Bring up the admin alongside the backend:
 
 ```bash
-cd /home/mootd/src/mootd-admin
-docker build -t mootd-admin:latest -f apps/admin/Dockerfile .
-
-docker run -d --name mootd-admin \
-  -p 127.0.0.1:3001:3001 \
-  -e NEXT_PUBLIC_ADMIN_API_URL=https://api.spodolaks.id.lv \
-  --restart unless-stopped \
-  mootd-admin:latest
+cd /home/mootd/src/mootd
+docker compose -f docker-compose.yml -f docker-compose.production.yml \
+  up -d --build admin
+docker logs -f mootd-admin
+curl -fsS http://127.0.0.1:3001 -o /dev/null -w "%{http_code}\n"     # 200
 ```
 
-(Or merge the admin into mootd's `docker-compose.production.yml` as
-a `admin:` service — same pattern as the backend, bound to
-`127.0.0.1:3001`.)
+The image bakes `NEXT_PUBLIC_ADMIN_API_URL` at BUILD time (Next.js
+inlines `NEXT_PUBLIC_*` values into the client bundle). The
+compose `build.args` reads it from `.env` with a sensible default:
+
+```bash
+# mootd/.env
+NEXT_PUBLIC_ADMIN_API_URL=https://api.spodolaks.id.lv
+ADMIN_BUILD_SHA=$(git -C ../mootd-admin rev-parse --short HEAD)   # optional; shows in the admin top bar
+```
+
+Changing the API origin therefore requires a fresh build:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.production.yml \
+  up -d --build --force-recreate admin
+```
+
+Local-dev mode (`cd ~/src/mootd-admin && npm --prefix apps/admin run
+dev`) is unaffected — the Dockerfile is only consulted by the
+production compose overlay.
 
 ---
 

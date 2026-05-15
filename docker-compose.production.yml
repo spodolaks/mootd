@@ -7,8 +7,14 @@
 #   - Backend binds to 127.0.0.1 only — reachable through Caddy, nothing else.
 #   - MongoDB + Redis drop their host ports entirely. They stay on the compose
 #     network; nothing outside the compose stack ever touches them.
-#   - Environment is sourced from .env on the server (see deploy/README.md for
-#     the expected variables).
+#   - The mootd-admin Next.js panel is built + run as a sibling service,
+#     also bound to 127.0.0.1 so Caddy is the only public ingress. The
+#     compose build context points at the sibling repo checkout, so the
+#     server layout must look like:
+#       /home/mootd/src/mootd/         ← this repo
+#       /home/mootd/src/mootd-admin/   ← admin repo
+#   - Environment is sourced from .env on the server (see deploy/README.md
+#     for the expected variables).
 #
 # The `!override` YAML tag replaces the base list instead of merging; this
 # requires Docker Compose v2.24+ (Jan 2024), which is standard on any recent
@@ -32,3 +38,27 @@ services:
 
   redis:
     ports: !override []
+
+  # mootd-admin Next.js panel. Image is built locally on the box from the
+  # sibling mootd-admin/ checkout — no registry round-trip needed. The
+  # build-args bake the API origin + a short git SHA into the client
+  # bundle (NEXT_PUBLIC_* values are compile-time, not runtime).
+  admin:
+    build:
+      context: ../mootd-admin/apps/admin
+      dockerfile: Dockerfile
+      args:
+        # api.spodolaks.id.lv is the public Caddy hostname for the
+        # backend — see deploy/Caddyfile. Override via .env if your
+        # hostname differs.
+        NEXT_PUBLIC_ADMIN_API_URL: "${NEXT_PUBLIC_ADMIN_API_URL:-https://api.spodolaks.id.lv}"
+        NEXT_PUBLIC_BUILD_SHA: "${ADMIN_BUILD_SHA:-prod}"
+    image: mootd-admin:latest
+    container_name: mootd-admin
+    restart: unless-stopped
+    # Loopback-only — Caddy reverse-proxies admin.spodolaks.id.lv to
+    # 127.0.0.1:3001 (see deploy/Caddyfile's admin block).
+    ports:
+      - "127.0.0.1:3001:3001"
+    depends_on:
+      - backend
