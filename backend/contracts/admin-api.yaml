@@ -2439,6 +2439,14 @@ components:
         category:
           type: string
           example: outerwear
+        gender:
+          type: string
+          enum: [male, female, unisex]
+          description: |
+            Which users this default is mixed into moodboards for.
+            A male user receives male + unisex defaults; a female
+            user receives female + unisex. Defaults to "unisex"
+            when omitted on create.
         label:
           type: string
           example: Black leather biker jacket
@@ -2498,6 +2506,9 @@ components:
       properties:
         category:
           type: string
+        gender:
+          type: string
+          enum: [male, female, unisex]
         label:
           type: string
         description:

@@ -4,6 +4,7 @@ import { WelcomeScreen } from '@/src/screens';
 import { useAuthStore } from '@/src/store';
 import { useGoogleAuth } from '@/src/hooks';
 import { wardrobeRepository } from '@/src/data/repositories';
+import { apiClient } from '@/src/data/api/client';
 
 export default function Index() {
   const router = useRouter();
@@ -12,18 +13,38 @@ export default function Index() {
   const isLoading = useAuthStore((state) => state.isLoading);
   const error = useAuthStore((state) => state.error);
 
+  /**
+   * Route the signed-in user onward. A user with no profile gender is
+   * sent through the onboarding gender step first — gender drives
+   * which archetype-default fillers their moodboards mix in — then
+   * the usual empty-wardrobe → build-wardrobe split.
+   */
+  const routeAfterAuth = useCallback(async () => {
+    try {
+      const profile = await apiClient.get<{ gender?: string }>('/v1/user/profile');
+      if (!profile.gender) {
+        router.replace('/onboarding-gender');
+        return;
+      }
+    } catch {
+      // Profile fetch failed (offline, or a mock user with no stored
+      // doc) — skip the gender gate rather than block the user.
+    }
+    try {
+      const { items } = await wardrobeRepository.getItems();
+      router.replace(items.length === 0 ? '/build-wardrobe' : '/(main)/moodboard');
+    } catch {
+      // If the wardrobe check fails, proceed to the main screen.
+      router.replace('/(main)/moodboard');
+    }
+  }, [router]);
+
   // If the session was already restored (e.g. browser refresh with valid
   // localStorage token), skip the login screen and go straight to the app.
   useEffect(() => {
     if (!isAuthenticated) return;
-    wardrobeRepository.getItems()
-      .then(({ items }) => {
-        router.replace(items.length === 0 ? '/build-wardrobe' : '/(main)/moodboard');
-      })
-      .catch(() => {
-        router.replace('/(main)/moodboard');
-      });
-  }, [isAuthenticated, router]);
+    void routeAfterAuth();
+  }, [isAuthenticated, routeAfterAuth]);
 
   const { isReady, response, signIn, redirectUri } = useGoogleAuth();
 
@@ -47,18 +68,12 @@ export default function Index() {
     try {
       const isSignedIn = await signInWithGoogle({ accessToken });
       if (isSignedIn) {
-        try {
-          const { items } = await wardrobeRepository.getItems();
-          router.replace(items.length === 0 ? '/build-wardrobe' : '/(main)/moodboard');
-        } catch {
-          // If the wardrobe check fails, proceed to the main screen.
-          router.replace('/(main)/moodboard');
-        }
+        await routeAfterAuth();
       }
     } catch {
       // Error is handled by the auth store
     }
-  }, [response, signInWithGoogle, router]);
+  }, [response, signInWithGoogle, routeAfterAuth]);
 
   useEffect(() => {
     void handleAuthResponse();

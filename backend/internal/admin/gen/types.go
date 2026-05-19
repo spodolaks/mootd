@@ -43,6 +43,20 @@ const (
 	ArchetypeDefaultItemArchetypeSage      ArchetypeDefaultItemArchetype = "sage"
 )
 
+// Defines values for ArchetypeDefaultItemGender.
+const (
+	ArchetypeDefaultItemGenderFemale ArchetypeDefaultItemGender = "female"
+	ArchetypeDefaultItemGenderMale   ArchetypeDefaultItemGender = "male"
+	ArchetypeDefaultItemGenderUnisex ArchetypeDefaultItemGender = "unisex"
+)
+
+// Defines values for ArchetypeDefaultItemPatchGender.
+const (
+	ArchetypeDefaultItemPatchGenderFemale ArchetypeDefaultItemPatchGender = "female"
+	ArchetypeDefaultItemPatchGenderMale   ArchetypeDefaultItemPatchGender = "male"
+	ArchetypeDefaultItemPatchGenderUnisex ArchetypeDefaultItemPatchGender = "unisex"
+)
+
 // Defines values for BuildInfoEnvironment.
 const (
 	Development BuildInfoEnvironment = "development"
@@ -400,9 +414,15 @@ type ArchetypeDefaultItem struct {
 	// context for why this item exists in their
 	// wardrobe before they start uploading their own.
 	Description *string `json:"description,omitempty"`
-	Id          string  `json:"id"`
-	ImageUrl    string  `json:"imageUrl"`
-	Label       string  `json:"label"`
+
+	// Gender Which users this default is mixed into moodboards for.
+	// A male user receives male + unisex defaults; a female
+	// user receives female + unisex. Defaults to "unisex"
+	// when omitted on create.
+	Gender   *ArchetypeDefaultItemGender `json:"gender,omitempty"`
+	Id       string                      `json:"id"`
+	ImageUrl string                      `json:"imageUrl"`
+	Label    string                      `json:"label"`
 
 	// PngImageUrl Background-removed PNG; populated when the curator supplies one.
 	PngImageUrl *string `json:"pngImageUrl,omitempty"`
@@ -421,19 +441,29 @@ type ArchetypeDefaultItem struct {
 // ArchetypeDefaultItemArchetype defines model for ArchetypeDefaultItem.Archetype.
 type ArchetypeDefaultItemArchetype string
 
+// ArchetypeDefaultItemGender Which users this default is mixed into moodboards for.
+// A male user receives male + unisex defaults; a female
+// user receives female + unisex. Defaults to "unisex"
+// when omitted on create.
+type ArchetypeDefaultItemGender string
+
 // ArchetypeDefaultItemPatch Body for PATCH /admin/v1/archetype-defaults/{id}.
 // Every field optional — only the supplied keys are
 // updated, the rest stay as-is. Pass an explicit empty
 // string to clear a string field.
 type ArchetypeDefaultItemPatch struct {
-	Category              *string                 `json:"category,omitempty"`
-	Description           *string                 `json:"description,omitempty"`
-	ImageUrl              *string                 `json:"imageUrl,omitempty"`
-	Label                 *string                 `json:"label,omitempty"`
-	PngImageUrl           *string                 `json:"pngImageUrl,omitempty"`
-	StructuredDescription *map[string]interface{} `json:"structuredDescription,omitempty"`
-	Traits                *map[string]string      `json:"traits,omitempty"`
+	Category              *string                          `json:"category,omitempty"`
+	Description           *string                          `json:"description,omitempty"`
+	Gender                *ArchetypeDefaultItemPatchGender `json:"gender,omitempty"`
+	ImageUrl              *string                          `json:"imageUrl,omitempty"`
+	Label                 *string                          `json:"label,omitempty"`
+	PngImageUrl           *string                          `json:"pngImageUrl,omitempty"`
+	StructuredDescription *map[string]interface{}          `json:"structuredDescription,omitempty"`
+	Traits                *map[string]string               `json:"traits,omitempty"`
 }
+
+// ArchetypeDefaultItemPatchGender defines model for ArchetypeDefaultItemPatch.Gender.
+type ArchetypeDefaultItemPatchGender string
 
 // ArchetypeDefaultItemsList defines model for ArchetypeDefaultItemsList.
 type ArchetypeDefaultItemsList struct {

@@ -66,6 +66,10 @@ func (r *MongoRepository) Update(ctx context.Context, id string, req UpdateProfi
 		}
 		updates["creativity"] = c
 	}
+	if req.Gender != nil {
+		// Value is validated in the handler (gender.ValidUser).
+		updates["gender"] = *req.Gender
+	}
 
 	if len(updates) == 1 {
 		return nil, errors.New("no fields to update")

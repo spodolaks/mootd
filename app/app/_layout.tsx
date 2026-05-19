@@ -229,6 +229,7 @@ function RootLayoutContent() {
       <OfflineBanner />
       <Stack>
         <Stack.Screen name="index" options={{ headerShown: false }} />
+        <Stack.Screen name="onboarding-gender" options={{ headerShown: false }} />
         <Stack.Screen name="build-wardrobe" options={{ headerShown: false }} />
         <Stack.Screen name="detected-item" options={{ headerShown: false }} />
         <Stack.Screen name="trait-selection" options={{ headerShown: false }} />

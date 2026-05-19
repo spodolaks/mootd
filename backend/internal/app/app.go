@@ -318,6 +318,22 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 	adminHandler.RegisterRoutes(mux, authLimit, requireAdmin)
 
 	userRepo := user.NewMongoRepository(a.MongoClient, a.MongoDB)
+
+	// userGenderOf resolves a user's profile gender ("" when unknown
+	// or unset). Shared by the wardrobe handler (stamps the owner's
+	// gender on newly detected items) and the outfit filler loader
+	// (filters archetype-default fillers to the user's gender).
+	userGenderOf := func(ctx context.Context, userID string) string {
+		if userID == "" {
+			return ""
+		}
+		u, err := userRepo.FindByID(ctx, userID)
+		if err != nil || u == nil {
+			return ""
+		}
+		return u.Gender
+	}
+
 	// Health endpoints (mootd#40 / #55).
 	//
 	// Redis is required in production because every fallback
@@ -473,6 +489,8 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 		a.Logger.Printf("wardrobe: detection_runs repo init failed: %v (continuing without archive)", err)
 	}
 	wardrobeHandler := wardrobe.NewHandler(a.Logger, detector, searcher, wardrobeRepo, bgRemover, workerCtx, detectJobs)
+	// Newly detected items inherit the owner's profile gender.
+	wardrobeHandler.WithGenderLookup(userGenderOf)
 	if detectionRunRepo != nil {
 		wardrobeHandler.WithDetectionRuns(detectionRunRepo)
 		// Same archive readable from the admin side via the wardrobe→admin adapter.
@@ -897,6 +915,7 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 		outfitCfg.ArchetypeDefaults = &archetypeDefaultsLoaderAdapter{
 			repo:       archetypeRepo,
 			rejections: rejectionsRepo, // nil-safe; loader degrades to no-filter
+			genderOf:   userGenderOf,
 			logger:     a.Logger,
 		}
 		// Note: outfit gen used to also wire a FillerSeeder for the
@@ -1183,6 +1202,7 @@ func (a *wardrobeItemDetectorAdapter) DetectFromBytes(ctx context.Context, image
 type archetypeDefaultsLoaderAdapter struct {
 	repo       admin.ArchetypeDefaultsRepository
 	rejections wardrobe.ArchetypeRejectionsRepository
+	genderOf   func(ctx context.Context, userID string) string // nil-safe: nil → gender filter disabled
 	logger     *log.Logger
 }
 
@@ -1203,7 +1223,15 @@ func (a *archetypeDefaultsLoaderAdapter) LoadFor(ctx context.Context, userID, ar
 			excludeIDs = ids
 		}
 	}
-	rows, err := a.repo.SampleForOutfitGen(ctx, archetypeName, excludeIDs, cap)
+	// Gender filter: a user only sees archetype-default fillers
+	// tagged with their own gender or "unisex". An empty userGender
+	// (the user hasn't picked one) disables the filter — every
+	// filler stays eligible.
+	userGender := ""
+	if a.genderOf != nil {
+		userGender = a.genderOf(ctx, userID)
+	}
+	rows, err := a.repo.SampleForOutfitGen(ctx, archetypeName, userGender, excludeIDs, cap)
 	if err != nil {
 		return nil, err
 	}
@@ -1223,6 +1251,7 @@ func (a *archetypeDefaultsLoaderAdapter) LoadFor(ctx context.Context, userID, ar
 			UserID:      "",   // intentionally blank: not yet owned
 			Category:    d.Category,
 			Label:       d.Label,
+			Gender:      d.Gender,
 			ImageURL:    d.ImageURL,
 			PngImageURL: d.PngImageURL,
 			Traits:      traits,
@@ -1302,6 +1331,7 @@ func (a *fillerSeederAdapter) SeedForUser(ctx context.Context, userID, defaultID
 		UserID:      userID,
 		Category:    def.Category,
 		Label:       def.Label,
+		Gender:      def.Gender,
 		ImageURL:    def.ImageURL,
 		PngImageURL: def.PngImageURL,
 		Traits:      traits,

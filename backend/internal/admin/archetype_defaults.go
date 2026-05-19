@@ -12,6 +12,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 
 	"mootd/backend/internal/archetype"
+	"mootd/backend/internal/shared/gender"
 )
 
 // ────────────────────────────────────────────────────────────────────
@@ -47,6 +48,10 @@ type ArchetypeDefaultItem struct {
 	ID                    string            `bson:"_id"                              json:"id"`
 	Archetype             string            `bson:"archetype"                        json:"archetype"`
 	Category              string            `bson:"category"                         json:"category"`
+	// Gender — "male", "female", or "unisex". Decides which users
+	// this default is mixed into moodboards for. "unisex" (the
+	// default when unset) participates for every user.
+	Gender                string            `bson:"gender,omitempty"                 json:"gender,omitempty"`
 	Label                 string            `bson:"label"                            json:"label"`
 	Description           string            `bson:"description,omitempty"            json:"description,omitempty"`
 	ImageURL              string            `bson:"imageUrl"                         json:"imageUrl"`
@@ -80,7 +85,7 @@ type ArchetypeDefaultsRepository interface {
 	// single Mongo aggregation ($match → $nin → $sample). Index-
 	// backed via the (archetype, createdAt) compound index already
 	// in place.
-	SampleForOutfitGen(ctx context.Context, archetype string, excludeIDs []string, sampleSize int) ([]ArchetypeDefaultItem, error)
+	SampleForOutfitGen(ctx context.Context, archetype, userGender string, excludeIDs []string, sampleSize int) ([]ArchetypeDefaultItem, error)
 }
 
 // ArchetypeDefaultItemPatch carries the optional update fields.
@@ -88,6 +93,7 @@ type ArchetypeDefaultsRepository interface {
 // is distinguishable from "leave unchanged".
 type ArchetypeDefaultItemPatch struct {
 	Category              *string            `json:"category,omitempty"`
+	Gender                *string            `json:"gender,omitempty"`
 	Label                 *string            `json:"label,omitempty"`
 	Description           *string            `json:"description,omitempty"`
 	ImageURL              *string            `json:"imageUrl,omitempty"`
@@ -176,6 +182,16 @@ func (r *ArchetypeDefaultsMongoRepository) Create(ctx context.Context, item Arch
 	if strings.TrimSpace(item.Category) == "" || strings.TrimSpace(item.Label) == "" || strings.TrimSpace(item.ImageURL) == "" {
 		return nil, errors.New("admin: archetype default requires category, label, imageUrl")
 	}
+	// Gender decides which users this default is mixed into
+	// moodboards for. Unset → "unisex" (participates for everyone).
+	switch item.Gender {
+	case "":
+		item.Gender = gender.Unisex
+	case gender.Male, gender.Female, gender.Unisex:
+		// valid
+	default:
+		return nil, fmt.Errorf("admin: invalid gender %q (must be male, female, or unisex)", item.Gender)
+	}
 	if item.ID == "" {
 		item.ID = "ad_" + randomHex(16)
 	}
@@ -193,6 +209,12 @@ func (r *ArchetypeDefaultsMongoRepository) Update(ctx context.Context, id string
 	set := bson.M{"updatedAt": time.Now().UTC()}
 	if patch.Category != nil {
 		set["category"] = *patch.Category
+	}
+	if patch.Gender != nil {
+		if !gender.ValidItem(*patch.Gender) {
+			return nil, fmt.Errorf("admin: invalid gender %q (must be male, female, or unisex)", *patch.Gender)
+		}
+		set["gender"] = *patch.Gender
 	}
 	if patch.Label != nil {
 		set["label"] = *patch.Label
@@ -251,13 +273,24 @@ func (r *ArchetypeDefaultsMongoRepository) IncrementSeeded(ctx context.Context, 
 // `sampleSize <= 0` returns nil with no error (caller should not
 // query in that case); a non-existent archetype legitimately yields
 // an empty slice — the caller logs "no fillers" and proceeds.
-func (r *ArchetypeDefaultsMongoRepository) SampleForOutfitGen(ctx context.Context, arche string, excludeIDs []string, sampleSize int) ([]ArchetypeDefaultItem, error) {
+func (r *ArchetypeDefaultsMongoRepository) SampleForOutfitGen(ctx context.Context, arche, userGender string, excludeIDs []string, sampleSize int) ([]ArchetypeDefaultItem, error) {
 	if sampleSize <= 0 {
 		return nil, nil
 	}
 	match := bson.M{"archetype": arche}
 	if len(excludeIDs) > 0 {
 		match["_id"] = bson.M{"$nin": excludeIDs}
+	}
+	// Gender filter: a user only gets defaults tagged with their own
+	// gender or "unisex". Rows with no gender field — or an empty
+	// one — pre-date the gender feature and are treated as unisex so
+	// they keep participating. Skipped when the user's gender is
+	// unknown (filter disabled → every filler is eligible).
+	if userGender != "" {
+		match["$or"] = []bson.M{
+			{"gender": bson.M{"$in": []string{userGender, gender.Unisex, ""}}},
+			{"gender": bson.M{"$exists": false}},
+		}
 	}
 	pipeline := mongo.Pipeline{
 		{{Key: "$match", Value: match}},

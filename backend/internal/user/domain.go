@@ -15,6 +15,12 @@ type UserDocument struct {
 	// at read time. The outfit service translates to a provider
 	// temperature via outfit.CreativityToTemperature.
 	Creativity *float64 `bson:"creativity,omitempty"          json:"creativity,omitempty"`
+	// Gender is the user's profile gender — "male" or "female"
+	// (see internal/shared/gender). It decides which archetype-
+	// default fillers are mixed into the user's moodboards. Empty
+	// until the user picks one in onboarding; an empty value leaves
+	// the filler gender filter disabled (all fillers shown).
+	Gender           string             `bson:"gender,omitempty"             json:"gender,omitempty"`
 	CreatedAt        string             `bson:"createdAt"                    json:"createdAt"`
 	UpdatedAt        string             `bson:"updatedAt"                    json:"updatedAt"`
 }
@@ -29,4 +35,7 @@ type UpdateProfileRequest struct {
 	// reset to 0 (the slider's left-end "predictable" extreme)
 	// without it being indistinguishable from "leave unchanged".
 	Creativity *float64 `json:"creativity,omitempty"`
+	// Gender must be "male" or "female"; validated in the handler,
+	// an invalid value is rejected with 400.
+	Gender *string `json:"gender,omitempty"`
 }

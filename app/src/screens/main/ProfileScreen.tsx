@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Pressable,
   ScrollView,
@@ -10,8 +10,10 @@ import { Image } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Icon, Button } from '@/src/components';
+import { SegmentedControl } from '@/src/components/ui/SegmentedControl/SegmentedControl';
 import { useColorScheme } from '@/src/hooks';
 import { useAuthStore, usePreferencesStore, useDetectionJobStore } from '@/src/store';
+import { apiClient } from '@/src/data/api/client';
 import {
   accents,
   backgrounds,
@@ -35,6 +37,32 @@ export const ProfileScreen: React.FC = () => {
   const jobCount = useDetectionJobStore((s) => s.jobs.length);
   const customDisplayName = usePreferencesStore((s) => s.displayName);
   const persistedEmail = usePreferencesStore((s) => s.email);
+
+  // Profile gender — not carried in the auth session, so fetch it
+  // from /v1/user/profile on mount. null until loaded (card hidden).
+  const [gender, setGender] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    apiClient
+      .get<{ gender?: string }>('/v1/user/profile')
+      .then((p) => {
+        if (!cancelled) setGender(p.gender ?? null);
+      })
+      .catch(() => {
+        /* leave unset — the gender card just won't render */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleGenderChange = (value: string) => {
+    const previous = gender;
+    setGender(value); // optimistic
+    apiClient.put('/v1/user/profile', { gender: value }).catch(() => {
+      setGender(previous); // revert on failure
+    });
+  };
 
   // Prefer the user-edited display name, fall back to Google profile name
   const displayName = customDisplayName || user?.name || 'Unknown User';
@@ -102,6 +130,25 @@ export const ProfileScreen: React.FC = () => {
             </View>
           )}
         </View>
+
+        {/* Gender — drives which archetype-default fillers moodboards use. */}
+        {gender && (
+          <View style={[styles.menuSection, { backgroundColor: cardBg }]}>
+            <View style={styles.genderRow}>
+              <Text style={[styles.genderLabel, { color: secondaryText }]}>
+                Styling for
+              </Text>
+              <SegmentedControl
+                options={[
+                  { label: 'Female', value: 'female' },
+                  { label: 'Male', value: 'male' },
+                ]}
+                selectedValue={gender}
+                onValueChange={handleGenderChange}
+              />
+            </View>
+          </View>
+        )}
 
         {/* Menu Sections */}
         {/* Detection Activity — always visible, badge when active */}
@@ -271,6 +318,14 @@ const styles = StyleSheet.create({
   },
   modeBadgeText: {
     ...typography.caption1.regular,
+  },
+  genderRow: {
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    gap: 10,
+  },
+  genderLabel: {
+    ...typography.subheadline.regular,
   },
   menuSection: {
     borderRadius: 16,

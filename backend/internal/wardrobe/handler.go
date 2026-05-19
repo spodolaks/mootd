@@ -21,6 +21,11 @@ import (
 
 const maxImageSize = 10 << 20 // 10 MB
 
+// GenderLookup resolves a user's profile gender, returning "" when
+// the user is unknown or has not set one. Wired in app.go so the
+// wardrobe package needn't import the user package directly.
+type GenderLookup func(ctx context.Context, userID string) string
+
 // Handler handles wardrobe HTTP endpoints.
 type Handler struct {
 	logger              *log.Logger
@@ -33,6 +38,7 @@ type Handler struct {
 	detectionRuns       DetectionRunRepository // optional — when nil, runs aren't archived (P1-04)
 	archetypeSeeder     ArchetypeFillerSeeder         // optional — pairs with archetypeRejections to power the FE filler tap-resolve flow
 	archetypeRejections ArchetypeRejectionsRepository // optional — when nil, /archetype-rejections returns 503
+	genderOf            GenderLookup                  // optional — when nil, detected items are saved with empty gender
 }
 
 // NewHandler creates a Handler with the given dependencies.
@@ -54,6 +60,15 @@ func NewHandler(logger *log.Logger, detector DetectorBackend, searcher *Searcher
 // app.go opt in to P1-04 archival without breaking existing tests.
 func (h *Handler) WithDetectionRuns(r DetectionRunRepository) *Handler {
 	h.detectionRuns = r
+	return h
+}
+
+// WithGenderLookup wires the user-gender resolver so newly detected
+// items inherit the owner's profile gender. Optional — when unset,
+// detected items are saved with an empty gender (treated as unisex
+// by the outfit-filler gender filter).
+func (h *Handler) WithGenderLookup(fn GenderLookup) *Handler {
+	h.genderOf = fn
 	return h
 }
 
@@ -127,6 +142,14 @@ func (h *Handler) processDetected(ctx context.Context, userID string, detected [
 	}
 
 	now := time.Now().UTC()
+
+	// Newly detected items inherit the owner's profile gender (mootd
+	// gender feature). Resolved once — every item in this batch
+	// belongs to the same user.
+	itemGender := ""
+	if h.genderOf != nil {
+		itemGender = h.genderOf(ctx, userID)
+	}
 
 	// Skipped items are noise from the detection service (low confidence,
 	// duplicate class, etc.) — drop them before we fan out work.
@@ -225,6 +248,7 @@ func (h *Handler) processDetected(ctx context.Context, userID string, detected [
 				UserID:      userID,
 				Category:    category,
 				Label:       label,
+				Gender:      itemGender,
 				ImageURL:    stableImageURL,
 				PngImageURL: stablePngURL,
 				Traits:      traits,
@@ -238,6 +262,7 @@ func (h *Handler) processDetected(ctx context.Context, userID string, detected [
 				ID:          itemID,
 				Category:    category,
 				Label:       label,
+				Gender:      itemGender,
 				ImageURL:    stableImageURL,
 				PngImageURL: stablePngURL,
 				Confidence:  d.Confidence,

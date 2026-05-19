@@ -129,7 +129,8 @@ func (h *Handler) createArchetypeDefault(w http.ResponseWriter, r *http.Request)
 		msg := err.Error()
 		switch {
 		case strings.Contains(msg, "unknown archetype"),
-			strings.Contains(msg, "requires category"):
+			strings.Contains(msg, "requires category"),
+			strings.Contains(msg, "invalid gender"):
 			response.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": msg})
 		case mongo.IsDuplicateKeyError(err):
 			response.WriteJSON(w, http.StatusConflict, map[string]string{
@@ -156,6 +157,7 @@ func (h *Handler) createArchetypeDefault(w http.ResponseWriter, r *http.Request)
 			Metadata: map[string]any{
 				"archetype": created.Archetype,
 				"category":  created.Category,
+				"gender":    created.Gender,
 				"label":     created.Label,
 			},
 			At:        time.Now().UTC(),
@@ -190,6 +192,10 @@ func (h *Handler) updateArchetypeDefault(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	if err != nil {
+		if strings.Contains(err.Error(), "invalid gender") {
+			response.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
 		h.logger.Printf("admin /archetype-defaults/%s patch: %v", id, err)
 		response.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
 		return

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/mongo"
+	"mootd/backend/internal/shared/gender"
 	"mootd/backend/internal/shared/middleware"
 	"mootd/backend/internal/shared/response"
 )
@@ -91,6 +92,10 @@ func (h *Handler) updateProfile(w http.ResponseWriter, r *http.Request) {
 	var req UpdateProfileRequest
 	if err := response.DecodeJSONBody(w, r, &req); err != nil {
 		response.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if req.Gender != nil && !gender.ValidUser(*req.Gender) {
+		response.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "gender must be male or female"})
 		return
 	}
 

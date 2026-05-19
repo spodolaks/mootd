@@ -16,6 +16,10 @@ type ClothingItem struct {
 	UserID           string            `bson:"userId"       json:"userId"`
 	Category         string            `bson:"category"     json:"category"`
 	Label            string            `bson:"label"        json:"label"`
+	// Gender is "male", "female", or "unisex" (internal/shared/
+	// gender). Stamped from the owner's profile gender when the item
+	// is detected; empty on legacy items (treated as unisex).
+	Gender           string            `bson:"gender,omitempty" json:"gender,omitempty"`
 	ImageURL         string            `bson:"imageUrl"     json:"imageUrl"`
 	PngImageURL      string            `bson:"pngImageUrl"  json:"pngImageUrl,omitempty"`
 	PngAttempts      int               `bson:"pngAttempts,omitempty"`
@@ -31,6 +35,7 @@ type DetectedItem struct {
 	ID          string            `json:"id"`
 	Category    string            `json:"category"`
 	Label       string            `json:"label"`
+	Gender      string            `json:"gender,omitempty"`
 	ImageURL    string            `json:"imageUrl,omitempty"`
 	PngImageURL string            `json:"pngImageUrl,omitempty"`
 	Confidence  float64           `json:"confidence,omitempty"`
