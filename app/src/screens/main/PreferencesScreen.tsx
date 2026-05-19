@@ -12,7 +12,7 @@
  *  • All interactive elements use Pressable (web-safe).
  */
 
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   Platform,
   Pressable,
@@ -67,6 +67,24 @@ export const PreferencesScreen: React.FC = () => {
     }, [prefs.displayName, user?.name]),
   );
 
+  // Gender preference. Loaded from /v1/user/profile; defaults to
+  // "unisex" ("as long as it's stylish") when nothing is set.
+  const [gender, setGender] = useState<string>('unisex');
+  useEffect(() => {
+    let cancelled = false;
+    apiClient
+      .get<{ gender?: string }>('/v1/user/profile')
+      .then((p) => {
+        if (!cancelled && p.gender) setGender(p.gender);
+      })
+      .catch(() => {
+        /* keep the unisex default */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // ─── Colors ────────────────────────────────────────────────────────────────
   const bg = backgrounds.primary[colorScheme];
   const text = labels.primary[colorScheme];
@@ -97,6 +115,17 @@ export const PreferencesScreen: React.FC = () => {
         console.warn('[Preferences] creativity sync failed:', err);
       });
   }, [prefs]);
+
+  // Gender — optimistic local update + best-effort PUT, mirroring
+  // the creativity sync above.
+  const handleGenderChange = useCallback((value: string) => {
+    setGender(value);
+    void apiClient
+      .put('/v1/user/profile', { gender: value })
+      .catch((err: unknown) => {
+        console.warn('[Preferences] gender sync failed:', err);
+      });
+  }, []);
 
   const handleDeleteAccount = useCallback(() => {
     const doDelete = () => {
@@ -230,6 +259,41 @@ export const PreferencesScreen: React.FC = () => {
             label="Fahrenheit (°F)"
             selected={prefs.temperatureUnit === 'fahrenheit'}
             onPress={() => prefs.setTemperatureUnit('fahrenheit')}
+            accentColor={accent}
+            textColor={text}
+          />
+        </SettingsSection>
+
+        {/* ── Styling for ─────────────────────────────────────────────── */}
+        <SettingsSection title="Styling for" color={secondary} cardBackground={cardBg}>
+          <SettingsRow
+            mode="select"
+            icon="user"
+            label="Female"
+            selected={gender === 'female'}
+            onPress={() => handleGenderChange('female')}
+            accentColor={accent}
+            textColor={text}
+            dividerColor={divider}
+            showDivider
+          />
+          <SettingsRow
+            mode="select"
+            icon="user"
+            label="Male"
+            selected={gender === 'male'}
+            onPress={() => handleGenderChange('male')}
+            accentColor={accent}
+            textColor={text}
+            dividerColor={divider}
+            showDivider
+          />
+          <SettingsRow
+            mode="select"
+            icon="user"
+            label="As long as it's stylish"
+            selected={gender === 'unisex'}
+            onPress={() => handleGenderChange('unisex')}
             accentColor={accent}
             textColor={text}
           />

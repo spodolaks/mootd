@@ -95,7 +95,7 @@ func (h *Handler) updateProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Gender != nil && !gender.ValidUser(*req.Gender) {
-		response.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "gender must be male or female"})
+		response.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "gender must be male, female, or unisex"})
 		return
 	}
 

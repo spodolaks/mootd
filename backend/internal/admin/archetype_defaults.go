@@ -281,12 +281,13 @@ func (r *ArchetypeDefaultsMongoRepository) SampleForOutfitGen(ctx context.Contex
 	if len(excludeIDs) > 0 {
 		match["_id"] = bson.M{"$nin": excludeIDs}
 	}
-	// Gender filter: a user only gets defaults tagged with their own
-	// gender or "unisex". Rows with no gender field — or an empty
-	// one — pre-date the gender feature and are treated as unisex so
-	// they keep participating. Skipped when the user's gender is
-	// unknown (filter disabled → every filler is eligible).
-	if userGender != "" {
+	// Gender filter: a male/female user only gets defaults tagged
+	// with their own gender or "unisex". Rows with no gender field —
+	// or an empty one — pre-date the gender feature and count as
+	// unisex so they keep participating. A "unisex" user ("as long
+	// as it's stylish") or an unknown gender skips the filter
+	// entirely — every filler is eligible.
+	if userGender == gender.Male || userGender == gender.Female {
 		match["$or"] = []bson.M{
 			{"gender": bson.M{"$in": []string{userGender, gender.Unisex, ""}}},
 			{"gender": bson.M{"$exists": false}},
