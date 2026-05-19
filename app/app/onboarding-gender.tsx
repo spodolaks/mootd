@@ -9,29 +9,40 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { SegmentedControl } from '@/src/components/ui/SegmentedControl/SegmentedControl';
 import { useColorScheme } from '@/src/hooks';
 import { apiClient } from '@/src/data/api/client';
 import { wardrobeRepository } from '@/src/data/repositories';
-import { backgrounds, button, labels } from '@/src/theme/colors';
+import { backgrounds, button, labels, separators } from '@/src/theme/colors';
 import { typography } from '@/src/theme/typography';
+
+type Gender = 'female' | 'male' | 'unisex';
+
+const GENDER_OPTIONS: ReadonlyArray<{ label: string; value: Gender }> = [
+  { label: 'Female', value: 'female' },
+  { label: 'Male', value: 'male' },
+  { label: "As long as it's stylish", value: 'unisex' },
+];
 
 /**
  * Onboarding gender step. Shown once after sign-in when the user has
  * no profile gender yet. The choice drives which archetype-default
- * fillers their moodboards mix in (a male user sees male + unisex
- * fillers, a female user female + unisex) and the default gender
- * stamped on items they add to their wardrobe.
+ * fillers their moodboards mix in:
+ *   - male   → male + unisex fillers
+ *   - female → female + unisex fillers
+ *   - unisex ("as long as it's stylish") → no restriction, every filler
+ * It also seeds the default gender stamped on items they add. Defaults
+ * to "unisex" — the neutral, no-assumption choice.
  */
 export default function OnboardingGender() {
   const router = useRouter();
   const colorScheme = useColorScheme() ?? 'light';
-  const [gender, setGender] = useState<'male' | 'female'>('female');
+  const [gender, setGender] = useState<Gender>('unisex');
   const [isSaving, setIsSaving] = useState(false);
 
   const backgroundColor = backgrounds.primary[colorScheme];
   const textColor = labels.primary[colorScheme];
   const secondaryText = labels.secondary[colorScheme];
+  const borderColor = separators.primary[colorScheme];
   const buttonBg = button.primary.background[colorScheme];
   const buttonFg = button.primary.foreground[colorScheme];
 
@@ -63,19 +74,40 @@ export default function OnboardingGender() {
           Who are we styling?
         </Text>
         <Text style={[styles.subtitle, { color: secondaryText }]}>
-          This tailors your outfit suggestions. You can change it later
-          in your profile.
+          This tailors your outfit suggestions. You can change it
+          anytime in Preferences.
         </Text>
-        <SegmentedControl
-          options={[
-            { label: 'Female', value: 'female' },
-            { label: 'Male', value: 'male' },
-          ]}
-          selectedValue={gender}
-          onValueChange={(value) => setGender(value as 'male' | 'female')}
-          disabled={isSaving}
-          style={styles.segmented}
-        />
+        <View style={styles.options}>
+          {GENDER_OPTIONS.map((opt) => {
+            const selected = gender === opt.value;
+            return (
+              <Pressable
+                key={opt.value}
+                onPress={() => setGender(opt.value)}
+                disabled={isSaving}
+                style={[
+                  styles.option,
+                  selected
+                    ? { backgroundColor: buttonBg }
+                    : { borderWidth: 1.5, borderColor },
+                ]}
+                testID={`onboarding-gender-${opt.value}`}
+                accessibilityLabel={opt.label}
+                accessibilityRole="radio"
+                accessibilityState={{ selected }}
+              >
+                <Text
+                  style={[
+                    styles.optionLabel,
+                    { color: selected ? buttonFg : textColor },
+                  ]}
+                >
+                  {opt.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
       </View>
       <Pressable
         style={[
@@ -118,8 +150,19 @@ const styles = StyleSheet.create({
     ...typography.body.regular,
     marginBottom: 8,
   },
-  segmented: {
+  options: {
+    gap: 10,
     marginTop: 8,
+  },
+  option: {
+    height: 56,
+    borderRadius: 14,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+  },
+  optionLabel: {
+    ...typography.body.semiBold,
   },
   button: {
     height: 54,
