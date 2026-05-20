@@ -45,7 +45,7 @@ func (r *MongoRepository) FindByID(ctx context.Context, id string) (*UserDocumen
 
 // Update applies non-nil fields from req to the user record and returns the updated document.
 func (r *MongoRepository) Update(ctx context.Context, id string, req UpdateProfileRequest) (*UserDocument, error) {
-	updates := bson.M{"updatedAt": time.Now().UTC().Format(time.RFC3339)}
+	updates := bson.M{"updatedAt": time.Now().UTC()}
 	if req.Name != nil {
 		updates["name"] = *req.Name
 	}
@@ -98,7 +98,7 @@ func (r *MongoRepository) UpdateArchetypeProfile(ctx context.Context, id string,
 	_, err := r.collection().UpdateOne(ctx, bson.M{"_id": id}, bson.M{
 		"$set": bson.M{
 			"archetypeProfile": profile,
-			"updatedAt":        time.Now().UTC().Format(time.RFC3339),
+			"updatedAt":        time.Now().UTC(),
 		},
 	})
 	return err

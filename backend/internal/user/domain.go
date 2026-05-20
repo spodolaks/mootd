@@ -1,6 +1,8 @@
 // Package user handles user profile management.
 package user
 
+import "time"
+
 // UserDocument represents a user record in MongoDB.
 type UserDocument struct {
 	ID               string             `bson:"_id"                          json:"id"`
@@ -20,9 +22,9 @@ type UserDocument struct {
 	// default fillers are mixed into the user's moodboards. Empty
 	// until the user picks one in onboarding; an empty value leaves
 	// the filler gender filter disabled (all fillers shown).
-	Gender           string             `bson:"gender,omitempty"             json:"gender,omitempty"`
-	CreatedAt        string             `bson:"createdAt"                    json:"createdAt"`
-	UpdatedAt        string             `bson:"updatedAt"                    json:"updatedAt"`
+	Gender    string    `bson:"gender,omitempty"             json:"gender,omitempty"`
+	CreatedAt time.Time `bson:"createdAt"                    json:"createdAt"`
+	UpdatedAt time.Time `bson:"updatedAt"                    json:"updatedAt"`
 }
 
 // UpdateProfileRequest is the request body for PUT /v1/user/profile.
