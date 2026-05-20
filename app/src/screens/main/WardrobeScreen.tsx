@@ -31,7 +31,15 @@ import type { DetectionStep } from '@/src/store/wardrobeStore';
 import type { ClothingDetectionResult, WardrobeItem } from '@/src/domain';
 import { useTabContentBottomPadding, PILL_GUTTER } from '@/app/(main)/_layout';
 
-const DARK_GREY = '#3A3A3C';
+// Wardrobe card backdrop is a solid neutral that gives the cut-out PNG
+// items an elevation contrast against the page background. We pick
+// per-scheme tokens directly instead of using fills.*, which are
+// translucent (rgba) — a transparent backdrop lets the page bleed
+// through and washes out the items.
+const CARD_BG = {
+  light: grays.gray5.light, // #E5E5EA — one step darker than page bg #F2F2F7
+  dark: grays.gray4.dark,   // #3A3A3C — the pre-existing dark-theme color
+};
 
 // F4: stable keyExtractor defined at module scope. The previous inline
 // `(item) => item.id` closure allocated fresh on every render, defeating
@@ -114,7 +122,7 @@ export const WardrobeScreen: React.FC = () => {
   const secondaryTextColor = labels.secondary[colorScheme];
   const searchBgColor = fills.tertiary[colorScheme];
   const placeholderColor = labels.tertiary[colorScheme];
-  const cardBgColor = DARK_GREY;
+  const cardBgColor = CARD_BG[colorScheme];
   const chipSelectedBg = button.primary.background[colorScheme];
   const chipSelectedText = button.primary.foreground[colorScheme];
   const cameraBg = button.primary.background[colorScheme];
