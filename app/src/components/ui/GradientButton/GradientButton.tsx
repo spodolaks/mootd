@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useId } from 'react';
 import { Text, Pressable, View, useWindowDimensions } from 'react-native';
 import Svg, {
   Defs,
@@ -38,6 +38,19 @@ export const GradientButton: React.FC<GradientButtonProps> = ({
   const buttonWidth = Math.max(screenWidth - 32, 100);
   const colorScheme = useColorScheme();
   const styles = getStyles(colorScheme);
+  // Per-instance prefix so SVG `url(#…)` refs can't collide with another
+  // instance's <defs> on the same DOM (Expo web renders react-native-svg
+  // to real SVG; gradient IDs are document-wide there, and a previously
+  // mounted button's `bgGradient` would shadow a later button's fill —
+  // surfacing as an invisible button in light theme where the fill is a
+  // gradient ref instead of a solid color).
+  const uid = useId().replace(/:/g, '');
+  const ids = {
+    bg: `gb-bg-${uid}`,
+    border: `gb-border-${uid}`,
+    fade: `gb-fade-${uid}`,
+    glow: `gb-glow-${uid}`,
+  };
 
   // Theme-aware colors using design tokens
   const isLightTheme = colorScheme === 'light';
@@ -55,7 +68,7 @@ export const GradientButton: React.FC<GradientButtonProps> = ({
       <Svg width="100%" height="100%" viewBox="0 0 375 50" preserveAspectRatio="xMidYMid slice">
         <Defs>
           <SvgLinearGradient
-            id="glowGradient"
+            id={ids.glow}
             x1={15}
             y1={25}
             x2={360}
@@ -67,15 +80,15 @@ export const GradientButton: React.FC<GradientButtonProps> = ({
             <Stop offset={1} stopColor={glowColors[3]} />
           </SvgLinearGradient>
         </Defs>
-        <Ellipse cx={187.5} cy={25} rx={172.5} ry={25} fill="url(#glowGradient)" opacity={0.01} />
-        <Ellipse cx={187.5} cy={25} rx={172.5} ry={22} fill="url(#glowGradient)" opacity={0.015} />
-        <Ellipse cx={187.5} cy={25} rx={170} ry={19} fill="url(#glowGradient)" opacity={0.02} />
-        <Ellipse cx={187.5} cy={25} rx={167} ry={16} fill="url(#glowGradient)" opacity={0.025} />
-        <Ellipse cx={187.5} cy={25} rx={164} ry={13} fill="url(#glowGradient)" opacity={0.03} />
-        <Ellipse cx={187.5} cy={25} rx={160} ry={10} fill="url(#glowGradient)" opacity={0.035} />
-        <Ellipse cx={187.5} cy={25} rx={156} ry={8} fill="url(#glowGradient)" opacity={0.04} />
-        <Ellipse cx={187.5} cy={25} rx={152} ry={6} fill="url(#glowGradient)" opacity={0.045} />
-        <Ellipse cx={187.5} cy={25} rx={148} ry={5} fill="url(#glowGradient)" opacity={0.05} />
+        <Ellipse cx={187.5} cy={25} rx={172.5} ry={25} fill={`url(#${ids.glow})`} opacity={0.01} />
+        <Ellipse cx={187.5} cy={25} rx={172.5} ry={22} fill={`url(#${ids.glow})`} opacity={0.015} />
+        <Ellipse cx={187.5} cy={25} rx={170} ry={19} fill={`url(#${ids.glow})`} opacity={0.02} />
+        <Ellipse cx={187.5} cy={25} rx={167} ry={16} fill={`url(#${ids.glow})`} opacity={0.025} />
+        <Ellipse cx={187.5} cy={25} rx={164} ry={13} fill={`url(#${ids.glow})`} opacity={0.03} />
+        <Ellipse cx={187.5} cy={25} rx={160} ry={10} fill={`url(#${ids.glow})`} opacity={0.035} />
+        <Ellipse cx={187.5} cy={25} rx={156} ry={8} fill={`url(#${ids.glow})`} opacity={0.04} />
+        <Ellipse cx={187.5} cy={25} rx={152} ry={6} fill={`url(#${ids.glow})`} opacity={0.045} />
+        <Ellipse cx={187.5} cy={25} rx={148} ry={5} fill={`url(#${ids.glow})`} opacity={0.05} />
       </Svg>
     </View>
   );
@@ -87,7 +100,7 @@ export const GradientButton: React.FC<GradientButtonProps> = ({
         {/* Background gradient for light theme - diagonal dark gradient */}
         {isLightTheme && (
           <SvgLinearGradient
-            id="bgGradient"
+            id={ids.bg}
             x1="0"
             y1="0"
             x2={buttonWidth * 0.35}
@@ -100,7 +113,7 @@ export const GradientButton: React.FC<GradientButtonProps> = ({
 
         {/* Border gradient - horizontal colorful */}
         <SvgLinearGradient
-          id="borderGradient"
+          id={ids.border}
           x1="0"
           y1={BUTTON_HEIGHT / 2}
           x2={buttonWidth}
@@ -114,7 +127,7 @@ export const GradientButton: React.FC<GradientButtonProps> = ({
 
         {/* Top fade gradient - vertical */}
         <SvgLinearGradient
-          id="fadeGradient"
+          id={ids.fade}
           x1={buttonWidth / 2}
           y1="0"
           x2={buttonWidth / 2}
@@ -132,7 +145,7 @@ export const GradientButton: React.FC<GradientButtonProps> = ({
         width={buttonWidth - 2}
         height={BUTTON_HEIGHT - 2}
         rx={BORDER_RADIUS - 1}
-        fill={isLightTheme ? 'url(#bgGradient)' : darkBgColor}
+        fill={isLightTheme ? `url(#${ids.bg})` : darkBgColor}
       />
 
       {/* Colorful border */}
@@ -142,7 +155,7 @@ export const GradientButton: React.FC<GradientButtonProps> = ({
         width={buttonWidth - 2}
         height={BUTTON_HEIGHT - 2}
         rx={BORDER_RADIUS - 1}
-        stroke="url(#borderGradient)"
+        stroke={`url(#${ids.border})`}
         strokeOpacity={0.8}
         strokeWidth={2}
         fill="none"
@@ -155,7 +168,7 @@ export const GradientButton: React.FC<GradientButtonProps> = ({
         width={buttonWidth - 2}
         height={BUTTON_HEIGHT - 2}
         rx={BORDER_RADIUS - 1}
-        stroke="url(#fadeGradient)"
+        stroke={`url(#${ids.fade})`}
         strokeWidth={2}
         fill="none"
       />

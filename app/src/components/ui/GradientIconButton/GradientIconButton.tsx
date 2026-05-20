@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useId } from 'react';
 import { Pressable, View } from 'react-native';
 import Svg, { Circle, Defs, LinearGradient as SvgLinearGradient, Stop } from 'react-native-svg';
 import { gradients, grays } from '../../../theme/colors';
@@ -20,6 +20,11 @@ export const GradientIconButton: React.FC<GradientIconButtonProps> = ({
 
   // Center point for the circle
   const center = dimension / 2;
+  // Per-instance suffix so this button's gradient ID can't collide with
+  // another SVG's `bgGradient` on the same Expo-web DOM (e.g. the round
+  // GradientButton variants used elsewhere on the same page). Without this
+  // the second instance's fill silently falls through to the page bg.
+  const bgId = `gib-bg-${useId().replace(/:/g, '')}`;
 
   // Button SVG with full gradient background
   const ButtonSvg = () => (
@@ -27,7 +32,7 @@ export const GradientIconButton: React.FC<GradientIconButtonProps> = ({
       <Defs>
         {/* Full gradient background - diagonal colorful */}
         <SvgLinearGradient
-          id="bgGradient"
+          id={bgId}
           x1="0"
           y1="0"
           x2={dimension}
@@ -41,7 +46,7 @@ export const GradientIconButton: React.FC<GradientIconButtonProps> = ({
       </Defs>
 
       {/* Background fill circle with gradient */}
-      <Circle cx={center} cy={center} r={radius} fill="url(#bgGradient)" />
+      <Circle cx={center} cy={center} r={radius} fill={`url(#${bgId})`} />
     </Svg>
   );
 
