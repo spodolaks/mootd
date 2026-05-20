@@ -31,6 +31,11 @@ const (
 	PermPromptsRead  Permission = "prompts:read"
 	PermPromptsWrite Permission = "prompts:write"
 
+	// Archetype-default wardrobe items (curator surface). Split
+	// off from prompts:write so the curator role can edit defaults
+	// without inheriting prompt-template / A-B-test write access.
+	PermDefaultsWrite Permission = "defaults:write"
+
 	// Detection.
 	PermDetectionsRerun Permission = "detections:rerun"
 
@@ -68,6 +73,7 @@ var rolePermissions = map[Role]map[Permission]bool{
 		PermTracesRerun:     true,
 		PermPromptsRead:     true,
 		PermPromptsWrite:    true,
+		PermDefaultsWrite:   true,
 		PermDetectionsRerun: true,
 		PermSpendRead:       true,
 		PermBudgetsWrite:    true,
@@ -82,6 +88,7 @@ var rolePermissions = map[Role]map[Permission]bool{
 		PermTracesRerun:     true,
 		PermPromptsRead:     true,
 		PermPromptsWrite:    true,
+		PermDefaultsWrite:   true,
 		PermDetectionsRerun: true,
 		PermSpendRead:       true,
 	},
@@ -97,13 +104,15 @@ var rolePermissions = map[Role]map[Permission]bool{
 		// No PII, no rerun, no writes.
 	},
 	RoleCurator: {
-		// Archetype-defaults curation (both read + write) is gated
-		// by prompts:read alone — see routes.go where
-		// /admin/v1/archetype-defaults* shares one permission for
-		// all methods. Granting just this one capability gives the
-		// curator full ability to add/edit/delete defaults plus the
-		// read-only Prompts view, and nothing else in the panel.
-		PermPromptsRead: true,
+		// Archetype-defaults curation. prompts:read also unlocks
+		// the read-only Prompts view (the two surfaces share the
+		// listing endpoint), defaults:write authorises add / edit
+		// / delete on archetype defaults — and nothing else in the
+		// panel. defaults:write is intentionally scoped narrower
+		// than prompts:write so a curator can't author prompt
+		// templates or A/B tests.
+		PermPromptsRead:   true,
+		PermDefaultsWrite: true,
 	},
 }
 

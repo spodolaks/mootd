@@ -104,10 +104,10 @@ func (h *Handler) getArchetypeDefault(w http.ResponseWriter, r *http.Request, id
 }
 
 func (h *Handler) createArchetypeDefault(w http.ResponseWriter, r *http.Request) {
-	if !HasPermissionFromContext(r, PermPromptsWrite) {
+	if !HasPermissionFromContext(r, PermDefaultsWrite) {
 		response.WriteJSON(w, http.StatusForbidden, map[string]any{
 			"error":             "permission denied",
-			"missingPermission": PermPromptsWrite,
+			"missingPermission": PermDefaultsWrite,
 		})
 		return
 	}
@@ -170,10 +170,10 @@ func (h *Handler) createArchetypeDefault(w http.ResponseWriter, r *http.Request)
 }
 
 func (h *Handler) updateArchetypeDefault(w http.ResponseWriter, r *http.Request, id string) {
-	if !HasPermissionFromContext(r, PermPromptsWrite) {
+	if !HasPermissionFromContext(r, PermDefaultsWrite) {
 		response.WriteJSON(w, http.StatusForbidden, map[string]any{
 			"error":             "permission denied",
-			"missingPermission": PermPromptsWrite,
+			"missingPermission": PermDefaultsWrite,
 		})
 		return
 	}
@@ -204,10 +204,10 @@ func (h *Handler) updateArchetypeDefault(w http.ResponseWriter, r *http.Request,
 }
 
 func (h *Handler) deleteArchetypeDefault(w http.ResponseWriter, r *http.Request, id string) {
-	if !HasPermissionFromContext(r, PermPromptsWrite) {
+	if !HasPermissionFromContext(r, PermDefaultsWrite) {
 		response.WriteJSON(w, http.StatusForbidden, map[string]any{
 			"error":             "permission denied",
-			"missingPermission": PermPromptsWrite,
+			"missingPermission": PermDefaultsWrite,
 		})
 		return
 	}

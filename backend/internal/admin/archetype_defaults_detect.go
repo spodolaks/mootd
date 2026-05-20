@@ -107,12 +107,12 @@ const (
 //  4. Run the detector; discard any generated image, keep description.
 //  5. Return ArchetypeDefaultDetectionResult to the FE.
 //
-// Permission: prompts:write (curating content).
+// Permission: defaults:write (curating content).
 func (h *Handler) detectArchetypeDefault(w http.ResponseWriter, r *http.Request) {
-	if !HasPermissionFromContext(r, PermPromptsWrite) {
+	if !HasPermissionFromContext(r, PermDefaultsWrite) {
 		response.WriteJSON(w, http.StatusForbidden, map[string]any{
 			"error":             "permission denied",
-			"missingPermission": PermPromptsWrite,
+			"missingPermission": PermDefaultsWrite,
 		})
 		return
 	}

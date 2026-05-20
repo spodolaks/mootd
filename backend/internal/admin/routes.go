@@ -123,9 +123,10 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, authLimit Middleware, requi
 	mux.Handle("/admin/v1/items/", requireAdmin(RequirePermission(PermTracesRead)(http.HandlerFunc(h.HitlItemsRouter))))
 
 	// Archetype-default wardrobe items (cold-start fix). Read =
-	// prompts:read; create / patch / delete gated inline on
-	// prompts:write (matches the prompts surface — both are
-	// admin-curated content authored against archetypes).
+	// prompts:read (shared with the Prompts list endpoint); create
+	// / patch / delete gated inline on defaults:write — scoped
+	// narrower than prompts:write so curators can edit defaults
+	// without inheriting prompt-template / A-B-test authoring.
 	mux.Handle("/admin/v1/archetype-defaults", requireAdmin(RequirePermission(PermPromptsRead)(http.HandlerFunc(h.ArchetypeDefaultsRouter))))
 	mux.Handle("/admin/v1/archetype-defaults/", requireAdmin(RequirePermission(PermPromptsRead)(http.HandlerFunc(h.ArchetypeDefaultsRouter))))
 	// "Seed this user's wardrobe with their archetype defaults"
