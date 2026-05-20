@@ -13,6 +13,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -381,17 +382,27 @@ func itemToJobItem(it *singleItemClothingItem) jobItem {
 }
 
 // flattenTraits projects the (potentially deep) structured
-// description into a flat map[string]string. Only top-level
-// string-valued fields are kept; nested objects are dropped
-// here so the wardrobe item table stays predictable. Admins
-// can drill into the full description via the HITL queue.
+// description into a flat map[string]string. For each top-level
+// key, we surface a representative string leaf so the mobile
+// client (TraitSelectionScreen) can pre-fill its inputs and let
+// the Done button enable — empty values dead-end that flow.
+//
+// Selection rule per top-level value:
+//   - string  → kept verbatim (trimmed); empty strings dropped.
+//   - object  → the "primary" leaf is preferred (matches the
+//     orchestrator's closed-enum garment description, where
+//     attributes nest as {primary, secondary, ...}); otherwise
+//     the first non-empty string leaf found by a sorted-key DFS.
+//   - other   → dropped (numbers, bools, arrays don't fit the
+//     map[string]string trait shape; admins can drill into the
+//     full description via the HITL queue).
 func flattenTraits(structured map[string]any) map[string]string {
 	if len(structured) == 0 {
 		return nil
 	}
 	out := make(map[string]string, len(structured))
 	for k, v := range structured {
-		if s, ok := v.(string); ok {
+		if s, ok := firstStringLeaf(v); ok {
 			out[k] = s
 		}
 	}
@@ -399,6 +410,44 @@ func flattenTraits(structured map[string]any) map[string]string {
 		return nil
 	}
 	return out
+}
+
+// firstStringLeaf returns a representative non-empty string from
+// v. See flattenTraits for the selection rule; this helper exists
+// so the rule is testable in isolation and recursive for nested
+// attributes (e.g. `color.primary.value`).
+func firstStringLeaf(v any) (string, bool) {
+	switch x := v.(type) {
+	case string:
+		s := strings.TrimSpace(x)
+		if s == "" {
+			return "", false
+		}
+		return s, true
+	case map[string]any:
+		if p, ok := x["primary"]; ok {
+			if s, ok := firstStringLeaf(p); ok {
+				return s, true
+			}
+		}
+		// Sorted iteration keeps the choice deterministic when
+		// several leaves qualify — important for tests and for
+		// stable diffs when the same item is re-detected.
+		keys := make([]string, 0, len(x))
+		for k := range x {
+			if k == "primary" {
+				continue
+			}
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			if s, ok := firstStringLeaf(x[k]); ok {
+				return s, true
+			}
+		}
+	}
+	return "", false
 }
 
 // Compile-time guard so Go stops the build if the multipart
