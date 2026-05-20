@@ -49,6 +49,23 @@ func TestHasPermission_Readonly(t *testing.T) {
 	}
 }
 
+func TestHasPermission_Curator(t *testing.T) {
+	roles := []string{string(RoleCurator)}
+	if !HasPermission(roles, PermPromptsRead) {
+		t.Error("curator should have prompts:read (archetype-defaults curation)")
+	}
+	for _, p := range []Permission{
+		PermUsersRead, PermUsersPII, PermTracesRead, PermTracesRerun,
+		PermPromptsWrite, PermDetectionsRerun, PermSpendRead,
+		PermBudgetsWrite, PermRoutingWrite, PermSessionsView,
+		PermAdminsManage,
+	} {
+		if HasPermission(roles, p) {
+			t.Errorf("curator should NOT have %q", p)
+		}
+	}
+}
+
 func TestHasPermission_UnknownRole_NoPermissions(t *testing.T) {
 	if HasPermission([]string{"superuser"}, PermUsersRead) {
 		t.Error("unknown role should grant nothing")

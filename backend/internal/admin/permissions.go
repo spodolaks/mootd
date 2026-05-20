@@ -96,6 +96,15 @@ var rolePermissions = map[Role]map[Permission]bool{
 		PermSpendRead:  true,
 		// No PII, no rerun, no writes.
 	},
+	RoleCurator: {
+		// Archetype-defaults curation (both read + write) is gated
+		// by prompts:read alone — see routes.go where
+		// /admin/v1/archetype-defaults* shares one permission for
+		// all methods. Granting just this one capability gives the
+		// curator full ability to add/edit/delete defaults plus the
+		// read-only Prompts view, and nothing else in the panel.
+		PermPromptsRead: true,
+	},
 }
 
 // HasPermission reports whether any of the supplied roles grants
