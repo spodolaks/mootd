@@ -29,17 +29,27 @@ const hydrateSavedBoard = (board: SavedMoodBoard): SavedMoodBoard => ({
 const normaliseOptions = (options?: string | SaveOptions): SaveOptions =>
   typeof options === 'string' ? { date: options } : options ?? {};
 
+/** Drop fields the wire schema doesn't know about. The FE's Outfit type
+ *  carries `itemSnapshots` (the resolved-at-generation list with the
+ *  `source` tag for owned vs filler items), but the backend's Outfit
+ *  has no matching JSON tag — its strict decoder rejects the unknown
+ *  key with a 400. Snapshots aren't actually shipped on save either
+ *  way: the handler overwrites outfit.snapshots from the user's
+ *  wardrobe before persisting (see moodboard/handler.go), so stripping
+ *  these client-only fields is purely cosmetic for the request body. */
+const toWirePayload = ({ itemSnapshots: _itemSnapshots, ...rest }: Outfit): Outfit => rest;
+
 export class ApiMoodBoardRepository implements IMoodBoardRepository {
   async save(outfit: Outfit, options?: string | SaveOptions): Promise<SavedMoodBoard> {
     const opts = normaliseOptions(options);
     const board = await apiClient.post<SavedMoodBoard>('/v1/moodboards', {
-      outfit,
+      outfit: toWirePayload(outfit),
       date: opts.date ?? new Date().toISOString().split('T')[0],
       // Send only when present so older server deploys (pre-#8) that reject
       // unknown fields don't 400 on the absence of the schema — the decoder
       // skips JSON keys with missing values.
       ...(opts.generatedBatch && opts.generatedBatch.length > 0
-        ? { generatedBatch: opts.generatedBatch }
+        ? { generatedBatch: opts.generatedBatch.map(toWirePayload) }
         : {}),
       ...(opts.jobId ? { jobId: opts.jobId } : {}),
       ...(opts.boardImage ? { boardImage: opts.boardImage } : {}),
