@@ -376,7 +376,7 @@ func itemToJobItem(it *singleItemClothingItem) jobItem {
 		ImageURL:              imgURL,
 		Confidence:            it.ConfidenceOverall,
 		Skipped:               false,
-		Traits:                flattenTraits(it.StructuredDescription),
+		Traits:                normalizeTraitKeys(flattenTraits(it.StructuredDescription)),
 		StructuredDescription: it.StructuredDescription,
 	}
 }
@@ -408,6 +408,46 @@ func flattenTraits(structured map[string]any) map[string]string {
 	}
 	if len(out) == 0 {
 		return nil
+	}
+	return out
+}
+
+// traitKeyAliases renames detector-side trait keys into the names
+// the mobile client's trait template uses. The detector emits the
+// GarmentDescription schema (color_primary, silhouette, …); the
+// app's per-category template (wardrobeStore.ts) asks for `color`,
+// `style`, etc. Without this rename the user sees two duplicate
+// fields per concept — one auto-filled, one empty — and the Done
+// button can't enable. Keep this map narrow: only rename when the
+// concepts truly overlap.
+var traitKeyAliases = map[string]string{
+	"color_primary": "color",
+	"silhouette":    "style",
+}
+
+// normalizeTraitKeys applies traitKeyAliases to a flat trait map.
+// When the destination key already carries a value we keep it
+// (the explicit name wins over the alias) — otherwise we move the
+// value across and drop the source key so the client doesn't see
+// both. Returns nil for nil / empty input so the downstream
+// jobItem.Traits stays consistent with flattenTraits.
+func normalizeTraitKeys(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return in
+	}
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	for src, dst := range traitKeyAliases {
+		v, hasSrc := out[src]
+		if !hasSrc {
+			continue
+		}
+		if _, hasDst := out[dst]; !hasDst {
+			out[dst] = v
+		}
+		delete(out, src)
 	}
 	return out
 }

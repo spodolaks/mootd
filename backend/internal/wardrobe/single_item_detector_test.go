@@ -122,3 +122,66 @@ func TestFlattenTraits(t *testing.T) {
 		})
 	}
 }
+
+func TestNormalizeTraitKeys(t *testing.T) {
+	tests := []struct {
+		name string
+		in   map[string]string
+		want map[string]string
+	}{
+		{
+			name: "nil input returns nil",
+			in:   nil,
+			want: nil,
+		},
+		{
+			// End-to-end realistic case: orchestrator emits
+			// GarmentDescription keys; mobile expects color/style.
+			name: "renames color_primary and silhouette",
+			in: map[string]string{
+				"color_primary": "navy",
+				"material":      "denim",
+				"fit":           "slim",
+				"silhouette":    "straight-leg",
+			},
+			want: map[string]string{
+				"color":    "navy",
+				"material": "denim",
+				"fit":      "slim",
+				"style":    "straight-leg",
+			},
+		},
+		{
+			// Both src and dst present: keep the explicit dst,
+			// drop the alias. Defensive against an upstream that
+			// starts emitting both.
+			name: "explicit color wins over color_primary",
+			in: map[string]string{
+				"color":         "scarlet",
+				"color_primary": "red",
+			},
+			want: map[string]string{"color": "scarlet"},
+		},
+		{
+			name: "unaliased keys pass through",
+			in: map[string]string{
+				"material": "cotton",
+				"pattern":  "striped",
+				"season":   "summer",
+			},
+			want: map[string]string{
+				"material": "cotton",
+				"pattern":  "striped",
+				"season":   "summer",
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := normalizeTraitKeys(tc.in)
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("normalizeTraitKeys(%#v) = %#v, want %#v", tc.in, got, tc.want)
+			}
+		})
+	}
+}
