@@ -51,7 +51,7 @@ func (b *BackgroundRemover) RemoveBackground(imageData []byte, filename string) 
 	// bytes.Reader — body needs to be replayable.
 	var body bytes.Buffer
 	mw := multipart.NewWriter(&body)
-	part, err := mw.CreateFormFile("files", filename)
+	part, err := mw.CreateFormFile("file", filename)
 	if err != nil {
 		return nil, fmt.Errorf("create form file: %w", err)
 	}
@@ -91,7 +91,7 @@ func (b *BackgroundRemover) RemoveBackground(imageData []byte, filename string) 
 		},
 	}, func(ctx context.Context) error {
 		req, reqErr := http.NewRequestWithContext(ctx, http.MethodPost,
-			b.baseURL+"/remove-background", bytes.NewReader(bodyBytes)) //nolint:gosec // URL from trusted config
+			b.baseURL+"/remove", bytes.NewReader(bodyBytes)) //nolint:gosec // URL from trusted config
 		if reqErr != nil {
 			return fmt.Errorf("build request: %w", reqErr)
 		}
