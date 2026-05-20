@@ -46,6 +46,7 @@ type Handler struct {
 	wardrobeSeeder    WardrobeSeeder              // optional — wired alongside archetypeDefaults so admin can preview seeding
 	imageStore        ImageStore                  // optional — pairs with itemDetector for upload+autodetect
 	itemDetector      ItemDetector                // optional — pairs with imageStore; when either nil, /archetype-defaults/detect → 503
+	bgRemover         BackgroundRemover           // optional — when nil, detect skips bg removal and pngImageUrl is omitted
 	secret        string
 }
 

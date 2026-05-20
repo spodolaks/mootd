@@ -389,8 +389,15 @@ type ArchetypeDefaultDetectionResult struct {
 	// ImageUrl Path the FE renders + the value to send back on create.
 	// Resolves via the public wardrobe ServeImage route, so
 	// seeded copies on user wardrobes also load without auth.
-	ImageUrl              string                  `json:"imageUrl"`
-	Label                 string                  `json:"label"`
+	ImageUrl string `json:"imageUrl"`
+	Label    string `json:"label"`
+
+	// PngImageUrl Background-removed PNG path; populated when the bg-removal
+	// service succeeded during detect. Same service the mobile
+	// wardrobe upload uses; omitted when the service is
+	// unconfigured or the call failed (non-fatal — the curator
+	// can still save the row with imageUrl alone).
+	PngImageUrl           *string                 `json:"pngImageUrl,omitempty"`
 	StructuredDescription *map[string]interface{} `json:"structuredDescription,omitempty"`
 	Traits                *map[string]string      `json:"traits,omitempty"`
 }

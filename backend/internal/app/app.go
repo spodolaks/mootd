@@ -455,6 +455,10 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 		//      Returns mock data when the orchestrator is in default
 		//      USE_REAL_STAGE1=false mode, so we put Claude first.
 		adminHandler.WithImageStore(&wardrobeImageStoreAdapter{repo: wardrobeRepo})
+		// Same bg-removal service the mobile wardrobe upload uses
+		// — passed straight through; the *wardrobe.BackgroundRemover
+		// concrete type already satisfies admin.BackgroundRemover.
+		adminHandler.WithBackgroundRemover(bgRemover)
 		switch {
 		case a.AnthropicAPIKey != "":
 			adminHandler.WithItemDetector(admin.NewClaudeItemDetector(
