@@ -155,6 +155,22 @@ func (m *memoryRepo) SetMFARecoveryCodes(ctx context.Context, adminID string, ha
 	return nil
 }
 
+func (m *memoryRepo) MarkTOTPStepUsed(ctx context.Context, adminID string, step int64) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for k, a := range m.admins {
+		if a.ID == adminID {
+			if step <= a.MFALastTOTPStep {
+				return false, nil // already consumed → replay
+			}
+			a.MFALastTOTPStep = step
+			m.admins[k] = a
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (m *memoryRepo) DisableMFA(ctx context.Context, adminID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -225,6 +241,30 @@ func TestLogin_Success(t *testing.T) {
 	// The access token must be parseable by the admin JWT validator.
 	if _, err := ValidateToken(resp.AccessToken, testSecret); err != nil {
 		t.Errorf("access token fails validation: %v", err)
+	}
+}
+
+// #108 B4: a TOTP code must not be replayable within its validity
+// window. First login with a code succeeds; a second login presenting
+// the SAME code is rejected.
+func TestLogin_TOTPReplayRejected(t *testing.T) {
+	h, repo := newTestHandler(t)
+	secret, _ := GenerateTOTPSecret()
+	if err := repo.SetMFAEnrollment(context.Background(), "adm_1", secret, nil); err != nil {
+		t.Fatalf("enroll: %v", err)
+	}
+	now := time.Now()
+	code := generateAt(t, secret, now)
+
+	body := `{"email":"admin@example.com","password":"hunter2hunter2","totp":"` + code + `"}`
+	rec1, _ := doJSON(h.Login, http.MethodPost, "/admin/v1/auth/login", body)
+	if rec1.Code != http.StatusOK {
+		t.Fatalf("first login should succeed, got %d body=%s", rec1.Code, rec1.Body)
+	}
+
+	rec2, _ := doJSON(h.Login, http.MethodPost, "/admin/v1/auth/login", body)
+	if rec2.Code != http.StatusUnauthorized {
+		t.Fatalf("replay of the same TOTP code must be rejected, got %d", rec2.Code)
 	}
 }
 

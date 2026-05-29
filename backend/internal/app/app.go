@@ -989,13 +989,17 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 	adminAllowlist := middleware.AdminIPAllowlist(adminCIDRs, a.Logger)
 	gatedMux := http.NewServeMux()
 	gatedMux.Handle("/admin/v1/", adminAllowlist(mux))
-	// /metrics is exempt from the admin IP allowlist + global
-	// rate limiter — Prometheus scrapes every 15s and shouldn't
-	// fight for token bucket against real users. Bind it on the
-	// gated mux so the operator gates exposure at the front
-	// (Caddy basic-auth or firewall) rather than a JWT middleware
-	// that Prometheus doesn't speak.
-	gatedMux.Handle("/metrics", metrics.Handler())
+	// /metrics is bound behind the SAME admin IP allowlist as
+	// /admin/v1/* (#108 B3). Previously it was exposed to anyone who
+	// could reach the port, with protection relying entirely on an
+	// external Caddy/firewall ACL the binary couldn't enforce — a
+	// missing front-proxy rule leaked route labels, error rates and
+	// cost/usage counters to the internet. It still skips the JWT
+	// middleware (Prometheus doesn't speak it); when ADMIN_ALLOWED_IPS
+	// is unset the allowlist is allow-all (dev), so this is a no-op
+	// there. In production the scraper's IP must be in ADMIN_ALLOWED_IPS
+	// (or front /metrics at Caddy).
+	gatedMux.Handle("/metrics", adminAllowlist(metrics.Handler()))
 	gatedMux.Handle("/", mux)
 
 	// Middleware chain (outermost → innermost):

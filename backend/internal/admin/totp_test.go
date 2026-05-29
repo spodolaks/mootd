@@ -7,6 +7,30 @@ import (
 	"time"
 )
 
+func TestVerifyTOTPStep_ReturnsMatchedStep(t *testing.T) {
+	secret, _ := GenerateTOTPSecret()
+	now := time.Unix(1_800_000_000, 0).UTC()
+	code := generateAt(t, secret, now)
+	step, ok := VerifyTOTPStep(secret, code, now)
+	if !ok {
+		t.Fatal("expected match")
+	}
+	if want := uint64(now.Unix() / totpPeriod); step != want {
+		t.Errorf("step: got %d, want %d", step, want)
+	}
+}
+
+func TestVerifyTOTPStep_RejectsBad(t *testing.T) {
+	secret, _ := GenerateTOTPSecret()
+	if _, ok := VerifyTOTPStep(secret, "000000", time.Now()); ok {
+		// extremely unlikely to be the real code; guards the bad-code path
+		t.Error("expected reject for an arbitrary code")
+	}
+	if _, ok := VerifyTOTPStep(secret, "abc", time.Now()); ok {
+		t.Error("expected reject for a malformed code")
+	}
+}
+
 func TestGenerateTOTPSecret_Length(t *testing.T) {
 	s, err := GenerateTOTPSecret()
 	if err != nil {
