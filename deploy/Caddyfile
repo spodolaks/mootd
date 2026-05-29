@@ -1,4 +1,4 @@
-# Production Caddyfile for the MOOTD backend.
+# Production Caddyfile for the MOOTD backend, admin panel, and web app.
 #
 # Caddy terminates TLS (Let's Encrypt, renewed automatically) and reverse-
 # proxies to the backend container bound to loopback. Cloudflare sits in
@@ -9,39 +9,91 @@
 # Install: copy this file to /etc/caddy/Caddyfile on the server and
 # `systemctl reload caddy`. Caddy requests the cert on first request to
 # the hostname and stores it in /var/lib/caddy.
+#
+# Three hostnames are served — all three must have a block here, or
+# Cloudflare returns 525 (origin TLS handshake fails) for the missing one:
+#   api.spodolaks.id.lv    → backend container
+#   admin.spodolaks.id.lv  → admin panel container
+#   spodolaks.id.lv        → static Expo web export at /var/www/mootd
 
 api.spodolaks.id.lv {
-    # Backend compose binds 127.0.0.1:8089; nothing else on the host can
-    # hit it, so this proxy is the only public path into the service.
-    reverse_proxy 127.0.0.1:8089
+	# Backend compose binds 127.0.0.1:8089; nothing else on the host can
+	# hit it, so this proxy is the only public path into the service.
+	reverse_proxy 127.0.0.1:8089
 
-    # Cloudflare puts the real client address in CF-Connecting-IP. Forward
-    # it as X-Forwarded-For so the backend's logging middleware + per-IP
-    # rate limiter see the user, not Cloudflare's edge node.
-    request_header X-Forwarded-For {http.request.header.CF-Connecting-IP}
+	# Cloudflare puts the real client address in CF-Connecting-IP. Forward
+	# it as X-Forwarded-For so the backend's logging middleware + per-IP
+	# rate limiter see the user, not Cloudflare's edge node.
+	request_header X-Forwarded-For {http.request.header.CF-Connecting-IP}
 
-    encode gzip
+	encode gzip
 
-    log {
-        output file /var/log/caddy/api.log
-        format json
-    }
+	log {
+		output file /var/log/caddy/api.log
+		format json
+	}
 }
 
 admin.spodolaks.id.lv {
-    # mootd-admin (Next.js) runs in the same compose stack as the backend,
-    # built from ../mootd-admin/apps/admin/Dockerfile and bound to
-    # 127.0.0.1:3001. Caddy is the only public ingress.
-    reverse_proxy 127.0.0.1:3001
+	# mootd-admin (Next.js) runs in the same compose stack as the backend,
+	# built from ../mootd-admin/apps/admin/Dockerfile and bound to
+	# 127.0.0.1:3001. Caddy is the only public ingress.
+	reverse_proxy 127.0.0.1:3001
 
-    # Same client-IP forwarding as the api block so the admin's own
-    # request-log middleware sees real users behind Cloudflare.
-    request_header X-Forwarded-For {http.request.header.CF-Connecting-IP}
+	# Same client-IP forwarding as the api block so the admin's own
+	# request-log middleware sees real users behind Cloudflare.
+	request_header X-Forwarded-For {http.request.header.CF-Connecting-IP}
 
-    encode gzip
+	encode gzip
 
-    log {
-        output file /var/log/caddy/admin.log
-        format json
-    }
+	log {
+		output file /var/log/caddy/admin.log
+		format json
+	}
+}
+
+spodolaks.id.lv {
+	# Apex serves the static Expo web export (the React Native app built
+	# for web via `npx expo export --platform web`). Deploy step: build
+	# app/dist/ and sync it to /var/www/mootd — see deploy/README.md.
+	root * /var/www/mootd
+
+	# Content-hashed build assets (Expo names every JS bundle/asset with a
+	# content hash). Serve them as-is, cache forever — and CRUCIALLY keep
+	# them OUT of the SPA fallback below. A missing hashed file MUST 404,
+	# never return index.html: if a stale cached index.html requests an
+	# old, now-deleted bundle hash and gets HTML back with a 200, the
+	# browser parses HTML as JS → "Uncaught SyntaxError: Unexpected token
+	# '<'" → the app white-screens. This is what broke web Google login.
+	@assets path /_expo/* /assets/*
+	handle @assets {
+		header Cache-Control "public, max-age=31536000, immutable"
+		file_server
+	}
+
+	# Everything else: the HTML shell + client-side routing. Expo's web
+	# export statically renders one .html per route (/calendar →
+	# calendar.html); try the literal path, then its .html form, then fall
+	# back to index.html. index.html must NOT be cached, or a new deploy is
+	# missed and the browser keeps requesting old, deleted bundle hashes.
+	handle {
+		header Cache-Control "no-cache"
+		try_files {path} {path}.html /index.html
+		file_server
+	}
+
+	# NOTE: deliberately NO Cross-Origin-Opener-Policy header here. The
+	# Google sign-in popup (expo-auth-session) must keep its window.opener
+	# link back to this page so it can postMessage the OAuth token home.
+	# Setting COOP: same-origin-allow-popups SEVERS window.opener when the
+	# popup navigates back here from accounts.google.com (cross-origin) —
+	# the token is then lost and login silently dead-ends on the login
+	# screen. Default (unsafe-none / no header) keeps the opener intact.
+
+	encode gzip
+
+	log {
+		output file /var/log/caddy/mootd.log
+		format json
+	}
 }
