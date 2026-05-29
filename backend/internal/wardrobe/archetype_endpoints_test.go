@@ -84,6 +84,9 @@ func (f *fakeWardrobeRepo) FindByUserPaginated(context.Context, string, int, *pa
 func (f *fakeWardrobeRepo) FindBySeededDefault(context.Context, string, string) (*ClothingItem, error) {
 	return nil, nil
 }
+func (f *fakeWardrobeRepo) OwnsItem(context.Context, string, string) (bool, error) {
+	panic("unused")
+}
 func (f *fakeWardrobeRepo) UpdateItem(context.Context, string, string, map[string]string, string, string) error {
 	panic("unused")
 }

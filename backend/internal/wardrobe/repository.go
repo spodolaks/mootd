@@ -28,6 +28,11 @@ type Repository interface {
 	// (userId, traits.seededFromDefaultId) compound index ensured at
 	// boot. Returns (nil, nil) when no row matches.
 	FindBySeededDefault(ctx context.Context, userID, defaultID string) (*ClothingItem, error)
+	// OwnsItem reports whether itemID exists AND belongs to userID.
+	// Used to gate image reads/writes that key GridFS by itemID alone
+	// (which carries no ownership) so a caller can't touch another
+	// user's item image — see updateItem / Search (IDOR fix).
+	OwnsItem(ctx context.Context, itemID, userID string) (bool, error)
 	// UpdateItem sets traits and optionally label and imageUrl. Empty strings are ignored.
 	UpdateItem(ctx context.Context, id, userID string, traits map[string]string, label, imageURL string) error
 	Delete(ctx context.Context, id, userID string) error
@@ -80,6 +85,21 @@ func (r *MongoRepository) Save(ctx context.Context, item ClothingItem) error {
 	update := bson.M{"$set": item}
 	_, err := r.collection().UpdateOne(ctx, filter, update, options.UpdateOne().SetUpsert(true))
 	return err
+}
+
+// OwnsItem reports whether itemID exists and is owned by userID. Cheap
+// existence check (projects only _id) used to authorize image-layer
+// operations that key GridFS by itemID alone.
+func (r *MongoRepository) OwnsItem(ctx context.Context, itemID, userID string) (bool, error) {
+	err := r.collection().FindOne(ctx, bson.M{"_id": itemID, "userId": userID},
+		options.FindOne().SetProjection(bson.M{"_id": 1})).Err()
+	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
 }
 
 // UpdateItem sets traits for the item and optionally updates label and imageUrl.
