@@ -31,7 +31,10 @@ func CORS(allowedOrigins []string) func(http.Handler) http.Handler {
 			}
 
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+			// X-Trial-Id / X-Describer / X-Request-Id carry the training-trial
+			// routing metadata on POST /admin/v1/training/process (#36). Without
+			// them in the allowlist the browser's preflight blocks the upload.
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Trial-Id, X-Describer, X-Request-Id")
 
 			if r.Method == http.MethodOptions {
 				w.Header().Set("Access-Control-Max-Age", "86400")
