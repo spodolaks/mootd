@@ -278,8 +278,27 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		}
 		// Try TOTP first. Recovery codes have dashes / mixed case;
 		// TOTP is always 6 digits — cheap discriminator.
-		if len(presented) == totpDigits && VerifyTOTP(admin.MFASecret, presented, time.Now()) {
-			mfaVerified = true
+		if step, ok := VerifyTOTPStep(admin.MFASecret, presented, time.Now()); ok {
+			// Block replay within the ±90s window: the matched step
+			// must be newer than the last one this admin consumed.
+			// MarkTOTPStepUsed is an atomic conditional update, so two
+			// concurrent logins with the same code can't both pass.
+			// A storage error fails open (logged) to avoid locking an
+			// admin out on a Mongo blip — same posture as the
+			// recovery-code path; the replay guard still holds in
+			// normal operation.
+			fresh, mErr := h.repo.MarkTOTPStepUsed(ctx, admin.ID, int64(step))
+			if mErr != nil {
+				h.logger.Printf("admin login: mark TOTP step used: %v (allowing)", mErr)
+				mfaVerified = true
+			} else if fresh {
+				mfaVerified = true
+			} else {
+				// Code already used this window — reject as replay,
+				// with the same opaque message as any other MFA failure.
+				response.WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid email or password"})
+				return
+			}
 		} else if ok, remaining := ConsumeRecoveryCode(admin.MFARecoveryCodes, presented); ok {
 			mfaVerified = true
 			// Persist the consumed-list update before issuing the

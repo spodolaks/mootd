@@ -71,14 +71,28 @@ func OTPAuthURI(secret, accountName string) string {
 // generated from `secret` within the configured ±skew window.
 // `now` is parameterised for tests; production passes
 // time.Now().
+//
+// Use this for enrollment (proving the user can produce a code).
+// For LOGIN use VerifyTOTPStep so the matched step can be recorded
+// and replays within the validity window rejected (#108 B4).
 func VerifyTOTP(secret, code string, now time.Time) bool {
+	_, ok := VerifyTOTPStep(secret, code, now)
+	return ok
+}
+
+// VerifyTOTPStep is VerifyTOTP that also returns the TOTP step
+// (counter) the code matched. The step lets the caller persist the
+// highest-consumed step and reject a code presented more than once
+// within its ±skew (~90s) validity window — without it a leaked or
+// shoulder-surfed code is replayable for the whole window.
+func VerifyTOTPStep(secret, code string, now time.Time) (uint64, bool) {
 	code = strings.TrimSpace(code)
 	if len(code) != totpDigits {
-		return false
+		return 0, false
 	}
 	key, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(strings.ToUpper(secret))
 	if err != nil {
-		return false
+		return 0, false
 	}
 	step := uint64(now.Unix() / totpPeriod)
 	for offset := -totpSkew; offset <= totpSkew; offset++ {
@@ -89,10 +103,10 @@ func VerifyTOTP(secret, code string, now time.Time) bool {
 			c += uint64(offset)
 		}
 		if hotp(key, c) == code {
-			return true
+			return c, true
 		}
 	}
-	return false
+	return 0, false
 }
 
 // hotp implements RFC 4226 HOTP (the building block of TOTP).

@@ -28,6 +28,13 @@ type Repository interface {
 	// SetMFARecoveryCodes replaces the recovery-code list (used
 	// when ConsumeRecoveryCode burns one on login). Atomic.
 	SetMFARecoveryCodes(ctx context.Context, adminID string, hashes []string) error
+	// MarkTOTPStepUsed atomically records `step` as consumed iff it is
+	// strictly greater than the admin's stored MFALastTOTPStep. Returns
+	// true when the step was newly consumed (login may proceed), false
+	// when it was already used (a replay within the validity window).
+	// The conditional update is the atomicity that makes the replay
+	// guard safe under concurrent logins (#108 B4).
+	MarkTOTPStepUsed(ctx context.Context, adminID string, step int64) (bool, error)
 	// DisableMFA clears secret + recovery codes + flips
 	// MFAEnforced=false. Reserved for "lost device" flows; not
 	// exposed via HTTP in v1.
@@ -198,6 +205,22 @@ func (r *MongoRepository) SetMFARecoveryCodes(ctx context.Context, adminID strin
 		"$set": bson.M{"mfaRecoveryCodes": hashes},
 	})
 	return err
+}
+
+// MarkTOTPStepUsed records `step` as consumed iff it's strictly newer
+// than the stored MFALastTOTPStep. The `mfaLastTotpStep < step` filter
+// makes the check-and-set atomic: of two concurrent logins presenting
+// the same code (same step), exactly one update matches and the other
+// gets ModifiedCount 0 → reported as a replay (#108 B4).
+func (r *MongoRepository) MarkTOTPStepUsed(ctx context.Context, adminID string, step int64) (bool, error) {
+	res, err := r.adminsCol().UpdateOne(ctx,
+		bson.M{"_id": adminID, "mfaLastTotpStep": bson.M{"$lt": step}},
+		bson.M{"$set": bson.M{"mfaLastTotpStep": step}},
+	)
+	if err != nil {
+		return false, err
+	}
+	return res.ModifiedCount == 1, nil
 }
 
 // DisableMFA clears MFA state. Not exposed via HTTP today —
