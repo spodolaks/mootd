@@ -54,6 +54,9 @@ func (m *memTrainingTrials) ListTrainingTrials(ctx context.Context, q TrainingTr
 	}
 	var out []TrainingTrial
 	for _, t := range m.rows {
+		if t.Source == TrainingSourceHITL {
+			continue // HITL-ingested records are export-only (#126)
+		}
 		if q.Status != "" && t.Status != q.Status {
 			continue
 		}
@@ -103,6 +106,9 @@ func (m *memTrainingTrials) SubmitTrainingTrial(ctx context.Context, id, submitt
 	}
 	if in.GemmaRequestID != "" {
 		t.GemmaRequestID = in.GemmaRequestID
+	}
+	if in.Source != "" {
+		t.Source = in.Source
 	}
 	m.rows[id] = t
 	return &t, nil

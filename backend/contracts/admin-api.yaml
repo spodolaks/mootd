@@ -2488,6 +2488,14 @@ components:
           type: string
         gemmaRequestId:
           type: string
+        source:
+          type: string
+          enum: [trial, hitl]
+          description: |
+            Provenance. Absent/`trial` = an admin ran this trial
+            manually. `hitl` = auto-captured from a HITL attribute
+            correction (mootd-admin#126) — excluded from the manual
+            review list, but included in exports.
 
     TrainingTrialPage:
       type: object

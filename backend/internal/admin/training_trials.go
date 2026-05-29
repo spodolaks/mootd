@@ -39,6 +39,15 @@ const (
 	TrainingStatusSubmitted = "submitted"
 )
 
+// Training-record provenance (mootd-admin#126). Trials an admin ran
+// manually carry no source (treated as "trial"); records auto-captured
+// from HITL attribute corrections carry "hitl" — excluded from the
+// manual review list but included in exports.
+const (
+	TrainingSourceTrial = "trial"
+	TrainingSourceHITL  = "hitl"
+)
+
 // TrainingTrial is one row in the training_trials collection. The _id
 // is the client-minted trial id (also the key the orchestrator poll
 // uses), so create is naturally idempotent on it.
@@ -74,6 +83,9 @@ type TrainingTrial struct {
 	SourceImageURL    string         `bson:"sourceImageUrl,omitempty" json:"sourceImageUrl,omitempty"`
 	ClaudeRequestID   string         `bson:"claudeRequestId,omitempty" json:"claudeRequestId,omitempty"`
 	GemmaRequestID    string         `bson:"gemmaRequestId,omitempty" json:"gemmaRequestId,omitempty"`
+	// Source provenance: empty/"trial" = manually run; "hitl" =
+	// auto-captured from a HITL attribute correction (#126).
+	Source string `bson:"source,omitempty" json:"source,omitempty"`
 }
 
 // TrainingSubmitInput bundles everything a submit records. Carrying the
@@ -88,6 +100,7 @@ type TrainingSubmitInput struct {
 	SourceImageURL    string
 	ClaudeRequestID   string
 	GemmaRequestID    string
+	Source            string
 }
 
 // TrainingTrialQuery filters the list endpoint. Empty status returns
@@ -163,6 +176,11 @@ func (r *MongoRepository) ListTrainingTrials(ctx context.Context, q TrainingTria
 	}
 
 	filter := bson.M{}
+	// The manual review list excludes HITL-ingested records (#126):
+	// they're auto-captured and already reviewed, so they'd bury the
+	// trials an admin actually started. $ne also matches docs with no
+	// source field (the manual trials). Exports read every source.
+	filter["source"] = bson.M{"$ne": TrainingSourceHITL}
 	if q.Status != "" {
 		filter["status"] = q.Status
 	}
@@ -229,6 +247,9 @@ func (r *MongoRepository) SubmitTrainingTrial(ctx context.Context, id, submitted
 	}
 	if in.GemmaRequestID != "" {
 		set["gemmaRequestId"] = in.GemmaRequestID
+	}
+	if in.Source != "" {
+		set["source"] = in.Source
 	}
 	update := bson.M{
 		"$set": set,

@@ -3,6 +3,7 @@ package admin
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -194,9 +195,36 @@ func (h *Handler) HitlPatchAttributes(w http.ResponseWriter, r *http.Request, id
 		response.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+
+	// Training ingest (#126): when the training store is wired, snapshot
+	// the pre-edit structuredDescription BEFORE forwarding the patch, so
+	// we can record (rejected = original, chosen = original+patches) once
+	// the patch succeeds. Entirely best-effort — any failure here leaves
+	// the patch itself untouched.
+	var snap *hitlItemSnapshot
+	var patches map[string]any
+	if h.trainingTrials != nil {
+		var pb struct {
+			Patches map[string]any `json:"patches"`
+		}
+		if json.Unmarshal(body, &pb) == nil && len(pb.Patches) > 0 {
+			patches = pb.Patches
+			if s, gErr := h.fetchHitlItemSnapshot(r.Context(), id); gErr == nil {
+				snap = s
+			} else {
+				h.logger.Printf("admin training: hitl pre-snapshot %s: %v", id, gErr)
+			}
+		}
+	}
+
 	upstream := fmt.Sprintf("%s/v1/admin/items/%s/attributes", h.hitlProxy.BaseURL, urlPathEscape(id))
-	h.proxyForward(w, r, http.MethodPatch, upstream, body)
+	status := h.proxyForward(w, r, http.MethodPatch, upstream, body)
 	h.auditHitlAction(r, "hitl.patch_attributes", id, body)
+
+	if snap != nil && status >= 200 && status < 300 {
+		adminID, _ := AdminIDFromContext(r.Context())
+		h.ingestHitlCorrection(r.Context(), id, snap, patches, adminID)
+	}
 }
 
 // HitlRegenerate handles POST /admin/v1/items/{id}/regenerate.
@@ -242,7 +270,11 @@ func (h *Handler) hitlReady(w http.ResponseWriter) bool {
 // the response back verbatim. Body is the pre-read request body
 // (nil for GETs). Errors at the transport layer surface as 502;
 // orchestrator-level 4xx/5xx pass through.
-func (h *Handler) proxyForward(w http.ResponseWriter, r *http.Request, method, upstream string, body []byte) {
+// Returns the HTTP status written to the client (the orchestrator's
+// status on success, or 502 on a transport/build failure) so callers
+// that need to act only on a successful upstream call — e.g. HITL
+// training ingest (#126) — can gate on it.
+func (h *Handler) proxyForward(w http.ResponseWriter, r *http.Request, method, upstream string, body []byte) int {
 	ctx, cancel := context.WithTimeout(r.Context(), h.hitlProxy.Client.Timeout)
 	defer cancel()
 
@@ -254,7 +286,7 @@ func (h *Handler) proxyForward(w http.ResponseWriter, r *http.Request, method, u
 	if err != nil {
 		h.logger.Printf("admin hitl proxy: build request %s %s: %v", method, upstream, err)
 		response.WriteJSON(w, http.StatusBadGateway, map[string]string{"error": "upstream request build failed"})
-		return
+		return http.StatusBadGateway
 	}
 	if body != nil && r.Header.Get("Content-Type") != "" {
 		req.Header.Set("Content-Type", r.Header.Get("Content-Type"))
@@ -275,7 +307,7 @@ func (h *Handler) proxyForward(w http.ResponseWriter, r *http.Request, method, u
 	if err != nil {
 		h.logger.Printf("admin hitl proxy: %s %s failed: %v", method, upstream, err)
 		response.WriteJSON(w, http.StatusBadGateway, map[string]string{"error": "orchestrator unreachable"})
-		return
+		return http.StatusBadGateway
 	}
 	defer resp.Body.Close()
 
@@ -290,6 +322,7 @@ func (h *Handler) proxyForward(w http.ResponseWriter, r *http.Request, method, u
 	if _, err := io.Copy(w, resp.Body); err != nil {
 		h.logger.Printf("admin hitl proxy: copy response %s: %v", upstream, err)
 	}
+	return resp.StatusCode
 }
 
 // readBody pulls the request body into a byte slice (capped) so

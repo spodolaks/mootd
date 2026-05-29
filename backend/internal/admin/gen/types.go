@@ -222,6 +222,12 @@ const (
 	TrainingPickKindGemma  TrainingPickKind = "gemma"
 )
 
+// Defines values for TrainingTrialSource.
+const (
+	Hitl  TrainingTrialSource = "hitl"
+	Trial TrainingTrialSource = "trial"
+)
+
 // Defines values for TrainingTrialStatus.
 const (
 	TrainingTrialStatusInReview  TrainingTrialStatus = "in_review"
@@ -1701,6 +1707,12 @@ type TrainingTrial struct {
 	// Picks Attribute dotted-path → winning side.
 	Picks *map[string]TrainingPickKind `json:"picks,omitempty"`
 
+	// Source Provenance. Absent/`trial` = an admin ran this trial
+	// manually. `hitl` = auto-captured from a HITL attribute
+	// correction (mootd-admin#126) — excluded from the manual
+	// review list, but included in exports.
+	Source *TrainingTrialSource `json:"source,omitempty"`
+
 	// SourceImageUrl gridfs:// URI of the source garment photo both describers ran on.
 	SourceImageUrl *string             `json:"sourceImageUrl,omitempty"`
 	Status         TrainingTrialStatus `json:"status"`
@@ -1710,6 +1722,12 @@ type TrainingTrial struct {
 	// TrialId Client-minted trial id; also the orchestrator poll key and the Mongo _id.
 	TrialId string `json:"trialId"`
 }
+
+// TrainingTrialSource Provenance. Absent/`trial` = an admin ran this trial
+// manually. `hitl` = auto-captured from a HITL attribute
+// correction (mootd-admin#126) — excluded from the manual
+// review list, but included in exports.
+type TrainingTrialSource string
 
 // TrainingTrialStatus defines model for TrainingTrial.Status.
 type TrainingTrialStatus string
