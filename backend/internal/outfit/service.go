@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"mootd/backend/internal/archetype"
@@ -246,6 +247,7 @@ type Service struct {
 	budgetEnforcer    BudgetEnforcer          // optional — nil disables P4-02 budget gate
 	archetypeDefaults archetypeDefaultsLoader // optional — when nil, only user wardrobe feeds the LLM
 	logger            *log.Logger
+	heartbeatInterval time.Duration // SSE progress heartbeat cadence; 0 → default 2s. Settable for tests.
 }
 
 // llmRecorder is the narrow interface the outfit service needs from
@@ -383,54 +385,93 @@ func (s *Service) GenerateOutfitsWithProgress(
 	weather Weather,
 	onProgress StreamCallback,
 ) ([]Outfit, error) {
-	if onProgress != nil {
-		// Fire-and-forget; if the wire-write fails we let the
-		// generation proceed — the client sees the failure when
-		// the SSE connection drops.
-		_ = onProgress(GenerateProgress{Stage: StageConnecting})
+	return s.runWithProgress(ctx, onProgress, func(c context.Context) ([]Outfit, error) {
+		return s.generateOutfitsImpl(c, userID, weather)
+	})
+}
+
+// runWithProgress wraps `work` with the SSE stage lifecycle
+// (connecting → streaming heartbeats → done/error). nil onProgress
+// degrades to calling work directly — identical to the old behaviour.
+//
+// Concurrency contract (fixes the data race in #109 D1): every
+// callback is funnelled through `emit`, which holds a mutex, so the
+// heartbeat goroutine and the terminal stage can never write the SSE
+// ResponseWriter concurrently. The heartbeat goroutine is also
+// cancelled AND joined (<-hbDone) before the terminal stage is
+// emitted, so `done`/`error` is always the last event on the wire —
+// no late heartbeat can interleave after it.
+func (s *Service) runWithProgress(
+	ctx context.Context,
+	onProgress StreamCallback,
+	work func(context.Context) ([]Outfit, error),
+) ([]Outfit, error) {
+	if onProgress == nil {
+		return work(ctx)
 	}
 
-	// Heartbeat goroutine: keeps the SSE connection alive while
-	// the LLM call is in-flight. Cancelled when the call returns
-	// (success or failure).
-	if onProgress != nil {
-		hbCtx, cancelHb := context.WithCancel(ctx)
-		defer cancelHb()
-		go func() {
-			ticker := time.NewTicker(2 * time.Second)
-			defer ticker.Stop()
-			messages := []string{
-				"Drafting outfits…",
-				"Picking pieces from your wardrobe…",
-				"Matching to today's weather…",
-				"Almost there…",
-			}
-			i := 0
-			for {
-				select {
-				case <-hbCtx.Done():
-					return
-				case <-ticker.C:
-					_ = onProgress(GenerateProgress{
-						Stage:       StageStreaming,
-						Description: messages[i%len(messages)],
-					})
-					i++
-				}
-			}
-		}()
+	var emitMu sync.Mutex
+	emit := func(p GenerateProgress) {
+		// Fire-and-forget; a wire-write failure lets generation proceed
+		// (the client notices when the SSE connection drops).
+		emitMu.Lock()
+		defer emitMu.Unlock()
+		_ = onProgress(p)
 	}
 
-	outfits, err := s.generateOutfitsImpl(ctx, userID, weather)
-	if err != nil {
-		if onProgress != nil {
-			_ = onProgress(GenerateProgress{Stage: StageError, Description: err.Error()})
+	emit(GenerateProgress{Stage: StageConnecting})
+
+	interval := s.heartbeatInterval
+	if interval <= 0 {
+		interval = 2 * time.Second
+	}
+	hbCtx, cancelHb := context.WithCancel(ctx)
+	hbDone := make(chan struct{})
+	go func() {
+		defer close(hbDone)
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		messages := []string{
+			"Drafting outfits…",
+			"Picking pieces from your wardrobe…",
+			"Matching to today's weather…",
+			"Almost there…",
 		}
+		i := 0
+		for {
+			select {
+			case <-hbCtx.Done():
+				return
+			case <-ticker.C:
+				emit(GenerateProgress{
+					Stage:       StageStreaming,
+					Description: messages[i%len(messages)],
+				})
+				i++
+			}
+		}
+	}()
+
+	// stopHeartbeat cancels the ticker goroutine and waits for it to
+	// fully exit, guaranteeing no heartbeat emit is in flight or can
+	// start once it returns. Idempotent.
+	stopped := false
+	stopHeartbeat := func() {
+		if !stopped {
+			cancelHb()
+			<-hbDone
+			stopped = true
+		}
+	}
+	defer stopHeartbeat() // safety net for any early return
+
+	outfits, err := work(ctx)
+	stopHeartbeat() // join the heartbeat BEFORE the terminal emit
+	if err != nil {
+		emit(GenerateProgress{Stage: StageError, Description: err.Error()})
 		return nil, err
 	}
-	if onProgress != nil {
-		_ = onProgress(GenerateProgress{Stage: StageDone, Outfits: outfits})
-	}
+	emit(GenerateProgress{Stage: StageDone, Outfits: outfits})
 	return outfits, nil
 }
 
