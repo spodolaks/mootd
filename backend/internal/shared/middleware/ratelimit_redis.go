@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -53,19 +52,17 @@ func RedisRateLimitScoped(client *redis.Client, scope string, maxRequests int, w
 }
 
 // rateLimitKey picks the most specific identifier available for the request:
-// authenticated user ID when present, else the first X-Forwarded-For hop, else
-// the remote address. Used by both per-scope and global Redis limiters so the
-// identity rules are consistent.
+// authenticated user ID when present, else the client IP. The IP comes from
+// clientIP, which honors X-Forwarded-For only from a trusted proxy — so an
+// unauthenticated caller can't forge XFF to mint a fresh counter per request
+// and walk past the auth/brute-force limiter. Used by both per-scope and
+// global Redis limiters so the identity rules are consistent.
 func rateLimitKey(r *http.Request) string {
 	if userID, ok := UserIDFromContext(r.Context()); ok && userID != "" {
 		return "user:" + userID
 	}
-	if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
-		// X-Forwarded-For is a comma-separated chain; take the leftmost (original client).
-		if i := strings.Index(forwarded, ","); i >= 0 {
-			return "ip:" + strings.TrimSpace(forwarded[:i])
-		}
-		return "ip:" + strings.TrimSpace(forwarded)
+	if ip := clientIP(r); ip != nil {
+		return "ip:" + ip.String()
 	}
 	return "ip:" + r.RemoteAddr
 }

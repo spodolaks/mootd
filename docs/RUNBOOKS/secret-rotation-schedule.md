@@ -185,3 +185,25 @@ Update the IP list in two places when the team grows:
 A mismatch is fine for short windows during rollout; long-term,
 the FE getting a 403 from Caddy vs. a 403 from the backend looks
 identical to admins so the symptom isn't misleading.
+
+### Trusted proxies — `TRUSTED_PROXY_CIDRS` (#107)
+
+The backend derives the client IP (for the allowlist above **and**
+the auth/brute-force rate limiters) from `X-Forwarded-For` only when
+the immediate TCP peer is a trusted proxy. Otherwise XFF is ignored
+and `RemoteAddr` is used — so a caller that reaches the backend port
+directly (bypassing Caddy) cannot forge `X-Forwarded-For` to satisfy
+the allowlist or to mint a fresh rate-limit counter per request.
+
+- Default (env unset): loopback only (`127.0.0.0/8`, `::1/128`) —
+  correct for the standard deploy where the backend binds `127.0.0.1`
+  behind a same-host Caddy.
+- If something other than a local proxy terminates the connection to
+  this process (e.g. Caddy on another host, or Cloudflare directly),
+  set `TRUSTED_PROXY_CIDRS` to those peer ranges, comma-separated:
+  `TRUSTED_PROXY_CIDRS=10.0.0.0/8,172.16.0.0/12`.
+
+Symptom of a too-narrow list: admins 403 even from an allowed IP
+(their real IP got replaced by the proxy's because XFF was ignored).
+Symptom of a too-wide list: the allowlist/rate-limit become
+spoofable again. Keep it to the actual proxy ranges.

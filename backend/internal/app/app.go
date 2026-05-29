@@ -88,6 +88,17 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 		a.Logger.Printf("WARNING: invalid REDIS_URL — falling back to MongoDB cache")
 	}
 
+	// Configure which reverse-proxy peers may set X-Forwarded-For. The
+	// admin IP allowlist and the rate limiters derive the client IP from
+	// XFF only when the immediate peer is trusted; a direct caller can't
+	// forge the header. Defaults to loopback (backend behind local Caddy)
+	// when TRUSTED_PROXY_CIDRS is unset.
+	if tp := strings.TrimSpace(os.Getenv("TRUSTED_PROXY_CIDRS")); tp != "" {
+		middleware.SetTrustedProxies(strings.Split(tp, ","), a.Logger)
+	} else {
+		middleware.SetTrustedProxies(nil, a.Logger)
+	}
+
 	mux := http.NewServeMux()
 	authMiddleware := middleware.Auth(a.JWTSecret)
 

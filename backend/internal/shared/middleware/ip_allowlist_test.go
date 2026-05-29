@@ -70,20 +70,39 @@ func TestAdminIPAllowlist_BareIPUpgraded(t *testing.T) {
 	}
 }
 
-func TestAdminIPAllowlist_HonoursXForwardedFor(t *testing.T) {
+func TestAdminIPAllowlist_HonoursXForwardedForFromTrustedProxy(t *testing.T) {
 	mw := AdminIPAllowlist([]string{"10.0.0.0/8"}, silentLogger{})
 	called := false
 	h := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called = true
 	}))
 	r := httptest.NewRequest(http.MethodGet, "/admin/v1/me", nil)
-	// Caddy front-end at a public IP, real client behind it.
-	r.RemoteAddr = "172.16.0.1:8080"
-	r.Header.Set("X-Forwarded-For", "10.5.6.7, 172.16.0.1")
+	// Local Caddy (loopback = trusted by default) forwards the real client.
+	r.RemoteAddr = "127.0.0.1:8080"
+	r.Header.Set("X-Forwarded-For", "10.5.6.7, 127.0.0.1")
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
 	if !called {
-		t.Errorf("XFF left-most should have matched 10.5.6.7, got %d", w.Code)
+		t.Errorf("XFF left-most from a trusted proxy should have matched 10.5.6.7, got %d", w.Code)
+	}
+}
+
+// Regression for #107: a direct caller (untrusted peer) must NOT be able
+// to forge X-Forwarded-For to satisfy the allowlist.
+func TestAdminIPAllowlist_IgnoresSpoofedXFFFromUntrustedPeer(t *testing.T) {
+	mw := AdminIPAllowlist([]string{"10.0.0.0/8"}, silentLogger{})
+	h := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("handler must NOT fire: spoofed XFF from an untrusted peer")
+	}))
+	r := httptest.NewRequest(http.MethodGet, "/admin/v1/me", nil)
+	// Attacker reaches the backend port directly from a public IP and
+	// forges an allowed IP in XFF.
+	r.RemoteAddr = "203.0.113.42:12345"
+	r.Header.Set("X-Forwarded-For", "10.5.6.7")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusForbidden {
+		t.Errorf("expected 403 (XFF ignored from untrusted peer), got %d", w.Code)
 	}
 }
 
