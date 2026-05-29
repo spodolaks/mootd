@@ -125,7 +125,16 @@ func (t *TierRoutingGenerator) Generate(ctx context.Context, req GeneratorReques
 	outfits, usage, err := gen.Generate(ctx, req)
 	if err != nil {
 		t.logger.Printf("outfit: tier routing %q failed (%v); falling back to %s", chosen, err, t.fallback.Name())
-		return t.fallback.Generate(ctx, req)
+		fbOutfits, fbUsage, fbErr := t.fallback.Generate(ctx, req)
+		// The chosen provider may have billed tokens before failing
+		// (e.g. Anthropic 5xx after generation). If the fallback
+		// produced no Usage of its own (free provider, or it errored
+		// before billing), surface the failed primary's Usage so those
+		// tokens still reach the ledger instead of vanishing.
+		if fbUsage == nil && usage != nil {
+			fbUsage = usage
+		}
+		return fbOutfits, fbUsage, fbErr
 	}
 	return outfits, usage, nil
 }

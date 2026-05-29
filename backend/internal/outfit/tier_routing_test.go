@@ -91,6 +91,33 @@ func TestTierRouting_FallsBackOnError(t *testing.T) {
 	}
 }
 
+func TestTierRouting_FallbackPreservesBilledPrimaryUsage(t *testing.T) {
+	// Primary billed tokens then failed; the fallback is a free
+	// provider (nil Usage). The failed primary's billed Usage must be
+	// surfaced so the cost still reaches the ledger.
+	billed := &Usage{Provider: "anthropic", Model: "claude-x", InputTokens: 800, OutputTokens: 40}
+	anth := &fakeGen{name: "anthropic", responses: []fakeResp{{usage: billed, err: errors.New("503")}}}
+	// Free fallback: outfits but no Usage.
+	freeFb := &fakeGen{name: "ollama", responses: []fakeResp{{outfits: []Outfit{{Name: "free-pick"}}}}}
+
+	r := NewTierRoutingGenerator(nil,
+		map[string]Generator{"anthropic": anth},
+		&fakeRouting{tier2Provider: map[string]string{"free": "anthropic"}},
+		fakeTierResolver{t: "free"},
+		freeFb,
+	)
+	outfits, usage, err := r.Generate(context.Background(), GeneratorRequest{UserID: "u1"})
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if len(outfits) != 1 || outfits[0].Name != "free-pick" {
+		t.Fatalf("expected fallback's outfit, got %+v", outfits)
+	}
+	if usage == nil || usage.Provider != "anthropic" || usage.InputTokens != 800 {
+		t.Fatalf("expected the failed primary's billed usage to be preserved, got %+v", usage)
+	}
+}
+
 func TestTierRouting_FallsBackWhenProviderMissing(t *testing.T) {
 	fb := okGen("cascade")
 	r := NewTierRoutingGenerator(nil,
