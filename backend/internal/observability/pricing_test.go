@@ -145,7 +145,13 @@ func TestComputeCost_OllamaIsZero(t *testing.T) {
 }
 
 func TestComputeCost_UnknownModelReturnsErr(t *testing.T) {
-	pt := newTable(t)
+	// Table is non-empty (an empty table now fails construction), but
+	// the queried model is absent.
+	pt := newTable(t, ModelPrice{
+		ID: "sonnet|2026-04-01", Model: "claude-sonnet-4-20250514", Provider: "anthropic",
+		InputUsdPerMTok: 3, OutputUsdPerMTok: 15,
+		EffectiveFrom: time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC),
+	})
 	cost, err := pt.ComputeCost("not-a-real-model", 100, 200, 0, 0)
 	if err != ErrUnpricedModel {
 		t.Errorf("err: got %v, want ErrUnpricedModel", err)
@@ -180,6 +186,45 @@ func TestPriceTable_RefreshPicksLatestEffectiveFrom(t *testing.T) {
 	cost, _ := pt.ComputeCost("claude-sonnet-4-20250514", 1_000_000, 0, 0, 0)
 	if !almostEqual(cost, 2.50) {
 		t.Errorf("expected the newer (lower) rate to win: got $%.4f, want $2.50", cost)
+	}
+}
+
+func TestPriceTable_RefreshKeepsTableOnEmptyResult(t *testing.T) {
+	sonnet := ModelPrice{
+		ID: "sonnet|2026-04-01", Model: "claude-sonnet-4-20250514", Provider: "anthropic",
+		InputUsdPerMTok: 3, OutputUsdPerMTok: 15,
+		EffectiveFrom: time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC),
+	}
+	repo := &memPriceRepo{rows: []ModelPrice{sonnet}}
+	pt, err := NewPriceTable(context.Background(), repo, log.New(io.Discard, "", 0))
+	if err != nil {
+		t.Fatalf("NewPriceTable: %v", err)
+	}
+
+	// Simulate a transient zero-row read (e.g. a misconfigured
+	// effectiveUntil window or partial read).
+	repo.rows = nil
+	if err := pt.Refresh(context.Background()); err == nil {
+		t.Fatal("expected Refresh to error on a 0-row result, got nil")
+	}
+
+	// The last-known-good price must survive — NOT be blanked to a
+	// $0 ErrUnpricedModel, which would silently zero all spend.
+	cost, err := pt.ComputeCost("claude-sonnet-4-20250514", 1_000_000, 0, 0, 0)
+	if err != nil {
+		t.Fatalf("ComputeCost after empty refresh: %v (table was wrongly blanked)", err)
+	}
+	if !almostEqual(cost, 3.0) {
+		t.Errorf("kept-table cost: got $%.4f, want $3.00", cost)
+	}
+}
+
+func TestNewPriceTable_FailsLoudWhenEmpty(t *testing.T) {
+	// A cold start with no seeded rows must fail at construction rather
+	// than booting with an empty (all-$0) price table.
+	repo := &memPriceRepo{}
+	if _, err := NewPriceTable(context.Background(), repo, log.New(io.Discard, "", 0)); err == nil {
+		t.Fatal("expected NewPriceTable to fail on an empty repo, got nil")
 	}
 }
 
