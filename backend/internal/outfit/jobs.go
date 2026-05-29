@@ -229,11 +229,38 @@ func (s *JobStore) Get(ctx context.Context, id string) (*Job, error) {
 	return &job, nil
 }
 
+// StartStaleJobSweeper periodically flips jobs stuck in `processing`
+// past jobStaleProcessing to failed (#109 D5). recoverStaleJobs only
+// ran at boot, so a job orphaned during normal operation — a panicked
+// worker goroutine, or a terminal Save that failed and was swallowed —
+// stayed `processing` until the 24h TTL reaped it, and the client
+// polled it forever. The sweep runs until ctx is cancelled. The
+// jobStaleProcessing cutoff (10m) is well above the 2-minute worker
+// timeout, so a live job is never falsely failed.
+func (s *JobStore) StartStaleJobSweeper(ctx context.Context, interval time.Duration) {
+	if interval <= 0 {
+		interval = 5 * time.Minute
+	}
+	go func() {
+		t := time.NewTicker(interval)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				if err := recoverStaleJobs(ctx, s.mongoCol, s.logger); err != nil {
+					s.logger.Printf("outfit: periodic stale-job sweep: %v", err)
+				}
+			}
+		}
+	}()
+}
+
 // recoverStaleJobs marks any job in `processing` for too long as
-// failed. Runs once at startup — captures jobs whose owning
-// goroutine died with the previous backend process. Without this,
-// an admin restarting the backend mid-generation leaves the user
-// polling forever.
+// failed. Runs at startup AND periodically (see StartStaleJobSweeper) —
+// captures jobs whose owning goroutine died (process restart, panic, or
+// a swallowed terminal Save). Without this, the client polls forever.
 func recoverStaleJobs(ctx context.Context, col *mongo.Collection, logger *log.Logger) error {
 	cutoff := time.Now().UTC().Add(-jobStaleProcessing)
 	res, err := col.UpdateMany(ctx,

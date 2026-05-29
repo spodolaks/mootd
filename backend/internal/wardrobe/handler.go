@@ -39,6 +39,45 @@ type Handler struct {
 	archetypeSeeder     ArchetypeFillerSeeder         // optional — pairs with archetypeRejections to power the FE filler tap-resolve flow
 	archetypeRejections ArchetypeRejectionsRepository // optional — when nil, /archetype-rejections returns 503
 	genderOf            GenderLookup                  // optional — when nil, detected items are saved with empty gender
+	// detectSem bounds in-flight async detection jobs so a burst can't
+	// fan out unbounded paid detection pipelines. nil disables the cap
+	// (#109 D2).
+	detectSem chan struct{}
+}
+
+// WithMaxConcurrent bounds concurrent async detection jobs to n.
+// n <= 0 leaves the cap disabled. Returns h for chaining.
+func (h *Handler) WithMaxConcurrent(n int) *Handler {
+	if n > 0 {
+		h.detectSem = make(chan struct{}, n)
+	}
+	return h
+}
+
+// acquireDetectSlot tries (non-blocking) to take a detection slot.
+// Returns true when taken (or the cap is disabled). Pair a successful
+// acquire with exactly one releaseDetectSlot.
+func (h *Handler) acquireDetectSlot() bool {
+	if h.detectSem == nil {
+		return true
+	}
+	select {
+	case h.detectSem <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+
+// releaseDetectSlot returns a previously-acquired slot.
+func (h *Handler) releaseDetectSlot() {
+	if h.detectSem == nil {
+		return
+	}
+	select {
+	case <-h.detectSem:
+	default:
+	}
 }
 
 // NewHandler creates a Handler with the given dependencies.
@@ -408,6 +447,21 @@ func (h *Handler) SubmitDetect(w http.ResponseWriter, r *http.Request) {
 	}
 	filename := header.Filename
 
+	// Bound concurrent detection pipelines (#109 D2). Acquire before
+	// creating the job so a rejected request leaves no orphan pending
+	// job; the launched goroutine owns the release.
+	if !h.acquireDetectSlot() {
+		w.Header().Set("Retry-After", "10")
+		response.WriteJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "server busy detecting, please retry shortly"})
+		return
+	}
+	launched := false
+	defer func() {
+		if !launched {
+			h.releaseDetectSlot()
+		}
+	}()
+
 	jobID := id.Generate()
 	job := &DetectJob{
 		ID:        jobID,
@@ -422,6 +476,7 @@ func (h *Handler) SubmitDetect(w http.ResponseWriter, r *http.Request) {
 	}
 
 	go h.runDetectionJob(jobID, userID, imageData, filename)
+	launched = true
 
 	response.WriteJSON(w, http.StatusAccepted, map[string]string{"jobId": jobID})
 }
@@ -432,6 +487,7 @@ func (h *Handler) SubmitDetect(w http.ResponseWriter, r *http.Request) {
 // timeout is 2 minutes, and this gives the subsequent image-download +
 // GridFS-save work time to finish without abandoning the whole job.
 func (h *Handler) runDetectionJob(jobID, userID string, imageData []byte, filename string) {
+	defer h.releaseDetectSlot() // pair with acquireDetectSlot in SubmitDetect
 	ctx, cancel := context.WithTimeout(h.workerCtx, 3*time.Minute)
 	defer cancel()
 

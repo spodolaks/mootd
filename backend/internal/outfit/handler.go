@@ -23,6 +23,46 @@ type Handler struct {
 	service   *Service
 	jobStore  *JobStore
 	workerCtx context.Context
+	// genSem bounds the number of in-flight async generations so a
+	// burst (or retry storm) can't fan out unbounded paid LLM jobs.
+	// nil disables the cap. See WithMaxConcurrent (#109 D2).
+	genSem chan struct{}
+}
+
+// WithMaxConcurrent bounds concurrent async outfit generations to n.
+// n <= 0 leaves the cap disabled. Returns h for chaining.
+func (h *Handler) WithMaxConcurrent(n int) *Handler {
+	if n > 0 {
+		h.genSem = make(chan struct{}, n)
+	}
+	return h
+}
+
+// acquireGenSlot tries (non-blocking) to take a generation slot. Returns
+// true when a slot was taken (or the cap is disabled). The caller must
+// pair a successful acquire with exactly one releaseGenSlot.
+func (h *Handler) acquireGenSlot() bool {
+	if h.genSem == nil {
+		return true
+	}
+	select {
+	case h.genSem <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+
+// releaseGenSlot returns a previously-acquired slot. Safe to call when
+// the cap is disabled; the select/default guards against over-release.
+func (h *Handler) releaseGenSlot() {
+	if h.genSem == nil {
+		return
+	}
+	select {
+	case <-h.genSem:
+	default:
+	}
 }
 
 // HandlerConfig wires a Handler.
@@ -162,6 +202,22 @@ func (h *Handler) SubmitGenerate(w http.ResponseWriter, r *http.Request) {
 
 	weather := parseWeatherParams(r)
 
+	// Bound concurrent expensive generations (#109 D2). Acquire before
+	// creating the job so a rejected request leaves no orphan pending
+	// job; the launched goroutine owns the release, and the deferred
+	// guard releases on any pre-launch early return.
+	if !h.acquireGenSlot() {
+		w.Header().Set("Retry-After", "10")
+		response.WriteJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "server busy generating outfits, please retry shortly"})
+		return
+	}
+	launched := false
+	defer func() {
+		if !launched {
+			h.releaseGenSlot()
+		}
+	}()
+
 	jobID := fmt.Sprintf("%s-%d-%d", userID[:minLen(8, len(userID))], time.Now().UnixMilli(), rand.Intn(10000))
 	job := &Job{
 		ID:        jobID,
@@ -186,8 +242,10 @@ func (h *Handler) SubmitGenerate(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Launch async generation in a goroutine.
+	// Launch async generation in a goroutine. It owns the generation
+	// slot from here and releases it when done (see runAsyncGeneration).
 	go h.runAsyncGeneration(jobID, userID, weather)
+	launched = true
 
 	response.WriteJSON(w, http.StatusAccepted, map[string]string{"jobId": jobID})
 }
@@ -277,6 +335,7 @@ func (h *Handler) handleSSEStream(w http.ResponseWriter, r *http.Request, userID
 // runAsyncGeneration performs the full outfit generation pipeline in the background
 // and updates the job in Redis with the result.
 func (h *Handler) runAsyncGeneration(jobID, userID string, weather Weather) {
+	defer h.releaseGenSlot() // pair with acquireGenSlot in SubmitGenerate
 	ctx, cancel := context.WithTimeout(h.workerCtx, 2*time.Minute)
 	defer cancel()
 
