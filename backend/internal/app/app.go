@@ -72,6 +72,17 @@ type App struct {
 }
 
 // NewHTTPHandler wires up all domain routes and wraps the mux with shared middleware.
+// envIntDefault reads a positive integer from env, falling back to def
+// when unset, unparseable, or non-positive.
+func envIntDefault(key string, def int) int {
+	if raw := strings.TrimSpace(os.Getenv(key)); raw != "" {
+		if v, err := strconv.Atoi(raw); err == nil && v > 0 {
+			return v
+		}
+	}
+	return def
+}
+
 func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.Repository, moodboard.Repository, func()) {
 	// ── Redis connection (best-effort — falls back gracefully) ────────
 	redisOpts, err := redis.ParseURL(a.RedisURL)
@@ -498,6 +509,8 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 	wardrobeHandler := wardrobe.NewHandler(a.Logger, detector, searcher, wardrobeRepo, bgRemover, workerCtx, detectJobs)
 	// Newly detected items inherit the owner's profile gender.
 	wardrobeHandler.WithGenderLookup(userGenderOf)
+	// Bound concurrent async detection pipelines (#109 D2).
+	wardrobeHandler.WithMaxConcurrent(envIntDefault("DETECT_MAX_CONCURRENT", 8))
 	if detectionRunRepo != nil {
 		wardrobeHandler.WithDetectionRuns(detectionRunRepo)
 		// Same archive readable from the admin side via the wardrobe→admin adapter.
@@ -832,6 +845,9 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 	if err != nil {
 		a.Logger.Fatalf("outfit: job store init: %v", err)
 	}
+	// Periodically flip jobs orphaned mid-run (panic / swallowed save) to
+	// failed, instead of only at boot (#109 D5).
+	jobStore.StartStaleJobSweeper(workerCtx, 5*time.Minute)
 
 	// Observability ledger (P1-01). Every LLM call writes one row to
 	// llm_calls with model + tokens + cost (computed from the price
@@ -940,7 +956,8 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 		Service:   outfitService,
 		JobStore:  jobStore,
 		WorkerCtx: workerCtx,
-	}).RegisterRoutes(mux, authMiddleware, outfitBurstLimit, outfitDailyLimit)
+	}).WithMaxConcurrent(envIntDefault("OUTFIT_MAX_CONCURRENT", 8)).
+		RegisterRoutes(mux, authMiddleware, outfitBurstLimit, outfitDailyLimit)
 
 	genericRepo := generic.NewMongoRepository(a.MongoClient, a.MongoDB)
 	generic.NewHandler(a.Logger, genericRepo, wardrobeRepo, profileProvider).RegisterRoutes(mux, authMiddleware)
