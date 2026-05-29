@@ -167,7 +167,7 @@ func TestEnforcer_AlreadySuspended_FallbackWhenUntilUnknown(t *testing.T) {
 	tr := newFakeTracker()
 	tr.suspended["u1"] = true
 	e := NewEnforcer(&fakeReader{dailyUSD: 1.00}, tr)
-	_, reason, err := e.Check(context.Background(), "u1", 0.10)
+	_, reason, _, err := e.Check(context.Background(), "u1", 0.10)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
