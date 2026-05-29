@@ -54,17 +54,21 @@ func newOutfitBudgetEnforcerAdapter(e *budget.Enforcer) *outfitBudgetEnforcerAda
 	return &outfitBudgetEnforcerAdapter{e: e}
 }
 
-func (a *outfitBudgetEnforcerAdapter) Check(ctx context.Context, userID string, estimatedUSD float64) (bool, map[string]any, error) {
+// Check returns (allow, reservedUSD, reason, err). When allow is true
+// and a cap is configured, reservedUSD has been atomically reserved
+// against today's spend; the caller must hand it back via Release once
+// the actual cost is recorded.
+func (a *outfitBudgetEnforcerAdapter) Check(ctx context.Context, userID string, estimatedUSD float64) (bool, float64, map[string]any, error) {
 	if a == nil || a.e == nil {
-		return true, nil, nil
+		return true, 0, nil, nil
 	}
-	decision, reason, err := a.e.Check(ctx, userID, estimatedUSD)
+	decision, reason, reserved, err := a.e.Check(ctx, userID, estimatedUSD)
 	if err != nil {
-		return true, nil, err
+		return true, 0, nil, err
 	}
 	allow := decision == budget.Allow
 	if allow {
-		return true, nil, nil
+		return true, reserved, nil, nil
 	}
 	out := map[string]any{
 		"code":          reason.Code,
@@ -76,5 +80,18 @@ func (a *outfitBudgetEnforcerAdapter) Check(ctx context.Context, userID string, 
 	if reason.SuspendedUntil != nil {
 		out["suspendedUntil"] = reason.SuspendedUntil.UTC().Format("2006-01-02T15:04:05Z07:00")
 	}
-	return false, out, nil
+	return false, 0, out, nil
+}
+
+// Release returns a previously-reserved amount to the daily pool.
+func (a *outfitBudgetEnforcerAdapter) Release(ctx context.Context, userID string, reservedUSD float64) {
+	if a == nil || a.e == nil {
+		return
+	}
+	if err := a.e.Release(ctx, userID, reservedUSD); err != nil {
+		// Best-effort: a failed release leaks the reservation until the
+		// 48h TTL, which fails safe (over-counts → over-denies). The
+		// enforcer has no logger; swallow here rather than bubble.
+		_ = err
+	}
 }

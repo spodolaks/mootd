@@ -271,11 +271,20 @@ type llmRecorder interface {
 // optional-deps-via-nil convention).
 type BudgetEnforcer interface {
 	// Check is called immediately before generator.Generate.
-	// Returns shouldAllow + a reason struct + error. Reason is
-	// untyped (map[string]any) here so the budget package's types
-	// can flow without a one-way dep needing reverse imports —
-	// the handler decodes the map.
-	Check(ctx context.Context, userID string, estimatedUSD float64) (allow bool, reason map[string]any, err error)
+	// Returns shouldAllow + the amount atomically reserved against
+	// today's spend (0 unless allowed with a cap configured) + a
+	// reason struct + error. Reason is untyped (map[string]any) here
+	// so the budget package's types can flow without a one-way dep
+	// needing reverse imports — the handler decodes the map.
+	//
+	// When allow is true and reserved > 0, the caller MUST call
+	// Release(reserved) once the call completes (success or failure),
+	// so the reservation nets out against the recorded actual cost.
+	Check(ctx context.Context, userID string, estimatedUSD float64) (allow bool, reserved float64, reason map[string]any, err error)
+
+	// Release returns a previously-reserved amount to the daily pool.
+	// Best-effort; a no-op for reserved <= 0.
+	Release(ctx context.Context, userID string, reserved float64)
 }
 
 // BudgetError is returned by GenerateOutfits when the enforcer
@@ -616,7 +625,7 @@ func (s *Service) generateOutfitsImpl(ctx context.Context, userID string, weathe
 	// stricter, not unsafe.
 	const estimatedCallUSD = 0.20
 	if s.budgetEnforcer != nil {
-		allow, reason, berr := s.budgetEnforcer.Check(ctx, userID, estimatedCallUSD)
+		allow, reserved, reason, berr := s.budgetEnforcer.Check(ctx, userID, estimatedCallUSD)
 		if berr != nil {
 			// Treat enforcement-side errors as Allow so a Redis
 			// blip doesn't deny service. Log + continue.
@@ -624,6 +633,19 @@ func (s *Service) generateOutfitsImpl(ctx context.Context, userID string, weathe
 		} else if !allow {
 			s.logger.Printf("outfit: budget gate denied user %s: %v", userID, reason)
 			return nil, &BudgetError{Reason: reason}
+		} else if reserved > 0 {
+			// Check atomically reserved `reserved` USD against today's
+			// spend to gate concurrent calls. Hand it back once this
+			// call finishes — the recorder books the actual cost, so the
+			// reservation must net out. Use a detached context so a
+			// cancelled request still releases (a missed release leaks
+			// the reservation until the 48h TTL, which fails safe).
+			enforcer := s.budgetEnforcer
+			defer func() {
+				relCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				enforcer.Release(relCtx, userID, reserved)
+			}()
 		}
 	}
 

@@ -88,6 +88,18 @@ type SpendTracker interface {
 	// Increment adds a delta. Concurrent-safe.
 	Increment(ctx context.Context, userID string, costUSD float64) error
 
+	// Reserve atomically adds amount to today's spend and returns the
+	// new running total (post-increment). Check uses this so two
+	// concurrent callers evaluate distinct totals and can't both pass
+	// the gate on the same pre-spend reading. The reservation is later
+	// returned via Release once the real cost is recorded.
+	Reserve(ctx context.Context, userID string, amount float64) (float64, error)
+
+	// Release returns a previously-reserved amount to the pool (a
+	// negative increment). Called after the actual cost is booked so
+	// the reservation doesn't double-count with it.
+	Release(ctx context.Context, userID string, amount float64) error
+
 	// IsSuspended reports whether the user is currently in a 24h
 	// auto-suspend window from a previous 200% breach.
 	IsSuspended(ctx context.Context, userID string) (bool, error)
@@ -146,12 +158,23 @@ var ErrNotConfigured = errors.New("budget: enforcer not configured")
 //  3. Over 100% (current + estimate > daily cap)? → Deny with
 //     "over_daily_cap". (Future: Downgrade.)
 //  4. Otherwise → Allow.
-func (e *Enforcer) Check(ctx context.Context, userID string, estimatedUSD float64) (Decision, Reason, error) {
+// Check now atomically RESERVES the estimate against today's spend
+// when it returns Allow (and a cap is configured). The returned
+// reservedUSD is the amount the caller MUST hand back via Release once
+// the real cost has been booked — otherwise the reservation
+// double-counts with the recorded actual. On any Deny path the
+// reservation is refunded before returning, so reservedUSD is 0.
+//
+// Reserving atomically closes the read-check-then-increment race: two
+// concurrent generations for the same user now increment a shared
+// counter and each evaluates its own post-increment total, so they
+// can't both pass the gate on the same stale pre-spend reading.
+func (e *Enforcer) Check(ctx context.Context, userID string, estimatedUSD float64) (Decision, Reason, float64, error) {
 	if e == nil || e.reader == nil || e.tracker == nil {
-		return Allow, Reason{}, ErrNotConfigured
+		return Allow, Reason{}, 0, ErrNotConfigured
 	}
 	if userID == "" {
-		return Allow, Reason{}, errors.New("budget: userID required")
+		return Allow, Reason{}, 0, errors.New("budget: userID required")
 	}
 
 	// 1. Suspended?
@@ -160,7 +183,7 @@ func (e *Enforcer) Check(ctx context.Context, userID string, estimatedUSD float6
 		// Best-effort: a Redis blip shouldn't deny service. Log
 		// upstream — we have no logger here on purpose, callers
 		// surface the error.
-		return Allow, Reason{}, err
+		return Allow, Reason{}, 0, err
 	}
 	if suspended {
 		// Report the real stored expiry so the FE countdown is accurate.
@@ -177,28 +200,34 @@ func (e *Enforcer) Check(ctx context.Context, userID string, estimatedUSD float6
 			Code:           "auto_suspended",
 			Message:        fmt.Sprintf("Account temporarily suspended after exceeding 200%% of daily LLM budget. Try again in ~%dh.", hours),
 			SuspendedUntil: &until,
-		}, nil
+		}, 0, nil
 	}
 
 	// 2 & 3. Spend check.
 	cap, err := e.reader.BudgetForUser(ctx, userID)
 	if err != nil {
-		return Allow, Reason{}, fmt.Errorf("read cap: %w", err)
-	}
-	today, err := e.tracker.TodaySpend(ctx, userID)
-	if err != nil {
-		return Allow, Reason{}, fmt.Errorf("read today spend: %w", err)
+		return Allow, Reason{}, 0, fmt.Errorf("read cap: %w", err)
 	}
 
-	projected := today + estimatedUSD
 	if cap.DailyUSD <= 0 {
-		// A cap of 0 means "no cap configured." We treat that as
-		// allow rather than "everything is over budget."
-		return Allow, Reason{TodaySpendUSD: today, EstimatedUSD: estimatedUSD}, nil
+		// A cap of 0 means "no cap configured." Nothing to gate and
+		// nothing to reserve — the recorder still books actual spend.
+		today, _ := e.tracker.TodaySpend(ctx, userID)
+		return Allow, Reason{TodaySpendUSD: today, EstimatedUSD: estimatedUSD}, 0, nil
 	}
 
-	if projected >= 2*cap.DailyUSD {
-		// Auto-suspend for 24h.
+	// Atomically reserve the estimate. newTotal already includes it.
+	newTotal, err := e.tracker.Reserve(ctx, userID, estimatedUSD)
+	if err != nil {
+		// Reserve failed — fail open (a Redis blip shouldn't deny
+		// service). Nothing was reserved, so reservedUSD is 0.
+		return Allow, Reason{EstimatedUSD: estimatedUSD}, 0, fmt.Errorf("reserve spend: %w", err)
+	}
+	today := newTotal - estimatedUSD // spend before this call, for the Reason
+
+	if newTotal >= 2*cap.DailyUSD {
+		// Denied → refund the reservation, then auto-suspend for 24h.
+		_ = e.tracker.Release(ctx, userID, estimatedUSD)
 		until := time.Now().UTC().Add(24 * time.Hour)
 		if serr := e.tracker.Suspend(ctx, userID, until); serr != nil {
 			// Suspend write failed — still deny this call but log
@@ -210,7 +239,7 @@ func (e *Enforcer) Check(ctx context.Context, userID string, estimatedUSD float6
 				DailyCapUSD:   cap.DailyUSD,
 				TodaySpendUSD: today,
 				EstimatedUSD:  estimatedUSD,
-			}, fmt.Errorf("suspend: %w", serr)
+			}, 0, fmt.Errorf("suspend: %w", serr)
 		}
 		return Deny, Reason{
 			Code:           "over_200pct",
@@ -219,24 +248,38 @@ func (e *Enforcer) Check(ctx context.Context, userID string, estimatedUSD float6
 			TodaySpendUSD:  today,
 			EstimatedUSD:   estimatedUSD,
 			SuspendedUntil: &until,
-		}, nil
+		}, 0, nil
 	}
 
-	if projected > cap.DailyUSD {
+	if newTotal > cap.DailyUSD {
+		// Denied → refund the reservation.
+		_ = e.tracker.Release(ctx, userID, estimatedUSD)
 		return Deny, Reason{
 			Code:          "over_daily_cap",
 			Message:       fmt.Sprintf("Daily LLM budget of $%.2f reached. Try again tomorrow.", cap.DailyUSD),
 			DailyCapUSD:   cap.DailyUSD,
 			TodaySpendUSD: today,
 			EstimatedUSD:  estimatedUSD,
-		}, nil
+		}, 0, nil
 	}
 
+	// Allowed — keep the reservation; the caller releases it after the
+	// call so it nets out against the recorded actual cost.
 	return Allow, Reason{
 		DailyCapUSD:   cap.DailyUSD,
 		TodaySpendUSD: today,
 		EstimatedUSD:  estimatedUSD,
-	}, nil
+	}, estimatedUSD, nil
+}
+
+// Release returns a previously-reserved amount to the daily pool. The
+// caller passes the reservedUSD value Check returned, once the real
+// cost has been recorded. Safe to call with 0 (no-op) and nil-safe.
+func (e *Enforcer) Release(ctx context.Context, userID string, reservedUSD float64) error {
+	if e == nil || e.tracker == nil || reservedUSD <= 0 || userID == "" {
+		return nil
+	}
+	return e.tracker.Release(ctx, userID, reservedUSD)
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -295,10 +338,43 @@ func (t *RedisSpendTracker) Increment(ctx context.Context, userID string, costUS
 	if costUSD <= 0 {
 		return nil
 	}
+	return t.incrBy(ctx, userID, costUSD)
+}
+
+// Reserve atomically adds amount to today's spend and returns the new
+// running total. IncrByFloat is atomic in Redis, so concurrent callers
+// each see a distinct post-increment total.
+func (t *RedisSpendTracker) Reserve(ctx context.Context, userID string, amount float64) (float64, error) {
+	if t == nil || t.rdb == nil {
+		return 0, nil
+	}
+	key := t.spendKey(userID)
+	pipe := t.rdb.TxPipeline()
+	incr := pipe.IncrByFloat(ctx, key, amount)
+	pipe.Expire(ctx, key, 48*time.Hour)
+	if _, err := pipe.Exec(ctx); err != nil {
+		return 0, err
+	}
+	return incr.Val(), nil
+}
+
+// Release returns a previously-reserved amount via a negative
+// increment. Unlike Increment it accepts a positive amount to subtract.
+func (t *RedisSpendTracker) Release(ctx context.Context, userID string, amount float64) error {
+	if t == nil || t.rdb == nil || amount <= 0 {
+		return nil
+	}
+	return t.incrBy(ctx, userID, -amount)
+}
+
+// incrBy is the shared IncrByFloat + Expire round-trip used by
+// Increment/Release. The 48h Expire is (re)applied on every write so a
+// busy key never loses its TTL.
+func (t *RedisSpendTracker) incrBy(ctx context.Context, userID string, delta float64) error {
 	key := t.spendKey(userID)
 	// Pipeline so the IncrByFloat + Expire are one round-trip.
 	pipe := t.rdb.TxPipeline()
-	pipe.IncrByFloat(ctx, key, costUSD)
+	pipe.IncrByFloat(ctx, key, delta)
 	pipe.Expire(ctx, key, 48*time.Hour)
 	_, err := pipe.Exec(ctx)
 	return err
@@ -360,6 +436,8 @@ type NoopSpendTracker struct{}
 
 func (NoopSpendTracker) TodaySpend(context.Context, string) (float64, error)         { return 0, nil }
 func (NoopSpendTracker) Increment(context.Context, string, float64) error            { return nil }
+func (NoopSpendTracker) Reserve(context.Context, string, float64) (float64, error)   { return 0, nil }
+func (NoopSpendTracker) Release(context.Context, string, float64) error              { return nil }
 func (NoopSpendTracker) IsSuspended(context.Context, string) (bool, error)           { return false, nil }
 func (NoopSpendTracker) Suspend(context.Context, string, time.Time) error            { return nil }
 func (NoopSpendTracker) SuspendedUntil(context.Context, string) (time.Time, error)   { return time.Time{}, nil }
