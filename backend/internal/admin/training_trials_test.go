@@ -108,6 +108,33 @@ func (m *memTrainingTrials) SubmitTrainingTrial(ctx context.Context, id, submitt
 	return &t, nil
 }
 
+func (m *memTrainingTrials) StreamSubmittedTrainingTrials(ctx context.Context, since time.Time, max int, fn func(TrainingTrial) error) (int, error) {
+	m.mu.Lock()
+	var rows []TrainingTrial
+	for _, t := range m.rows {
+		if t.Status != TrainingStatusSubmitted {
+			continue
+		}
+		if !since.IsZero() && t.SubmittedAt != nil && t.SubmittedAt.Before(since) {
+			continue
+		}
+		rows = append(rows, t)
+	}
+	m.mu.Unlock()
+	sort.Slice(rows, func(i, j int) bool { return rows[i].ID < rows[j].ID })
+	n := 0
+	for _, t := range rows {
+		if max > 0 && n >= max {
+			break
+		}
+		if err := fn(t); err != nil {
+			return n, err
+		}
+		n++
+	}
+	return n, nil
+}
+
 // trainingTestHandler builds a Handler wired with the in-memory admin
 // repo (for audit) + an in-memory training-trials store.
 func trainingTestHandler(tt TrainingTrialsRepository) *Handler {

@@ -27,6 +27,12 @@ const (
 	PermTracesRead  Permission = "traces:read"
 	PermTracesRerun Permission = "traces:rerun" // run a trace again with a new prompt
 
+	// Training-data export (mootd-admin#125). Scoped separately from
+	// traces:rerun (which authorises *running* trials): export ships
+	// the accumulated DPO/SFT corpus off the box, so it's a distinct,
+	// audited capability — see docs/SECURITY.md export-exfil risk.
+	PermTrainingExport Permission = "training:export"
+
 	// Prompts + eval.
 	PermPromptsRead  Permission = "prompts:read"
 	PermPromptsWrite Permission = "prompts:write"
@@ -71,6 +77,7 @@ var rolePermissions = map[Role]map[Permission]bool{
 		PermUsersPurge:      true,
 		PermTracesRead:      true,
 		PermTracesRerun:     true,
+		PermTrainingExport:  true,
 		PermPromptsRead:     true,
 		PermPromptsWrite:    true,
 		PermDefaultsWrite:   true,
@@ -86,6 +93,7 @@ var rolePermissions = map[Role]map[Permission]bool{
 		PermUsersRead:       true,
 		PermTracesRead:      true,
 		PermTracesRerun:     true,
+		PermTrainingExport:  true,
 		PermPromptsRead:     true,
 		PermPromptsWrite:    true,
 		PermDefaultsWrite:   true,

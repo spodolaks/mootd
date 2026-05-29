@@ -2618,6 +2618,53 @@ components:
         requestId:
           type: string
 
+    TrainingSftRecord:
+      type: object
+      description: |
+        One line of an `sft` export. The model input is the photo at
+        `sourceImageUrl`; `gold` is the human-approved structured
+        description (Gemma's output with each pick applied on top).
+      required: [trialId, gold, attrCount]
+      properties:
+        trialId:
+          type: string
+        sourceImageUrl:
+          type: string
+        gold:
+          type: object
+          additionalProperties: true
+        attrCount:
+          type: integer
+        submittedBy:
+          type: string
+        submittedAt:
+          type: string
+          format: date-time
+
+    TrainingDpoRecord:
+      type: object
+      description: |
+        One line of a `dpo` export. `chosen` is the human-approved gold;
+        `rejected` is Gemma's full original output. Only trials where
+        the reviewer changed at least one value are emitted.
+      required: [trialId, chosen, rejected]
+      properties:
+        trialId:
+          type: string
+        sourceImageUrl:
+          type: string
+        chosen:
+          type: object
+          additionalProperties: true
+        rejected:
+          type: object
+          additionalProperties: true
+        submittedBy:
+          type: string
+        submittedAt:
+          type: string
+          format: date-time
+
     ArchetypeDefaultItem:
       description: |
         Admin-curated wardrobe item that gets COPIED into a
@@ -5047,6 +5094,49 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           description: Missing traces:rerun permission.
+
+  /admin/v1/training/export:
+    get:
+      operationId: adminExportTrainingData
+      summary: |
+        Stream submitted training trials as JSONL training data.
+        `format=sft` emits the reconstructed gold per trial;
+        `format=dpo` emits (chosen, rejected) pairs, skipping trials
+        with no preference signal (Gemma won every pick / all agreed).
+        Optional `since` for incremental pulls. Permission:
+        training:export. Audited — ships data off-box.
+      tags: [training]
+      parameters:
+        - name: format
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [sft, dpo]
+        - name: since
+          in: query
+          required: false
+          description: Only trials submitted at/after this RFC3339 timestamp.
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: |
+            JSONL stream — one TrainingSftRecord or TrainingDpoRecord per
+            line, depending on `format`.
+          content:
+            application/x-ndjson:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/TrainingSftRecord"
+                  - $ref: "#/components/schemas/TrainingDpoRecord"
+        "400":
+          description: Missing or invalid format / since.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Missing training:export permission.
 
   /admin/v1/archetype-defaults:
     get:

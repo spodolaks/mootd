@@ -308,6 +308,12 @@ const (
 	AdminTracesSummaryParamsStatusTimeout AdminTracesSummaryParamsStatus = "timeout"
 )
 
+// Defines values for AdminExportTrainingDataParamsFormat.
+const (
+	Dpo AdminExportTrainingDataParamsFormat = "dpo"
+	Sft AdminExportTrainingDataParamsFormat = "sft"
+)
+
 // Defines values for AdminTrainingProcessParamsXDescriber.
 const (
 	AdminTrainingProcessParamsXDescriberClaude AdminTrainingProcessParamsXDescriber = "claude"
@@ -1629,6 +1635,18 @@ type TracesSummary struct {
 	TotalCount int64 `json:"totalCount"`
 }
 
+// TrainingDpoRecord One line of a `dpo` export. `chosen` is the human-approved gold;
+// `rejected` is Gemma's full original output. Only trials where
+// the reviewer changed at least one value are emitted.
+type TrainingDpoRecord struct {
+	Chosen         map[string]interface{} `json:"chosen"`
+	Rejected       map[string]interface{} `json:"rejected"`
+	SourceImageUrl *string                `json:"sourceImageUrl,omitempty"`
+	SubmittedAt    *time.Time             `json:"submittedAt,omitempty"`
+	SubmittedBy    *string                `json:"submittedBy,omitempty"`
+	TrialId        string                 `json:"trialId"`
+}
+
 // TrainingPickKind Which value won an attribute in a training trial: one of the
 // two describers, or `custom` when the reviewer typed a value
 // because neither describer was right.
@@ -1640,6 +1658,18 @@ type TrainingPickKind string
 type TrainingProcessAccepted struct {
 	RequestId *string `json:"requestId,omitempty"`
 	Status    string  `json:"status"`
+}
+
+// TrainingSftRecord One line of an `sft` export. The model input is the photo at
+// `sourceImageUrl`; `gold` is the human-approved structured
+// description (Gemma's output with each pick applied on top).
+type TrainingSftRecord struct {
+	AttrCount      int                    `json:"attrCount"`
+	Gold           map[string]interface{} `json:"gold"`
+	SourceImageUrl *string                `json:"sourceImageUrl,omitempty"`
+	SubmittedAt    *time.Time             `json:"submittedAt,omitempty"`
+	SubmittedBy    *string                `json:"submittedBy,omitempty"`
+	TrialId        string                 `json:"trialId"`
 }
 
 // TrainingTrial One admin-side training-review record (mootd `training_trials`
@@ -2269,6 +2299,17 @@ type AdminTracesSummaryParams struct {
 
 // AdminTracesSummaryParamsStatus defines parameters for AdminTracesSummary.
 type AdminTracesSummaryParamsStatus string
+
+// AdminExportTrainingDataParams defines parameters for AdminExportTrainingData.
+type AdminExportTrainingDataParams struct {
+	Format AdminExportTrainingDataParamsFormat `form:"format" json:"format"`
+
+	// Since Only trials submitted at/after this RFC3339 timestamp.
+	Since *time.Time `form:"since,omitempty" json:"since,omitempty"`
+}
+
+// AdminExportTrainingDataParamsFormat defines parameters for AdminExportTrainingData.
+type AdminExportTrainingDataParamsFormat string
 
 // AdminTrainingProcessMultipartBody defines parameters for AdminTrainingProcess.
 type AdminTrainingProcessMultipartBody struct {

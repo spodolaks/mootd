@@ -114,6 +114,13 @@ type TrainingTrialsRepository interface {
 	ListTrainingTrials(ctx context.Context, q TrainingTrialQuery) ([]TrainingTrial, string, error)
 	GetTrainingTrial(ctx context.Context, id string) (*TrainingTrial, error)
 	SubmitTrainingTrial(ctx context.Context, id, submittedBy string, in TrainingSubmitInput, at time.Time) (*TrainingTrial, error)
+	// StreamSubmittedTrainingTrials yields submitted trials in
+	// submittedAt order (oldest first, so an incremental export with
+	// `since` is stable), invoking fn per row. Stops after max rows
+	// (0 = unbounded) or when fn returns an error. Powers the export
+	// endpoint (mootd-admin#125) — streamed, not materialised, so a
+	// large corpus can't OOM the box.
+	StreamSubmittedTrainingTrials(ctx context.Context, since time.Time, max int, fn func(TrainingTrial) error) (int, error)
 }
 
 // ── MongoRepository implementation ──────────────────────────────────
@@ -239,6 +246,38 @@ func (r *MongoRepository) SubmitTrainingTrial(ctx context.Context, id, submitted
 		return nil, err
 	}
 	return &doc, nil
+}
+
+// StreamSubmittedTrainingTrials iterates submitted trials oldest-first
+// (submittedAt asc, _id asc as tiebreak) so an incremental export keyed
+// on `since` is deterministic. Rows are decoded one at a time off the
+// cursor — memory stays flat regardless of corpus size.
+func (r *MongoRepository) StreamSubmittedTrainingTrials(ctx context.Context, since time.Time, max int, fn func(TrainingTrial) error) (int, error) {
+	filter := bson.M{"status": TrainingStatusSubmitted}
+	if !since.IsZero() {
+		filter["submittedAt"] = bson.M{"$gte": since}
+	}
+	opts := options.Find().SetSort(bson.D{{Key: "submittedAt", Value: 1}, {Key: "_id", Value: 1}})
+	if max > 0 {
+		opts.SetLimit(int64(max))
+	}
+	cur, err := r.trainingTrialsCol().Find(ctx, filter, opts)
+	if err != nil {
+		return 0, err
+	}
+	defer cur.Close(ctx)
+	n := 0
+	for cur.Next(ctx) {
+		var t TrainingTrial
+		if err := cur.Decode(&t); err != nil {
+			return n, err
+		}
+		if err := fn(t); err != nil {
+			return n, err
+		}
+		n++
+	}
+	return n, cur.Err()
 }
 
 // ── HTTP handlers ───────────────────────────────────────────────────

@@ -65,6 +65,8 @@ func (h *Handler) TrainingRouter(w http.ResponseWriter, r *http.Request) {
 		h.TrainingBlob(w, r, tail)
 	case "submissions":
 		h.TrainingSubmissionsRouter(w, r, tail)
+	case "export":
+		h.TrainingExport(w, r)
 	default:
 		response.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "unknown training sub-resource"})
 	}
