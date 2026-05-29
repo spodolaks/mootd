@@ -78,6 +78,12 @@ func (f *fakeTracker) Suspend(_ context.Context, userID string, until time.Time)
 	return nil
 }
 
+func (f *fakeTracker) SuspendedUntil(_ context.Context, userID string) (time.Time, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.suspendedUntil[userID], nil
+}
+
 func TestEnforcer_AllowUnderCap(t *testing.T) {
 	e := NewEnforcer(&fakeReader{dailyUSD: 1.00}, newFakeTracker())
 	d, _, _, err := e.Check(context.Background(), "u1", 0.10)
@@ -129,6 +135,9 @@ func TestEnforcer_Over200pct_AutoSuspends(t *testing.T) {
 func TestEnforcer_AlreadySuspended(t *testing.T) {
 	tr := newFakeTracker()
 	tr.suspended["u1"] = true
+	// Suspended 23h ago for a 24h window → ~1h left, NOT a fresh +24h.
+	stored := time.Now().UTC().Add(1 * time.Hour)
+	tr.suspendedUntil["u1"] = stored
 	e := NewEnforcer(&fakeReader{dailyUSD: 1.00}, tr)
 	d, reason, _, err := e.Check(context.Background(), "u1", 0.10)
 	if err != nil {
@@ -139,6 +148,34 @@ func TestEnforcer_AlreadySuspended(t *testing.T) {
 	}
 	if reason.Code != "auto_suspended" {
 		t.Fatalf("expected code auto_suspended, got %q", reason.Code)
+	}
+	// Must report the real stored expiry, not a fabricated now+24h.
+	if reason.SuspendedUntil == nil {
+		t.Fatal("expected SuspendedUntil to be populated")
+	}
+	if got := reason.SuspendedUntil.Sub(stored); got > time.Second || got < -time.Second {
+		t.Errorf("SuspendedUntil should match stored value; off by %v", got)
+	}
+	if time.Until(*reason.SuspendedUntil) > 2*time.Hour {
+		t.Errorf("expected ~1h remaining, got until=%v (fabricated +24h?)", reason.SuspendedUntil)
+	}
+}
+
+func TestEnforcer_AlreadySuspended_FallbackWhenUntilUnknown(t *testing.T) {
+	// Suspended flag set but no stored expiry (e.g. legacy key) → fall
+	// back to the +24h upper bound rather than a zero timestamp.
+	tr := newFakeTracker()
+	tr.suspended["u1"] = true
+	e := NewEnforcer(&fakeReader{dailyUSD: 1.00}, tr)
+	_, reason, err := e.Check(context.Background(), "u1", 0.10)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if reason.SuspendedUntil == nil || reason.SuspendedUntil.IsZero() {
+		t.Fatal("expected a non-zero fallback SuspendedUntil")
+	}
+	if time.Until(*reason.SuspendedUntil) < 23*time.Hour {
+		t.Errorf("expected ~24h fallback, got until=%v", reason.SuspendedUntil)
 	}
 }
 

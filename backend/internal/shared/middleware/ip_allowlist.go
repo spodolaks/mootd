@@ -24,11 +24,11 @@ import (
 // at parse time + logged once, rather than failing startup —
 // a typo in env shouldn't keep the admin out entirely.
 //
-// Source IP precedence: the left-most X-Forwarded-For entry
-// when present (Caddy / Cloudflare populate it), else
-// RemoteAddr. Same convention as admin.clientIP() — kept here
-// without the import so this middleware doesn't drag the admin
-// package into shared/.
+// Source IP precedence: the left-most X-Forwarded-For entry, but
+// ONLY when the immediate peer is a trusted proxy (see
+// SetTrustedProxies); otherwise RemoteAddr. This means a caller
+// that reaches the backend directly cannot forge X-Forwarded-For
+// to satisfy the allowlist.
 //
 // Failures return 403 with a deliberately uninformative
 // message ("forbidden") so an attacker can't probe whether
@@ -47,7 +47,7 @@ func AdminIPAllowlist(cidrs []string, logger interface{ Printf(string, ...any) }
 	logger.Printf("middleware: admin IP allowlist enforcing %d CIDR(s)", len(nets))
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ip := remoteIP(r)
+			ip := clientIP(r)
 			if ip == nil {
 				logger.Printf("middleware: admin IP allowlist: no parseable client IP, denying")
 				response.WriteJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
@@ -95,30 +95,6 @@ func parseCIDRs(cidrs []string, logger interface{ Printf(string, ...any) }) []*n
 		out = append(out, ipnet)
 	}
 	return out
-}
-
-// remoteIP extracts the client IP. Same precedence rules as
-// admin.clientIP() — left-most X-Forwarded-For entry when set
-// (trusted because Caddy / Cloudflare append; not because the
-// header itself is trustworthy), else RemoteAddr.
-func remoteIP(r *http.Request) net.IP {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		if idx := strings.IndexByte(xff, ','); idx > 0 {
-			xff = xff[:idx]
-		}
-		if ip := net.ParseIP(strings.TrimSpace(xff)); ip != nil {
-			return ip
-		}
-	}
-	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
-		if ip := net.ParseIP(host); ip != nil {
-			return ip
-		}
-	}
-	if ip := net.ParseIP(r.RemoteAddr); ip != nil {
-		return ip
-	}
-	return nil
 }
 
 // noopLogger is a fallback when callers don't pass a logger.

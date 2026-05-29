@@ -83,6 +83,19 @@ func (pt *PriceTable) Refresh(ctx context.Context) error {
 		}
 		next[r.Model] = r
 	}
+	// An empty result is never legitimate: SeedDefaults always runs
+	// before the first Refresh, so there are always ≥8 effective rows.
+	// A zero-row read therefore means a transient failure (partial
+	// read, clock skew, a misconfigured effectiveUntil window) — never
+	// "prices were intentionally deleted". Swapping in an empty map
+	// would make ComputeCost return ErrUnpricedModel for every model,
+	// silently logging every LLM call at $0 AND disabling the budget
+	// gate. Refuse the swap and keep the last-known-good table; at
+	// startup this surfaces as a hard error so we fail loud instead of
+	// booting with no prices.
+	if len(next) == 0 {
+		return fmt.Errorf("price table refresh: ListEffective returned 0 rows; keeping previous table")
+	}
 	pt.mu.Lock()
 	pt.prices = next
 	pt.mu.Unlock()

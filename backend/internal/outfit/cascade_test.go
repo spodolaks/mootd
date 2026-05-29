@@ -109,6 +109,27 @@ func TestCascade_AllFail(t *testing.T) {
 	}
 }
 
+func TestCascade_ExhaustionSurfacesBilledUsage(t *testing.T) {
+	// Anthropic billed tokens then 5xx'd; OpenAI then failed with no
+	// usage. The chain exhausts, but the billed tokens from the first
+	// attempt must still surface so the ledger records the cost.
+	billed := &Usage{Provider: "anthropic", Model: "claude-x", InputTokens: 1000, OutputTokens: 50}
+	first := &fakeGen{name: "first", responses: []fakeResp{{usage: billed, err: errors.New("503 Service Unavailable")}}}
+	second := &fakeGen{name: "second", responses: []fakeResp{{err: errors.New("network reset")}}}
+
+	c := NewCascadeGenerator(quietLogger(), first, second)
+	_, usage, err := c.Generate(context.Background(), GeneratorRequest{})
+	if err == nil {
+		t.Fatal("expected error after exhausting chain")
+	}
+	if usage == nil {
+		t.Fatal("expected billed Usage from the failed first provider to be surfaced, got nil")
+	}
+	if usage.Provider != "anthropic" || usage.InputTokens != 1000 {
+		t.Errorf("expected the first provider's billed usage, got %+v", usage)
+	}
+}
+
 func TestCascade_ContextCancelledShortCircuits(t *testing.T) {
 	first := &fakeGen{name: "first", responses: []fakeResp{{err: context.Canceled}}}
 	second := &fakeGen{name: "second", responses: []fakeResp{{outfits: []Outfit{{Name: "should not see"}}}}}

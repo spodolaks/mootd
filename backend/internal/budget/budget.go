@@ -106,6 +106,12 @@ type SpendTracker interface {
 
 	// Suspend marks the user as auto-suspended until `until`.
 	Suspend(ctx context.Context, userID string, until time.Time) error
+
+	// SuspendedUntil returns the stored expiry of the user's current
+	// auto-suspend window, or the zero time when not suspended (or the
+	// expiry can't be determined). Lets Check report the real remaining
+	// time rather than a fabricated +24h.
+	SuspendedUntil(ctx context.Context, userID string) (time.Time, error)
 }
 
 // Reason carries the why behind a Deny/Downgrade decision. The
@@ -180,10 +186,19 @@ func (e *Enforcer) Check(ctx context.Context, userID string, estimatedUSD float6
 		return Allow, Reason{}, 0, err
 	}
 	if suspended {
-		until := time.Now().UTC().Add(24 * time.Hour) // upper bound; actual stored value isn't read here
+		// Report the real stored expiry so the FE countdown is accurate.
+		// Fall back to a +24h upper bound only if the value can't be read.
+		until, uerr := e.tracker.SuspendedUntil(ctx, userID)
+		if uerr != nil || until.IsZero() {
+			until = time.Now().UTC().Add(24 * time.Hour)
+		}
+		hours := int(time.Until(until).Hours()) + 1
+		if hours < 1 {
+			hours = 1
+		}
 		return Deny, Reason{
 			Code:           "auto_suspended",
-			Message:        "Account temporarily suspended after exceeding 200% of daily LLM budget. Try again in 24 hours.",
+			Message:        fmt.Sprintf("Account temporarily suspended after exceeding 200%% of daily LLM budget. Try again in ~%dh.", hours),
 			SuspendedUntil: &until,
 		}, 0, nil
 	}
@@ -388,6 +403,27 @@ func (t *RedisSpendTracker) Suspend(ctx context.Context, userID string, until ti
 	return t.rdb.Set(ctx, t.suspendKey(userID), until.Format(time.RFC3339), ttl).Err()
 }
 
+// SuspendedUntil reads back the timestamp written by Suspend. Returns
+// the zero time when no suspend key exists (not suspended) so callers
+// can distinguish "no window" from a parse error.
+func (t *RedisSpendTracker) SuspendedUntil(ctx context.Context, userID string) (time.Time, error) {
+	if t == nil || t.rdb == nil {
+		return time.Time{}, nil
+	}
+	val, err := t.rdb.Get(ctx, t.suspendKey(userID)).Result()
+	if err != nil {
+		if errors.Is(err, redis.Nil) {
+			return time.Time{}, nil
+		}
+		return time.Time{}, err
+	}
+	until, perr := time.Parse(time.RFC3339, val)
+	if perr != nil {
+		return time.Time{}, perr
+	}
+	return until, nil
+}
+
 // ────────────────────────────────────────────────────────────────────
 // NoopSpendTracker — tests and Redis-down fallback.
 // ────────────────────────────────────────────────────────────────────
@@ -404,3 +440,4 @@ func (NoopSpendTracker) Reserve(context.Context, string, float64) (float64, erro
 func (NoopSpendTracker) Release(context.Context, string, float64) error              { return nil }
 func (NoopSpendTracker) IsSuspended(context.Context, string) (bool, error)           { return false, nil }
 func (NoopSpendTracker) Suspend(context.Context, string, time.Time) error            { return nil }
+func (NoopSpendTracker) SuspendedUntil(context.Context, string) (time.Time, error)   { return time.Time{}, nil }
