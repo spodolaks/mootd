@@ -11,6 +11,27 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
+// anchorBounds returns the user ids in `anchors` plus the min and max
+// anchor timestamps. A funnel step's qualifying event for any user
+// falls in (anchor_u, anchor_u+window], so [min, max+window] is a safe
+// global time bound for the step query (#110 E3). Returns zero times
+// for an empty map.
+func anchorBounds(anchors map[string]time.Time) (ids []string, minA, maxA time.Time) {
+	ids = make([]string, 0, len(anchors))
+	first := true
+	for u, a := range anchors {
+		ids = append(ids, u)
+		if first || a.Before(minA) {
+			minA = a
+		}
+		if first || a.After(maxA) {
+			maxA = a
+		}
+		first = false
+	}
+	return ids, minA, maxA
+}
+
 // ────────────────────────────────────────────────────────────────────
 // Funnels (P2-04 / mootd-admin#21).
 //
@@ -255,12 +276,14 @@ func (r *FunnelsMongoRepository) Stats(ctx context.Context, id string) (*FunnelS
 	prevCount := step0Count
 	for i := 1; i < len(f.Steps); i++ {
 		step := f.Steps[i]
-		// Pull this step's events for users still in play.
-		// We pre-filter by user-id list to bound the read.
-		userIDs := make([]string, 0, len(currentAnchors))
-		for u := range currentAnchors {
-			userIDs = append(userIDs, u)
-		}
+		// Pull this step's events for users still in play. Pre-filter
+		// by the user-id list AND by time: a qualifying event for user
+		// u must fall in (anchor_u, anchor_u+window], so globally it
+		// lies in [min(anchor), max(anchor)+window]. Without this bound
+		// the query loaded EVERY event of this name for these users
+		// across all history into memory (#110 E3); the per-user
+		// anchor/window check below still does the exact filtering.
+		userIDs, minAnchor, maxAnchor := anchorBounds(currentAnchors)
 		if len(userIDs) == 0 {
 			stats.Steps = append(stats.Steps, FunnelStepStat{
 				StepIndex: i, EventName: step.EventName,
@@ -271,6 +294,10 @@ func (r *FunnelsMongoRepository) Stats(ctx context.Context, id string) (*FunnelS
 		match := bson.M{
 			"userId": bson.M{"$in": userIDs},
 			"name":   step.EventName,
+			"createdAt": bson.M{
+				"$gt":  minAnchor,
+				"$lte": maxAnchor.Add(time.Duration(windowMs) * time.Millisecond),
+			},
 		}
 		for k, v := range step.Filters {
 			match["properties."+k] = v

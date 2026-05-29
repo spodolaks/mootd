@@ -10,6 +10,8 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
+
+	"mootd/backend/internal/shared/pagination"
 )
 
 // UserSummary is the row shape returned by GET /admin/v1/users.
@@ -305,16 +307,25 @@ func (r *UsersMongoRepository) ListSummaries(ctx context.Context, q UsersQuery) 
 func (r *UsersMongoRepository) listIndexedSort(
 	ctx context.Context, q UsersQuery, filter bson.M, limit int,
 ) ([]UserSummary, string, error) {
-	if q.Cursor != "" {
-		// Cursor is the previous page's last user _id. Pull rows
-		// older than that one (sort is already createdAt-desc, so
-		// "_id < cursor" lines up with the natural order).
-		filter["_id"] = bson.M{"$lt": q.Cursor}
-	}
-
-	sortSpec := bson.D{{Key: "createdAt", Value: -1}, {Key: "_id", Value: -1}}
+	// The sort field depends on the requested order; the cursor must
+	// carry the value of THAT field plus _id. The previous code filtered
+	// "_id < cursor", which only works if _id is monotonic with the sort
+	// field — user _id is a generated id, so it isn't, and pages
+	// skipped/duplicated rows (#110 E1).
+	sortField := "createdAt"
 	if q.Sort == "-last_active" {
-		sortSpec = bson.D{{Key: "updatedAt", Value: -1}, {Key: "_id", Value: -1}}
+		sortField = "updatedAt"
+	}
+	sortSpec := bson.D{{Key: sortField, Value: -1}, {Key: "_id", Value: -1}}
+
+	if q.Cursor != "" {
+		if c, err := pagination.DecodeCursor(q.Cursor); err == nil && c != nil {
+			filter["$or"] = bson.A{
+				bson.M{sortField: bson.M{"$lt": c.CreatedAt}},
+				bson.M{sortField: c.CreatedAt, "_id": bson.M{"$lt": c.ID}},
+			}
+		}
+		// A malformed cursor is ignored (first page) rather than 500ing.
 	}
 
 	cur, err := r.usersCol().Find(ctx, filter,
@@ -337,8 +348,13 @@ func (r *UsersMongoRepository) listIndexedSort(
 	summaries := r.populateSummaries(ctx, docs)
 
 	nextCursor := ""
-	if hasMore && len(summaries) > 0 {
-		nextCursor = summaries[len(summaries)-1].ID
+	if hasMore && len(docs) > 0 {
+		last := docs[len(docs)-1]
+		ts := last.CreatedAt
+		if sortField == "updatedAt" {
+			ts = last.UpdatedAt
+		}
+		nextCursor = pagination.EncodeCursor(ts, last.ID)
 	}
 	return summaries, nextCursor, nil
 }
@@ -393,10 +409,13 @@ func (r *UsersMongoRepository) listComputedSort(
 	return page, nextCursor, nil
 }
 
-// populateSummaries fans out the per-user count queries + a single
-// llm_calls $group aggregation for the spend column. Per-user counts
-// are tiny indexed point queries; at 20 users/page that's 80 ops per
-// request — comfortably under 100ms total against local Mongo.
+// populateSummaries fills per-user counts + 7d spend for a page of
+// users. Counts come from grouped `$in` aggregations — ONE per
+// collection — instead of per-user CountDocuments. The old code ran 5
+// point queries per user (5×20=100/page on the indexed path; for the
+// computed-sort path, 5 for EVERY user up to maxUsersScan on every
+// request — thousands of queries to render one page) (#110 E2). Each
+// collection now needs a single aggregation regardless of page size.
 func (r *UsersMongoRepository) populateSummaries(ctx context.Context, docs []userListDoc) []UserSummary {
 	weekAgo := time.Now().UTC().Add(-7 * 24 * time.Hour)
 
@@ -404,35 +423,74 @@ func (r *UsersMongoRepository) populateSummaries(ctx context.Context, docs []use
 	for i, d := range docs {
 		ids[i] = d.ID
 	}
-	// One $group call covers spend for the entire page. Best-effort —
-	// a failure here just leaves spend at 0; we never want a single
-	// aggregation hiccup to fail the whole users list.
+	// All best-effort — a failed aggregation just leaves that column 0;
+	// a single hiccup must never fail the whole users list.
+	wardrobeTotal, wardrobeRecent := r.countAndRecentByUser(ctx, r.wardrobeCol(), ids, weekAgo)
+	outfitTotal, outfitRecent := r.countAndRecentByUser(ctx, r.outfitsCol(), ids, weekAgo)
+	moodboardTotal, _ := r.countAndRecentByUser(ctx, r.moodboardsCol(), ids, weekAgo)
 	spendMap, _ := r.spend7dByUser(ctx, ids, weekAgo)
 
 	summaries := make([]UserSummary, 0, len(docs))
 	for _, d := range docs {
-		s := UserSummary{
+		summaries = append(summaries, UserSummary{
 			ID:             d.ID,
 			Email:          d.Email,
 			Name:           d.Name,
 			SignupDate:     d.CreatedAt,
 			LastActiveAt:   d.UpdatedAt,
 			Last7dSpendUsd: spendMap[d.ID],
-		}
-		s.WardrobeCount, _ = r.wardrobeCol().CountDocuments(ctx, bson.M{"userId": d.ID})
-		s.OutfitCount, _ = r.outfitsCol().CountDocuments(ctx, bson.M{"userId": d.ID})
-		s.MoodboardCount, _ = r.moodboardsCol().CountDocuments(ctx, bson.M{"userId": d.ID})
-		s.Last7dUploads, _ = r.wardrobeCol().CountDocuments(ctx, bson.M{
-			"userId":    d.ID,
-			"createdAt": bson.M{"$gt": weekAgo},
+			WardrobeCount:  wardrobeTotal[d.ID],
+			OutfitCount:    outfitTotal[d.ID],
+			MoodboardCount: moodboardTotal[d.ID],
+			Last7dUploads:  wardrobeRecent[d.ID],
+			Last7dOutfits:  outfitRecent[d.ID],
 		})
-		s.Last7dOutfits, _ = r.outfitsCol().CountDocuments(ctx, bson.M{
-			"userId":    d.ID,
-			"createdAt": bson.M{"$gt": weekAgo},
-		})
-		summaries = append(summaries, s)
 	}
 	return summaries
+}
+
+// countAndRecentByUser returns, for the supplied page of user ids, the
+// total document count and the count created since `since`, both keyed
+// by userId — in a single grouped aggregation over the collection.
+// Relies on the userId index for the match. Best-effort: on error it
+// returns whatever it has (possibly empty maps), never an error, so a
+// blip degrades a column to 0 rather than failing the list.
+func (r *UsersMongoRepository) countAndRecentByUser(
+	ctx context.Context, col *mongo.Collection, ids []string, since time.Time,
+) (total map[string]int64, recent map[string]int64) {
+	total = make(map[string]int64)
+	recent = make(map[string]int64)
+	if len(ids) == 0 {
+		return total, recent
+	}
+	pipeline := mongo.Pipeline{
+		{{Key: "$match", Value: bson.M{"userId": bson.M{"$in": ids}}}},
+		{{Key: "$group", Value: bson.M{
+			"_id":   "$userId",
+			"total": bson.M{"$sum": 1},
+			"recent": bson.M{"$sum": bson.M{"$cond": bson.A{
+				bson.M{"$gt": bson.A{"$createdAt", since}}, 1, 0,
+			}}},
+		}}},
+	}
+	cur, err := col.Aggregate(ctx, pipeline)
+	if err != nil {
+		return total, recent
+	}
+	defer cur.Close(ctx)
+	var rows []struct {
+		ID     string `bson:"_id"`
+		Total  int64  `bson:"total"`
+		Recent int64  `bson:"recent"`
+	}
+	if err := cur.All(ctx, &rows); err != nil {
+		return total, recent
+	}
+	for _, row := range rows {
+		total[row.ID] = row.Total
+		recent[row.ID] = row.Recent
+	}
+	return total, recent
 }
 
 // spend7dByUser sums llm_calls.costUsd grouped by userId for the

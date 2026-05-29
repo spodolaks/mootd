@@ -8,6 +8,8 @@ import (
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
+
+	"mootd/backend/internal/shared/pagination"
 )
 
 // TracesQuery is the filter set accepted by GET /admin/v1/traces.
@@ -161,9 +163,16 @@ func (r *TracesMongoRepository) List(ctx context.Context, q TracesQuery) (Traces
 
 	filter := buildTracesFilter(q)
 	if q.Cursor != "" {
-		// Cursor encodes the last row's _id — pull rows whose _id
-		// is "less than" it under the descending sort.
-		filter["_id"] = bson.M{"$lt": q.Cursor}
+		// The cursor encodes (createdAt, _id) so it matches the
+		// createdAt-desc,_id-desc sort. The previous _id-only `$lt`
+		// was broken: llm_calls _id is "llm_"+random hex (no time
+		// correlation), so `_id < cursor` dropped ~half the rows
+		// arbitrarily and paging skipped/duplicated rows (#110 E1).
+		// A malformed cursor is ignored (treated as first page)
+		// rather than 500ing.
+		if c, err := pagination.DecodeCursor(q.Cursor); err == nil && c != nil {
+			filter = pagination.BuildFilter(filter, c)
+		}
 	}
 
 	cur, err := r.col().Find(
@@ -189,7 +198,8 @@ func (r *TracesMongoRepository) List(ctx context.Context, q TracesQuery) (Traces
 
 	page := TracesPage{Calls: rows}
 	if hasMore && len(rows) > 0 {
-		page.NextCursor = rows[len(rows)-1].ID
+		last := rows[len(rows)-1]
+		page.NextCursor = pagination.EncodeCursor(last.CreatedAt, last.ID)
 	}
 	return page, nil
 }
