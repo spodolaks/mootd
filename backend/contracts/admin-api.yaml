@@ -2496,6 +2496,21 @@ components:
             manually. `hitl` = auto-captured from a HITL attribute
             correction (mootd-admin#126) — excluded from the manual
             review list, but included in exports.
+        reviewCount:
+          type: integer
+          description: Distinct reviewers who submitted (1, or 2 after a re-review).
+        agreement:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+          description: |
+            Label-quality signal (mootd-admin#127): the fraction of
+            attribute picks a second reviewer agreed with the first on.
+            Present only once a trial has been re-reviewed.
+        secondReviewer:
+          type: string
+          description: Admin id of the second reviewer, when re-reviewed.
 
     TrainingTrialPage:
       type: object
@@ -5128,6 +5143,18 @@ paths:
           schema:
             type: string
             format: date-time
+        - name: minAgreement
+          in: query
+          required: false
+          description: |
+            Label-quality gate (mootd-admin#127). When > 0, emit only
+            trials that were dual-reviewed AND whose reviewer agreement
+            is at least this value — single-reviewed trials are excluded.
+          schema:
+            type: number
+            format: double
+            minimum: 0
+            maximum: 1
       responses:
         "200":
           description: |

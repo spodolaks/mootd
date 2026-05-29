@@ -1687,7 +1687,11 @@ type TrainingSftRecord struct {
 // (chosen, rejected) training pair reconstructs without
 // re-reading the (mutable) orchestrator (mootd-admin#124).
 type TrainingTrial struct {
-	AttrCount int `json:"attrCount"`
+	// Agreement Label-quality signal (mootd-admin#127): the fraction of
+	// attribute picks a second reviewer agreed with the first on.
+	// Present only once a trial has been re-reviewed.
+	Agreement *float64 `json:"agreement,omitempty"`
+	AttrCount int      `json:"attrCount"`
 
 	// ClaudeDescription Phase 1 snapshot — Claude's full structured description at submit time.
 	ClaudeDescription *map[string]interface{} `json:"claudeDescription,omitempty"`
@@ -1706,6 +1710,12 @@ type TrainingTrial struct {
 
 	// Picks Attribute dotted-path → winning side.
 	Picks *map[string]TrainingPickKind `json:"picks,omitempty"`
+
+	// ReviewCount Distinct reviewers who submitted (1, or 2 after a re-review).
+	ReviewCount *int `json:"reviewCount,omitempty"`
+
+	// SecondReviewer Admin id of the second reviewer, when re-reviewed.
+	SecondReviewer *string `json:"secondReviewer,omitempty"`
 
 	// Source Provenance. Absent/`trial` = an admin ran this trial
 	// manually. `hitl` = auto-captured from a HITL attribute
@@ -2324,6 +2334,11 @@ type AdminExportTrainingDataParams struct {
 
 	// Since Only trials submitted at/after this RFC3339 timestamp.
 	Since *time.Time `form:"since,omitempty" json:"since,omitempty"`
+
+	// MinAgreement Label-quality gate (mootd-admin#127). When > 0, emit only
+	// trials that were dual-reviewed AND whose reviewer agreement
+	// is at least this value — single-reviewed trials are excluded.
+	MinAgreement *float64 `form:"minAgreement,omitempty" json:"minAgreement,omitempty"`
 }
 
 // AdminExportTrainingDataParamsFormat defines parameters for AdminExportTrainingData.

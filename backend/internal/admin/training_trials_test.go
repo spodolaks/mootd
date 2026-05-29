@@ -83,7 +83,7 @@ func (m *memTrainingTrials) SubmitTrainingTrial(ctx context.Context, id, submitt
 	}
 	t, ok := m.rows[id]
 	if !ok {
-		t = TrainingTrial{ID: id, CreatedBy: submittedBy, CreatedAt: at}
+		t = TrainingTrial{ID: id, CreatedBy: submittedBy, CreatedAt: at, ReviewCount: 1}
 	}
 	t.Status = TrainingStatusSubmitted
 	t.SubmittedBy = submittedBy
@@ -110,6 +110,21 @@ func (m *memTrainingTrials) SubmitTrainingTrial(ctx context.Context, id, submitt
 	if in.Source != "" {
 		t.Source = in.Source
 	}
+	m.rows[id] = t
+	return &t, nil
+}
+
+func (m *memTrainingTrials) RecordReReview(ctx context.Context, id, secondReviewer string, agreement float64, at time.Time) (*TrainingTrial, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	t, ok := m.rows[id]
+	if !ok {
+		return nil, nil
+	}
+	a := agreement
+	t.Agreement = &a
+	t.SecondReviewer = secondReviewer
+	t.ReviewCount = 2
 	m.rows[id] = t
 	return &t, nil
 }

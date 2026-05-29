@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -103,6 +104,20 @@ func (h *Handler) TrainingExport(w http.ResponseWriter, r *http.Request) {
 		}
 		since = parsed
 	}
+	// minAgreement (Phase 4, mootd-admin#127): when > 0, emit only
+	// trials that were dual-reviewed AND met the agreement bar — a way
+	// to keep noisy single-reviewer labels out of a training set.
+	var minAgreement float64
+	if s := r.URL.Query().Get("minAgreement"); s != "" {
+		v, err := strconv.ParseFloat(s, 64)
+		if err != nil || v < 0 || v > 1 {
+			response.WriteJSON(w, http.StatusBadRequest, map[string]string{
+				"error": "minAgreement must be a number between 0 and 1",
+			})
+			return
+		}
+		minAgreement = v
+	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
@@ -119,6 +134,11 @@ func (h *Handler) TrainingExport(w http.ResponseWriter, r *http.Request) {
 	total, streamErr := h.trainingTrials.StreamSubmittedTrainingTrials(ctx, since, maxTrainingExportRows, func(t TrainingTrial) error {
 		// No snapshot → pre-Phase-1 trial; can't reconstruct a pair.
 		if t.GemmaDescription == nil {
+			skipped++
+			return nil
+		}
+		// Label-quality gate: below the bar, or not dual-reviewed at all.
+		if minAgreement > 0 && (t.Agreement == nil || *t.Agreement < minAgreement) {
 			skipped++
 			return nil
 		}
@@ -168,7 +188,7 @@ func (h *Handler) TrainingExport(w http.ResponseWriter, r *http.Request) {
 		h.logger.Printf("admin training export (%s): stream failed after %d rows: %v", format, total, streamErr)
 	}
 
-	h.auditTrainingExport(r, format, since, emitted, skipped, total)
+	h.auditTrainingExport(r, format, since, minAgreement, emitted, skipped, total)
 }
 
 // reconstructGold rebuilds the human-approved structured description
@@ -294,7 +314,7 @@ func flatDiffers(a, b map[string]any) bool {
 // auditTrainingExport writes one admin_audit row per export. Best-effort
 // (same contract as the traces export audit) — we don't deny a served
 // export over an audit hiccup.
-func (h *Handler) auditTrainingExport(r *http.Request, format string, since time.Time, emitted, skipped, total int) {
+func (h *Handler) auditTrainingExport(r *http.Request, format string, since time.Time, minAgreement float64, emitted, skipped, total int) {
 	if h.repo == nil {
 		return
 	}
@@ -311,6 +331,9 @@ func (h *Handler) auditTrainingExport(r *http.Request, format string, since time
 	}
 	if !since.IsZero() {
 		meta["since"] = since.UTC().Format(time.RFC3339)
+	}
+	if minAgreement > 0 {
+		meta["minAgreement"] = minAgreement
 	}
 	Audit(r.Context(), h.repo, h.logger, AuditEntry{
 		ID:           generateAuditID(),

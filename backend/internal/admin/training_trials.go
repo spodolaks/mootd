@@ -86,6 +86,14 @@ type TrainingTrial struct {
 	// Source provenance: empty/"trial" = manually run; "hitl" =
 	// auto-captured from a HITL attribute correction (#126).
 	Source string `bson:"source,omitempty" json:"source,omitempty"`
+
+	// ── Label quality (Phase 4, mootd-admin#127) ───────────────────
+	// When a second admin re-reviews a submitted trial, we keep the
+	// first review's picks canonical and record how much the two
+	// reviewers agreed — a label-noise signal exports can threshold on.
+	ReviewCount    int      `bson:"reviewCount,omitempty" json:"reviewCount,omitempty"`
+	Agreement      *float64 `bson:"agreement,omitempty" json:"agreement,omitempty"`
+	SecondReviewer string   `bson:"secondReviewer,omitempty" json:"secondReviewer,omitempty"`
 }
 
 // TrainingSubmitInput bundles everything a submit records. Carrying the
@@ -134,6 +142,42 @@ type TrainingTrialsRepository interface {
 	// endpoint (mootd-admin#125) — streamed, not materialised, so a
 	// large corpus can't OOM the box.
 	StreamSubmittedTrainingTrials(ctx context.Context, since time.Time, max int, fn func(TrainingTrial) error) (int, error)
+	// RecordReReview stores a second reviewer's agreement against the
+	// canonical (first) review WITHOUT touching its picks (Phase 4,
+	// mootd-admin#127). Returns the updated record.
+	RecordReReview(ctx context.Context, id, secondReviewer string, agreement float64, at time.Time) (*TrainingTrial, error)
+}
+
+// pickAgreement scores how much two reviewers agreed: the fraction of
+// attribute paths (the union of both reviewers' picks) where they chose
+// the same kind — and, for "custom", the same typed value. A path only
+// one reviewer touched counts as a disagreement. Empty on both sides is
+// full agreement (1.0). Used for the label-noise metric exports can
+// threshold on.
+func pickAgreement(picksA, customA, picksB, customB map[string]string) float64 {
+	paths := map[string]struct{}{}
+	for p := range picksA {
+		paths[p] = struct{}{}
+	}
+	for p := range picksB {
+		paths[p] = struct{}{}
+	}
+	if len(paths) == 0 {
+		return 1
+	}
+	matches := 0
+	for p := range paths {
+		ka, oka := picksA[p]
+		kb, okb := picksB[p]
+		if !oka || !okb || ka != kb {
+			continue
+		}
+		if ka == "custom" && customA[p] != customB[p] {
+			continue
+		}
+		matches++
+	}
+	return float64(matches) / float64(len(paths))
 }
 
 // ── MongoRepository implementation ──────────────────────────────────
@@ -254,8 +298,9 @@ func (r *MongoRepository) SubmitTrainingTrial(ctx context.Context, id, submitted
 	update := bson.M{
 		"$set": set,
 		"$setOnInsert": bson.M{
-			"createdBy": submittedBy,
-			"createdAt": at,
+			"createdBy":   submittedBy,
+			"createdAt":   at,
+			"reviewCount": 1,
 		},
 	}
 	opts := options.FindOneAndUpdate().
@@ -264,6 +309,31 @@ func (r *MongoRepository) SubmitTrainingTrial(ctx context.Context, id, submitted
 	var doc TrainingTrial
 	err := r.trainingTrialsCol().FindOneAndUpdate(ctx, bson.M{"_id": id}, update, opts).Decode(&doc)
 	if err != nil {
+		return nil, err
+	}
+	return &doc, nil
+}
+
+// RecordReReview records a second reviewer's agreement against the
+// canonical first review. It deliberately leaves picks/customValues and
+// the original submittedBy untouched — the first review stays the gold
+// the export reconstructs from; this only annotates label quality.
+func (r *MongoRepository) RecordReReview(ctx context.Context, id, secondReviewer string, agreement float64, at time.Time) (*TrainingTrial, error) {
+	update := bson.M{
+		"$set": bson.M{
+			"agreement":      agreement,
+			"secondReviewer": secondReviewer,
+			"reviewCount":    2,
+			"updatedAt":      at,
+		},
+	}
+	opts := options.FindOneAndUpdate().SetReturnDocument(options.After)
+	var doc TrainingTrial
+	err := r.trainingTrialsCol().FindOneAndUpdate(ctx, bson.M{"_id": id}, update, opts).Decode(&doc)
+	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	return &doc, nil
@@ -469,6 +539,29 @@ func (h *Handler) submitTrainingTrial(w http.ResponseWriter, r *http.Request, id
 		return
 	}
 	adminID, _ := AdminIDFromContext(r.Context())
+
+	// Re-review path (Phase 4, mootd-admin#127): if the trial is already
+	// submitted by a DIFFERENT admin, this is a second reviewer. Record
+	// the pick agreement against the canonical first review instead of
+	// overwriting it — the first review stays the gold the export uses.
+	if existing, gErr := h.trainingTrials.GetTrainingTrial(r.Context(), id); gErr == nil &&
+		existing != nil && existing.Status == TrainingStatusSubmitted &&
+		existing.SubmittedBy != "" && existing.SubmittedBy != adminID {
+		agreement := pickAgreement(existing.Picks, existing.CustomValues, body.Picks, body.CustomValues)
+		rec, err := h.trainingTrials.RecordReReview(r.Context(), id, adminID, agreement, time.Now().UTC())
+		if err != nil || rec == nil {
+			h.logger.Printf("admin training: re-review trial %s: %v", id, err)
+			response.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "re-review failed"})
+			return
+		}
+		h.auditTrainingAction(r, "training.trial.rereview", id, map[string]any{
+			"agreement": agreement,
+			"pickCount": len(body.Picks),
+		})
+		response.WriteJSON(w, http.StatusOK, rec)
+		return
+	}
+
 	rec, err := h.trainingTrials.SubmitTrainingTrial(r.Context(), id, adminID, TrainingSubmitInput{
 		Picks:             body.Picks,
 		CustomValues:      body.CustomValues,
