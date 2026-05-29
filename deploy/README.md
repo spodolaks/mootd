@@ -10,6 +10,16 @@ Browser → Cloudflare (edge TLS) → Caddy :443 (origin TLS) → backend :8089
                                           mongo + redis (compose network only)
 ```
 
+Caddy serves **three** hostnames — all three need a block in
+`deploy/Caddyfile`, or Cloudflare returns **525** for any host that's
+missing one:
+
+| Host | Served by |
+|------|-----------|
+| `api.spodolaks.id.lv`   | backend container (`127.0.0.1:8089`) |
+| `admin.spodolaks.id.lv` | admin panel container (`127.0.0.1:3001`) |
+| `spodolaks.id.lv`       | static Expo web export at `/var/www/mootd` |
+
 ## One-time bootstrap
 
 ### 1. Cloudflare DNS
@@ -18,8 +28,9 @@ In the dashboard for the zone:
 
 | Type | Name | Content | Proxy |
 |------|------|---------|-------|
-| A | `api` | server IP | 🟠 Proxied |
-| A | `@`   | server IP | 🟠 Proxied |
+| A | `api`   | server IP | 🟠 Proxied |
+| A | `admin` | server IP | 🟠 Proxied |
+| A | `@`     | server IP | 🟠 Proxied |
 
 SSL/TLS → **Full (strict)**. (Use "Full" non-strict only until Caddy has
 obtained its first cert, then switch.)
@@ -136,12 +147,33 @@ Roll back by deploying an older commit:
 git checkout <sha> && MOOTD_HOST=… ./scripts/deploy.sh
 ```
 
-## What's _not_ here
+## Web app — apex domain (`spodolaks.id.lv`)
 
-**Frontend**: the web build is a separate concern. When you want to host
-the Expo web bundle at `https://spodolaks.id.lv`, the plan is
-`expo export --platform web` → static files → Cloudflare Pages or a
-second Caddy block. Track that as its own task.
+The apex host serves the Expo app built for web as a static bundle. This
+is **part of the deploy**, not an optional extra — if you skip it, the
+apex 525s because Caddy has no block (and therefore no cert) for it.
+
+Build and deploy the web export:
+
+```bash
+cd app
+# .env must point at the public API, not localhost:
+#   EXPO_PUBLIC_DATA_SOURCE=api
+#   EXPO_PUBLIC_API_URL=https://api.spodolaks.id.lv
+npx expo export --platform web        # → app/dist/
+
+# Sync to the Caddy web root (root-owned, so sudo):
+sudo rsync -a --delete dist/ /var/www/mootd/
+```
+
+The `spodolaks.id.lv` block in `deploy/Caddyfile` already points `root`
+at `/var/www/mootd` with an SPA fallback. No Caddy reload is needed
+after a content-only update — `file_server` reads the directory live.
+
+> The API URL is baked into the JS bundle at build time. If the API
+> hostname changes, you must re-run `expo export`.
+
+## What's _not_ here
 
 **CI-driven deploy**: the script works off your laptop. When you want
 to trigger deploys from GitHub Actions on merge to `main`, add a
