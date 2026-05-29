@@ -102,7 +102,7 @@ type FunnelStats struct {
 type FunnelsRepository interface {
 	List(ctx context.Context) ([]Funnel, error)
 	Get(ctx context.Context, id string) (*Funnel, error)
-	Create(ctx context.Context, f Funnel) error
+	Create(ctx context.Context, f Funnel) (Funnel, error)
 	Stats(ctx context.Context, id string) (*FunnelStats, error)
 }
 
@@ -184,15 +184,17 @@ func (r *FunnelsMongoRepository) Get(ctx context.Context, id string) (*Funnel, e
 	return &doc, nil
 }
 
-func (r *FunnelsMongoRepository) Create(ctx context.Context, f Funnel) error {
+// Create persists f and returns it with its generated ID populated, so
+// the caller can echo the created row without a follow-up read (#111 F7).
+func (r *FunnelsMongoRepository) Create(ctx context.Context, f Funnel) (Funnel, error) {
 	if f.Name == "" || len(f.Steps) < 2 {
-		return errors.New("admin: funnel needs name + at least 2 steps")
+		return Funnel{}, errors.New("admin: funnel needs name + at least 2 steps")
 	}
 	if f.WindowDays <= 0 || f.WindowDays > 90 {
-		return errors.New("admin: windowDays must be 1-90")
+		return Funnel{}, errors.New("admin: windowDays must be 1-90")
 	}
 	if f.AnalysisDays <= 0 || f.AnalysisDays > 180 {
-		return errors.New("admin: analysisDays must be 1-180")
+		return Funnel{}, errors.New("admin: analysisDays must be 1-180")
 	}
 	if f.ID == "" {
 		f.ID = "fn_" + generateAuditID()[len("aud_"):]
@@ -200,8 +202,10 @@ func (r *FunnelsMongoRepository) Create(ctx context.Context, f Funnel) error {
 	if f.CreatedAt.IsZero() {
 		f.CreatedAt = time.Now().UTC()
 	}
-	_, err := r.col().InsertOne(ctx, f)
-	return err
+	if _, err := r.col().InsertOne(ctx, f); err != nil {
+		return Funnel{}, err
+	}
+	return f, nil
 }
 
 // Stats walks the steps and computes per-user pass-through.

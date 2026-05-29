@@ -237,22 +237,33 @@ func (r *EvalsMongoRepository) UpdateProgress(ctx context.Context, id string, st
 }
 
 func (r *EvalsMongoRepository) UpsertCase(ctx context.Context, runID string, c EvalCaseResult) error {
-	// Atomic per-case update so concurrent goroutines can write
-	// their results without racing the read-modify-write a naive
-	// approach would need. Pull-then-push guarantees idempotency
-	// on retries (rare, but the runner's panic recovery could
-	// re-trigger a case).
-	if _, err := r.col().UpdateOne(ctx,
-		bson.M{"_id": runID},
-		bson.M{"$pull": bson.M{"cases": bson.M{"caseId": c.CaseID}}},
-	); err != nil {
-		return fmt.Errorf("eval upsert case pull: %w", err)
-	}
-	_, err := r.col().UpdateOne(ctx,
-		bson.M{"_id": runID},
-		bson.M{"$push": bson.M{"cases": c}},
+	// Atomic upsert-into-array (#111 F2). The previous $pull-then-$push
+	// was two separate updates: between them the case was absent from
+	// the array, so a concurrent UpsertCase for a DIFFERENT case (the
+	// runner writes 5 at a time) could interleave and drop or duplicate
+	// entries. Instead: update the case in place if present, else push
+	// it with a $ne guard — each statement is atomic and they never
+	// touch a sibling element.
+	res, err := r.col().UpdateOne(ctx,
+		bson.M{"_id": runID, "cases.caseId": c.CaseID},
+		bson.M{"$set": bson.M{"cases.$": c}},
 	)
-	return err
+	if err != nil {
+		return fmt.Errorf("eval upsert case set: %w", err)
+	}
+	if res.MatchedCount > 0 {
+		return nil // updated in place
+	}
+	// Not present yet — push, guarding against a concurrent push of the
+	// same caseId (the $ne fails to match once the element exists, so
+	// the second writer is a no-op rather than a duplicate).
+	if _, err := r.col().UpdateOne(ctx,
+		bson.M{"_id": runID, "cases.caseId": bson.M{"$ne": c.CaseID}},
+		bson.M{"$push": bson.M{"cases": c}},
+	); err != nil {
+		return fmt.Errorf("eval upsert case push: %w", err)
+	}
+	return nil
 }
 
 func (r *EvalsMongoRepository) Finalize(ctx context.Context, id string, status EvalRunStatus, completedAt time.Time, agg EvalRunAggregate, errMsg string) error {
@@ -815,7 +826,10 @@ func (r *EvalRunner) execute(runID string, tuples []EvalTuple) {
 			if err := r.repo.UpsertCase(ctx, runID, res); err != nil {
 				r.logger.Printf("eval %s case %s: upsert: %v", runID, tuple.ID, err)
 			}
-			if err := r.repo.UpdateProgress(ctx, runID, EvalStatusProcessing, completed, snap, nil); err != nil {
+			// Pass snap.CompletedCases (captured under mu above) rather
+			// than reading `completed` here outside the lock — that read
+			// raced concurrent workers (#111 F3). Same value, no race.
+			if err := r.repo.UpdateProgress(ctx, runID, EvalStatusProcessing, snap.CompletedCases, snap, nil); err != nil {
 				r.logger.Printf("eval %s: progress update: %v", runID, err)
 			}
 		}(t)
