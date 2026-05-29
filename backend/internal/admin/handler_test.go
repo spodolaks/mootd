@@ -22,6 +22,7 @@ type memoryRepo struct {
 	mu     sync.Mutex
 	admins map[string]Admin        // keyed by email
 	tokens map[string]RefreshToken // keyed by hash
+	audits []AuditEntry            // recorded so tests can assert audit writes
 }
 
 func newMemoryRepo() *memoryRepo {
@@ -112,8 +113,9 @@ func (m *memoryRepo) RevokeRefreshToken(ctx context.Context, hash string, at tim
 }
 
 func (m *memoryRepo) AppendAudit(ctx context.Context, e AuditEntry) error {
-	// In-memory tests don't read audit; just no-op so the auth handler
-	// surface stays compilable when audit calls are added later.
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.audits = append(m.audits, e)
 	return nil
 }
 

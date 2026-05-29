@@ -223,7 +223,14 @@ func (h *Handler) HitlPatchAttributes(w http.ResponseWriter, r *http.Request, id
 
 	if snap != nil && status >= 200 && status < 300 {
 		adminID, _ := AdminIDFromContext(r.Context())
-		h.ingestHitlCorrection(r.Context(), id, snap, patches, adminID)
+		// Detached context: the PATCH already succeeded upstream and its
+		// response is written, so a client disconnect now would cancel
+		// r.Context() and abort this ingest write — silently losing the
+		// (rejected, chosen) training pair (#111 F6). The write is a few
+		// ms; bound it generously.
+		ingestCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		h.ingestHitlCorrection(ingestCtx, id, snap, patches, adminID)
 	}
 }
 

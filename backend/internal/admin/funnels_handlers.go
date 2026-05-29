@@ -111,10 +111,10 @@ func (h *Handler) createFunnel(w http.ResponseWriter, r *http.Request) {
 		response.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	if body.WindowDays == 0 {
+	if body.WindowDays <= 0 {
 		body.WindowDays = 7
 	}
-	if body.AnalysisDays == 0 {
+	if body.AnalysisDays <= 0 {
 		body.AnalysisDays = 30
 	}
 	// Validate step event names against the catalog. We can't
@@ -144,20 +144,41 @@ func (h *Handler) createFunnel(w http.ResponseWriter, r *http.Request) {
 		CreatedBy:    adminID,
 		CreatedAt:    time.Now().UTC(),
 	}
-	if err := h.funnelsRepo.Create(ctx, f); err != nil {
+	created, err := h.funnelsRepo.Create(ctx, f)
+	if err != nil {
 		response.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 
-	// Echo the persisted row.
-	echoed, _ := h.funnelsRepo.List(ctx)
-	for _, e := range echoed {
-		if e.Name == f.Name && e.CreatedBy == adminID {
-			response.WriteJSON(w, http.StatusCreated, e)
-			return
+	// Audit the mutation (#111 F1) — every other admin write does, and
+	// CLAUDE.md requires non-read handlers to write an admin_audit row.
+	if h.repo != nil {
+		var adminEmail string
+		if a, _ := h.repo.FindByID(ctx, adminID); a != nil {
+			adminEmail = a.Email
 		}
+		Audit(ctx, h.repo, h.logger, AuditEntry{
+			ID:           generateAuditID(),
+			AdminID:      adminID,
+			AdminEmail:   adminEmail,
+			Action:       "funnel.create",
+			TargetEntity: created.ID,
+			At:           time.Now().UTC(),
+			IP:           clientIP(r),
+			UserAgent:    r.Header.Get("User-Agent"),
+			Metadata: map[string]any{
+				"name":         created.Name,
+				"steps":        len(created.Steps),
+				"windowDays":   created.WindowDays,
+				"analysisDays": created.AnalysisDays,
+			},
+		})
 	}
-	response.WriteJSON(w, http.StatusCreated, f)
+
+	// Echo the persisted row directly — Create returns it with its
+	// generated ID, so no name-scan re-list (which returned the wrong
+	// row for duplicate names) (#111 F7).
+	response.WriteJSON(w, http.StatusCreated, created)
 }
 
 func (h *Handler) getFunnelStats(w http.ResponseWriter, r *http.Request, id string) {
