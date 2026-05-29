@@ -69,6 +69,15 @@ func (h *Handler) WithHitlProxy(p *HitlProxy) *Handler {
 	return h
 }
 
+// WithTrainingTrials wires the training-review record store
+// (singleItemDetection #36, multi-item). Optional — when nil, the
+// /admin/v1/training/submissions/* endpoints return 503 while the
+// orchestrator-proxied /training/{process,trials,blob} keep working.
+func (h *Handler) WithTrainingTrials(r TrainingTrialsRepository) *Handler {
+	h.trainingTrials = r
+	return h
+}
+
 // HitlQueue handles GET /admin/v1/hitl-queue.
 //
 // Query params are forwarded verbatim — the orchestrator owns the

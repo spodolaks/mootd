@@ -2420,6 +2420,204 @@ components:
         reason:
           type: string
 
+    TrainingPickKind:
+      type: string
+      enum: [claude, gemma, custom]
+      description: |
+        Which value won an attribute in a training trial: one of the
+        two describers, or `custom` when the reviewer typed a value
+        because neither describer was right.
+
+    TrainingTrial:
+      type: object
+      description: |
+        One admin-side training-review record (mootd `training_trials`
+        collection). The orchestrator owns the per-trial describer
+        output (see TrainingTrialDetail); this row is the admin index
+        over it: who started the trial, its review status, the winning
+        pick per attribute, and — once submitted — a self-contained
+        snapshot of both describers' full structured descriptions so a
+        (chosen, rejected) training pair reconstructs without
+        re-reading the (mutable) orchestrator (mootd-admin#124).
+      required: [trialId, status, createdBy, createdAt, pickCount, attrCount]
+      properties:
+        trialId:
+          type: string
+          description: Client-minted trial id; also the orchestrator poll key and the Mongo _id.
+        label:
+          type: string
+        status:
+          type: string
+          enum: [in_review, submitted]
+        createdBy:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        submittedBy:
+          type: string
+        submittedAt:
+          type: string
+          format: date-time
+        picks:
+          type: object
+          description: Attribute dotted-path → winning side.
+          additionalProperties:
+            $ref: "#/components/schemas/TrainingPickKind"
+        customValues:
+          type: object
+          description: Human-entered override text for `custom` picks (path → value).
+          additionalProperties:
+            type: string
+        pickCount:
+          type: integer
+        attrCount:
+          type: integer
+        claudeDescription:
+          type: object
+          additionalProperties: true
+          description: Phase 1 snapshot — Claude's full structured description at submit time.
+        gemmaDescription:
+          type: object
+          additionalProperties: true
+          description: Phase 1 snapshot — Gemma's full structured description at submit time.
+        sourceImageUrl:
+          type: string
+          description: gridfs:// URI of the source garment photo both describers ran on.
+        claudeRequestId:
+          type: string
+        gemmaRequestId:
+          type: string
+
+    TrainingTrialPage:
+      type: object
+      description: One page of training-review records, newest first.
+      required: [trials]
+      properties:
+        trials:
+          type: array
+          items:
+            $ref: "#/components/schemas/TrainingTrial"
+        nextCursor:
+          type: string
+
+    TrainingTrialCreateRequest:
+      type: object
+      description: |
+        Register a trial review record so it appears in the list
+        immediately, before the describers finish.
+      required: [trialId]
+      properties:
+        trialId:
+          type: string
+        label:
+          type: string
+
+    TrainingTrialSubmitRequest:
+      type: object
+      description: |
+        Finalize a trial review: record the per-attribute picks and
+        flip status to `submitted`. The snapshot fields capture both
+        describers' full output so the saved record is self-contained
+        training data (mootd-admin#124).
+      required: [picks, attrCount]
+      properties:
+        picks:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/TrainingPickKind"
+        customValues:
+          type: object
+          additionalProperties:
+            type: string
+        attrCount:
+          type: integer
+        claudeDescription:
+          type: object
+          additionalProperties: true
+        gemmaDescription:
+          type: object
+          additionalProperties: true
+        sourceImageUrl:
+          type: string
+        claudeRequestId:
+          type: string
+        gemmaRequestId:
+          type: string
+
+    TrainingTrialJob:
+      type: object
+      description: |
+        One describer's output for a trial, as returned by the
+        orchestrator (proxied read-only). Slim subset the training UI
+        renders.
+      required: [request_id, status, describer]
+      properties:
+        request_id:
+          type: string
+        status:
+          type: string
+        describer:
+          type: string
+          description: Which describer produced this job, e.g. `claude` or `gemma`.
+        structured_description:
+          type: object
+          additionalProperties: true
+        image_url:
+          type: string
+        mask_url:
+          type: string
+        generation_image_url:
+          type: string
+        confidence_overall:
+          type: number
+          format: double
+        confidence_per_attribute:
+          type: object
+          additionalProperties:
+            type: number
+            format: double
+        hitl_required:
+          type: boolean
+        hitl_reason:
+          type: string
+        locked_attributes:
+          type: array
+          items:
+            type: string
+        created_at:
+          type: string
+
+    TrainingTrialDetail:
+      type: object
+      description: |
+        Orchestrator-owned trial detail: every describer job for one
+        trial id. Proxied read-only by GET
+        /admin/v1/training/trials/{trialId}; the UI polls it until both
+        describers reach a terminal state.
+      required: [trial_id, jobs]
+      properties:
+        trial_id:
+          type: string
+        jobs:
+          type: array
+          items:
+            $ref: "#/components/schemas/TrainingTrialJob"
+
+    TrainingProcessAccepted:
+      type: object
+      description: |
+        202 body from POST /admin/v1/training/process — the
+        orchestrator accepted the describer job; the pipeline runs
+        server-side and the UI polls the trial detail for results.
+      required: [status]
+      properties:
+        status:
+          type: string
+          example: accepted
+        requestId:
+          type: string
+
     ArchetypeDefaultItem:
       description: |
         Admin-curated wardrobe item that gets COPIED into a
@@ -4624,6 +4822,232 @@ paths:
         "503":
           description: Regenerator not configured.
 
+  /admin/v1/training/process:
+    post:
+      operationId: adminTrainingProcess
+      summary: |
+        Run one describer on a garment photo for a training trial.
+        Proxies the multipart upload to the orchestrator's SSE
+        pipeline; returns 202 once the job is accepted (the pipeline
+        runs server-side and the UI polls the trial detail).
+        Permission: traces:rerun. Audited.
+      tags: [training]
+      parameters:
+        - name: X-Trial-Id
+          in: header
+          required: true
+          schema: { type: string }
+        - name: X-Describer
+          in: header
+          required: true
+          schema:
+            type: string
+            enum: [claude, gemma]
+        - name: X-Request-Id
+          in: header
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                image:
+                  type: string
+                  format: binary
+      responses:
+        "202":
+          description: Describer job accepted; pipeline runs server-side.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TrainingProcessAccepted"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Missing traces:rerun permission.
+        "502":
+          description: Orchestrator unreachable.
+
+  /admin/v1/training/trials/{trialId}:
+    get:
+      operationId: adminGetTrainingTrialDetail
+      summary: |
+        Orchestrator-owned trial detail (both describers' jobs).
+        Read-only; the UI polls until both reach a terminal state.
+        Permission: traces:read.
+      tags: [training]
+      parameters:
+        - name: trialId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Trial detail with all describer jobs.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TrainingTrialDetail"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: No jobs for this trial id yet.
+
+  /admin/v1/training/blob/{bucket}/{id}:
+    get:
+      operationId: adminGetTrainingBlob
+      summary: |
+        Image bytes (source / mask / generation) for a trial, resolved
+        from a gridfs:// URI. Proxied from the orchestrator with admin
+        auth. Permission: traces:read.
+      tags: [training]
+      parameters:
+        - name: bucket
+          in: path
+          required: true
+          schema: { type: string }
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Raw image bytes.
+          content:
+            image/*:
+              schema:
+                type: string
+                format: binary
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Blob not found.
+
+  /admin/v1/training/submissions:
+    get:
+      operationId: adminListTrainingTrials
+      summary: |
+        Paginated training-review records (mootd `training_trials`),
+        newest first. Permission: traces:read.
+      tags: [training]
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [in_review, submitted]
+        - name: cursor
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 25
+      responses:
+        "200":
+          description: One page of training-review records.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TrainingTrialPage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      operationId: adminCreateTrainingTrial
+      summary: |
+        Register a training-review record so the trial appears in the
+        list before its describers finish. Idempotent on trialId.
+        Permission: traces:rerun. Audited.
+      tags: [training]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TrainingTrialCreateRequest"
+      responses:
+        "201":
+          description: Record created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TrainingTrial"
+        "200":
+          description: Record already existed (idempotent create).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TrainingTrial"
+        "400":
+          description: Missing trialId.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Missing traces:rerun permission.
+
+  /admin/v1/training/submissions/{id}:
+    get:
+      operationId: adminGetTrainingTrial
+      summary: |
+        One training-review record. Permission: traces:read.
+      tags: [training]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: The training-review record.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TrainingTrial"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Trial not found.
+
+  /admin/v1/training/submissions/{id}/submit:
+    post:
+      operationId: adminSubmitTrainingTrial
+      summary: |
+        Finalize a trial review: record the per-attribute picks plus a
+        self-contained snapshot of both describers' output, and flip
+        status to `submitted`. Upserts. Permission: traces:rerun.
+        Audited.
+      tags: [training]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TrainingTrialSubmitRequest"
+      responses:
+        "200":
+          description: Trial submitted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TrainingTrial"
+        "400":
+          description: Invalid body.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Missing traces:rerun permission.
+
   /admin/v1/archetype-defaults:
     get:
       operationId: adminListArchetypeDefaults
@@ -4842,6 +5266,14 @@ tags:
       singleItemDetection HITL queue — list, approve, reject, PATCH
       attributes, re-run a stage. Backed by the orchestrator's
       /v1/admin/* endpoints (mootd backend proxies).
+  - name: training
+    description: |
+      singleItemDetection training trials — run a garment photo through
+      two describers (Claude + Gemma), review attribute by attribute,
+      and submit the winning picks as a self-contained snapshot. Picks
+      accumulate as DPO/SFT data for Gemma fine-tuning. CRUD records
+      live in mootd `training_trials`; the trial detail, blob, and
+      process endpoints proxy the orchestrator.
   - name: archetype-defaults
     description: |
       Admin-curated wardrobe items keyed by archetype. Copied
