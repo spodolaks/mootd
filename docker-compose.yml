@@ -3,8 +3,6 @@ services:
     image: redis:7-alpine
     container_name: mootd-redis
     restart: unless-stopped
-    ports:
-      - "6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -18,8 +16,6 @@ services:
     environment:
       MONGO_INITDB_ROOT_USERNAME: mootd
       MONGO_INITDB_ROOT_PASSWORD: mootd_dev
-    ports:
-      - "27018:27017"
     volumes:
       - mongo_data:/data/db
     healthcheck:
@@ -54,7 +50,7 @@ services:
       # ADMIN_JWT_SECRET: "replace-with-a-strong-admin-secret-min-32-chars"
       # CORS_ALLOWED_ORIGINS: "https://app.mootd.com"
       DETECTION_API_KEY: "${DETECTION_API_KEY}"
-      BG_REMOVER_BASE_URL: "http://bcgrm-api-1:8000"
+      BG_REMOVER_BASE_URL: "${BG_REMOVER_BASE_URL:-http://bcgrm-api-1:8000}"
       # DETECTION_API_BASE_URL accepts a comma-separated list
       # (mootd#56). The detector round-robins per request and
       # fails over to a different host on 5xx / network error.
@@ -141,8 +137,6 @@ services:
     networks:
       - default
       - bcgrm_default
-    ports:
-      - "8089:8080"
     depends_on:
       mongo:
         condition: service_healthy

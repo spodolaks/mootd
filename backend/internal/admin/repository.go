@@ -113,7 +113,10 @@ func (r *MongoRepository) ensureIndexes(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	return r.ensureAuditIndexes(ctx)
+	if err := r.ensureAuditIndexes(ctx); err != nil {
+		return err
+	}
+	return r.ensureTrainingTrialIndexes(ctx)
 }
 
 // FindByEmail looks up an admin by lower-cased email. Returns (nil, nil)

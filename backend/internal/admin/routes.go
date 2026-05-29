@@ -122,10 +122,17 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, authLimit Middleware, requi
 	mux.Handle("/admin/v1/hitl-queue", requireAdmin(RequirePermission(PermTracesRead)(http.HandlerFunc(h.HitlQueue))))
 	mux.Handle("/admin/v1/items/", requireAdmin(RequirePermission(PermTracesRead)(http.HandlerFunc(h.HitlItemsRouter))))
 
+	// Training trials (singleItemDetection #36). Same orchestrator
+	// proxy as the HITL queue (reuses hitlProxy). Read = traces:read
+	// for the trial poll + image blobs; the process POST gates inline
+	// on traces:rerun. Returns 503 when SINGLEITEM_BASE_URL is empty.
+	mux.Handle("/admin/v1/training/", requireAdmin(RequirePermission(PermTracesRead)(http.HandlerFunc(h.TrainingRouter))))
+
 	// Archetype-default wardrobe items (cold-start fix). Read =
-	// prompts:read; create / patch / delete gated inline on
-	// prompts:write (matches the prompts surface — both are
-	// admin-curated content authored against archetypes).
+	// prompts:read (shared with the Prompts list endpoint); create
+	// / patch / delete gated inline on defaults:write — scoped
+	// narrower than prompts:write so curators can edit defaults
+	// without inheriting prompt-template / A-B-test authoring.
 	mux.Handle("/admin/v1/archetype-defaults", requireAdmin(RequirePermission(PermPromptsRead)(http.HandlerFunc(h.ArchetypeDefaultsRouter))))
 	mux.Handle("/admin/v1/archetype-defaults/", requireAdmin(RequirePermission(PermPromptsRead)(http.HandlerFunc(h.ArchetypeDefaultsRouter))))
 	// "Seed this user's wardrobe with their archetype defaults"

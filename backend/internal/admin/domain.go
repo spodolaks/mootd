@@ -29,12 +29,18 @@ const (
 	RoleSupport Role = "support"
 	// RoleReadonly grants read on everything; cannot mutate or rerun.
 	RoleReadonly Role = "readonly"
+	// RoleCurator grants only prompts:read — enough for the
+	// archetype-defaults curation surface (Defaults page) and the
+	// read-only Prompts view. No traces, no users, no spend. Used
+	// for contributors whose only job is curating per-archetype
+	// defaults.
+	RoleCurator Role = "curator"
 )
 
-// IsValidRole reports whether r is one of the four recognised roles.
+// IsValidRole reports whether r is one of the five recognised roles.
 func IsValidRole(r Role) bool {
 	switch r {
-	case RoleAdmin, RoleEngineer, RoleSupport, RoleReadonly:
+	case RoleAdmin, RoleEngineer, RoleSupport, RoleReadonly, RoleCurator:
 		return true
 	}
 	return false

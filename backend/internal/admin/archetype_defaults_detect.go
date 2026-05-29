@@ -46,6 +46,14 @@ type ItemDetector interface {
 	DetectFromBytes(ctx context.Context, imageData []byte, filename string) (DetectionPrefill, error)
 }
 
+// BackgroundRemover is the small surface admin/ needs to produce a
+// bg-removed PNG alongside the original upload during detect. Same
+// service the mobile wardrobe upload uses. Defined as an interface
+// so admin/ doesn't import wardrobe — one-way dep convention.
+type BackgroundRemover interface {
+	RemoveBackground(imageData []byte, filename string) ([]byte, error)
+}
+
 // WithImageStore + WithItemDetector wire the new "upload + autodetect"
 // flow on /admin/v1/archetype-defaults/detect. Both are required for
 // the endpoint to come online; either one missing → 503.
@@ -56,6 +64,15 @@ func (h *Handler) WithImageStore(s ImageStore) *Handler {
 
 func (h *Handler) WithItemDetector(d ItemDetector) *Handler {
 	h.itemDetector = d
+	return h
+}
+
+// WithBackgroundRemover wires the bg-removal service so detect
+// produces a pngImageUrl alongside the original upload. Optional —
+// when unwired (or the call fails), the response just omits
+// pngImageUrl and the curator can still save with imageUrl alone.
+func (h *Handler) WithBackgroundRemover(b BackgroundRemover) *Handler {
+	h.bgRemover = b
 	return h
 }
 
@@ -75,6 +92,11 @@ type ArchetypeDefaultDetectionResult struct {
 	// straight onto seeded wardrobe items so the mobile app
 	// can render the image without admin auth.
 	ImageURL string `json:"imageUrl"`
+	// PngImageURL points at the bg-removed PNG (same ServeImage
+	// route, key=`{id}-png`). Empty when the bg-removal service
+	// is unconfigured or returned an error — non-fatal; the
+	// curator can still save the row.
+	PngImageURL string `json:"pngImageUrl,omitempty"`
 	// Detection-derived fields. Curators can edit any of them
 	// before saving.
 	Category              string            `json:"category"`
@@ -107,12 +129,12 @@ const (
 //  4. Run the detector; discard any generated image, keep description.
 //  5. Return ArchetypeDefaultDetectionResult to the FE.
 //
-// Permission: prompts:write (curating content).
+// Permission: defaults:write (curating content).
 func (h *Handler) detectArchetypeDefault(w http.ResponseWriter, r *http.Request) {
-	if !HasPermissionFromContext(r, PermPromptsWrite) {
+	if !HasPermissionFromContext(r, PermDefaultsWrite) {
 		response.WriteJSON(w, http.StatusForbidden, map[string]any{
 			"error":             "permission denied",
-			"missingPermission": PermPromptsWrite,
+			"missingPermission": PermDefaultsWrite,
 		})
 		return
 	}
@@ -177,6 +199,25 @@ func (h *Handler) detectArchetypeDefault(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Background removal mirrors the wardrobe single-item upload
+	// flow: best-effort, failure is logged but not fatal. The
+	// curator can still save the row with the original imageUrl
+	// alone if the service is unconfigured or down.
+	var pngImageURL string
+	if h.bgRemover != nil {
+		pngData, bgErr := h.bgRemover.RemoveBackground(imgData, filename)
+		if bgErr != nil {
+			h.logger.Printf("admin /archetype-defaults/detect: bg removal for %s: %v", id, bgErr)
+		} else {
+			pngKey := id + "-png"
+			if saveErr := h.imageStore.Save(ctx, pngKey, pngData, "image/png"); saveErr != nil {
+				h.logger.Printf("admin /archetype-defaults/detect: save png for %s: %v", id, saveErr)
+			} else {
+				pngImageURL = "/v1/wardrobe/items/" + pngKey + "/image"
+			}
+		}
+	}
+
 	prefill, err := h.itemDetector.DetectFromBytes(ctx, imgData, filename)
 	if err != nil {
 		h.logger.Printf("admin /archetype-defaults/detect: detect: %v", err)
@@ -190,6 +231,7 @@ func (h *Handler) detectArchetypeDefault(w http.ResponseWriter, r *http.Request)
 	response.WriteJSON(w, http.StatusOK, ArchetypeDefaultDetectionResult{
 		ID:                    id,
 		ImageURL:              imageURL,
+		PngImageURL:           pngImageURL,
 		Category:              prefill.Category,
 		Label:                 prefill.Label,
 		Confidence:            prefill.Confidence,

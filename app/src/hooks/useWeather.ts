@@ -147,9 +147,9 @@ export function useWeather(): UseWeatherResult {
         longitude = coords.longitude;
         console.log(`[Weather] ✓ Location acquired: ${latitude.toFixed(4)}, ${longitude.toFixed(4)}`);
       } catch (locErr) {
-        console.log('[Weather] ⚠ Location unavailable, using default (New York):', locErr instanceof Error ? locErr.message : locErr);
-        latitude = 40.7128;
-        longitude = -74.006;
+        console.log('[Weather] ⚠ Location unavailable, using default (Tallinn):', locErr instanceof Error ? locErr.message : locErr);
+        latitude = 59.437;
+        longitude = 24.7536;
       }
 
       const apiUnit = temperatureUnit === 'fahrenheit' ? 'fahrenheit' : 'celsius';

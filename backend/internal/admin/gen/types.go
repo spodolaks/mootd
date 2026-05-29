@@ -215,6 +215,25 @@ const (
 	SingleItemDetectionJobStatusRunning   SingleItemDetectionJobStatus = "running"
 )
 
+// Defines values for TrainingPickKind.
+const (
+	TrainingPickKindClaude TrainingPickKind = "claude"
+	TrainingPickKindCustom TrainingPickKind = "custom"
+	TrainingPickKindGemma  TrainingPickKind = "gemma"
+)
+
+// Defines values for TrainingTrialSource.
+const (
+	Hitl  TrainingTrialSource = "hitl"
+	Trial TrainingTrialSource = "trial"
+)
+
+// Defines values for TrainingTrialStatus.
+const (
+	TrainingTrialStatusInReview  TrainingTrialStatus = "in_review"
+	TrainingTrialStatusSubmitted TrainingTrialStatus = "submitted"
+)
+
 // Defines values for UserOutfitBatchStatus.
 const (
 	Completed  UserOutfitBatchStatus = "completed"
@@ -293,6 +312,24 @@ const (
 	AdminTracesSummaryParamsStatusError   AdminTracesSummaryParamsStatus = "error"
 	AdminTracesSummaryParamsStatusSuccess AdminTracesSummaryParamsStatus = "success"
 	AdminTracesSummaryParamsStatusTimeout AdminTracesSummaryParamsStatus = "timeout"
+)
+
+// Defines values for AdminExportTrainingDataParamsFormat.
+const (
+	Dpo AdminExportTrainingDataParamsFormat = "dpo"
+	Sft AdminExportTrainingDataParamsFormat = "sft"
+)
+
+// Defines values for AdminTrainingProcessParamsXDescriber.
+const (
+	AdminTrainingProcessParamsXDescriberClaude AdminTrainingProcessParamsXDescriber = "claude"
+	AdminTrainingProcessParamsXDescriberGemma  AdminTrainingProcessParamsXDescriber = "gemma"
+)
+
+// Defines values for AdminListTrainingTrialsParamsStatus.
+const (
+	AdminListTrainingTrialsParamsStatusInReview  AdminListTrainingTrialsParamsStatus = "in_review"
+	AdminListTrainingTrialsParamsStatusSubmitted AdminListTrainingTrialsParamsStatus = "submitted"
 )
 
 // Defines values for AdminListUsersParamsTier.
@@ -389,8 +426,15 @@ type ArchetypeDefaultDetectionResult struct {
 	// ImageUrl Path the FE renders + the value to send back on create.
 	// Resolves via the public wardrobe ServeImage route, so
 	// seeded copies on user wardrobes also load without auth.
-	ImageUrl              string                  `json:"imageUrl"`
-	Label                 string                  `json:"label"`
+	ImageUrl string `json:"imageUrl"`
+	Label    string `json:"label"`
+
+	// PngImageUrl Background-removed PNG path; populated when the bg-removal
+	// service succeeded during detect. Same service the mobile
+	// wardrobe upload uses; omitted when the service is
+	// unconfigured or the call failed (non-fatal — the curator
+	// can still save the row with imageUrl alone).
+	PngImageUrl           *string                 `json:"pngImageUrl,omitempty"`
 	StructuredDescription *map[string]interface{} `json:"structuredDescription,omitempty"`
 	Traits                *map[string]string      `json:"traits,omitempty"`
 }
@@ -1597,6 +1641,165 @@ type TracesSummary struct {
 	TotalCount int64 `json:"totalCount"`
 }
 
+// TrainingDpoRecord One line of a `dpo` export. `chosen` is the human-approved gold;
+// `rejected` is Gemma's full original output. Only trials where
+// the reviewer changed at least one value are emitted.
+type TrainingDpoRecord struct {
+	Chosen         map[string]interface{} `json:"chosen"`
+	Rejected       map[string]interface{} `json:"rejected"`
+	SourceImageUrl *string                `json:"sourceImageUrl,omitempty"`
+	SubmittedAt    *time.Time             `json:"submittedAt,omitempty"`
+	SubmittedBy    *string                `json:"submittedBy,omitempty"`
+	TrialId        string                 `json:"trialId"`
+}
+
+// TrainingPickKind Which value won an attribute in a training trial: one of the
+// two describers, or `custom` when the reviewer typed a value
+// because neither describer was right.
+type TrainingPickKind string
+
+// TrainingProcessAccepted 202 body from POST /admin/v1/training/process — the
+// orchestrator accepted the describer job; the pipeline runs
+// server-side and the UI polls the trial detail for results.
+type TrainingProcessAccepted struct {
+	RequestId *string `json:"requestId,omitempty"`
+	Status    string  `json:"status"`
+}
+
+// TrainingSftRecord One line of an `sft` export. The model input is the photo at
+// `sourceImageUrl`; `gold` is the human-approved structured
+// description (Gemma's output with each pick applied on top).
+type TrainingSftRecord struct {
+	AttrCount      int                    `json:"attrCount"`
+	Gold           map[string]interface{} `json:"gold"`
+	SourceImageUrl *string                `json:"sourceImageUrl,omitempty"`
+	SubmittedAt    *time.Time             `json:"submittedAt,omitempty"`
+	SubmittedBy    *string                `json:"submittedBy,omitempty"`
+	TrialId        string                 `json:"trialId"`
+}
+
+// TrainingTrial One admin-side training-review record (mootd `training_trials`
+// collection). The orchestrator owns the per-trial describer
+// output (see TrainingTrialDetail); this row is the admin index
+// over it: who started the trial, its review status, the winning
+// pick per attribute, and — once submitted — a self-contained
+// snapshot of both describers' full structured descriptions so a
+// (chosen, rejected) training pair reconstructs without
+// re-reading the (mutable) orchestrator (mootd-admin#124).
+type TrainingTrial struct {
+	// Agreement Label-quality signal (mootd-admin#127): the fraction of
+	// attribute picks a second reviewer agreed with the first on.
+	// Present only once a trial has been re-reviewed.
+	Agreement *float64 `json:"agreement,omitempty"`
+	AttrCount int      `json:"attrCount"`
+
+	// ClaudeDescription Phase 1 snapshot — Claude's full structured description at submit time.
+	ClaudeDescription *map[string]interface{} `json:"claudeDescription,omitempty"`
+	ClaudeRequestId   *string                 `json:"claudeRequestId,omitempty"`
+	CreatedAt         time.Time               `json:"createdAt"`
+	CreatedBy         string                  `json:"createdBy"`
+
+	// CustomValues Human-entered override text for `custom` picks (path → value).
+	CustomValues *map[string]string `json:"customValues,omitempty"`
+
+	// GemmaDescription Phase 1 snapshot — Gemma's full structured description at submit time.
+	GemmaDescription *map[string]interface{} `json:"gemmaDescription,omitempty"`
+	GemmaRequestId   *string                 `json:"gemmaRequestId,omitempty"`
+	Label            *string                 `json:"label,omitempty"`
+	PickCount        int                     `json:"pickCount"`
+
+	// Picks Attribute dotted-path → winning side.
+	Picks *map[string]TrainingPickKind `json:"picks,omitempty"`
+
+	// ReviewCount Distinct reviewers who submitted (1, or 2 after a re-review).
+	ReviewCount *int `json:"reviewCount,omitempty"`
+
+	// SecondReviewer Admin id of the second reviewer, when re-reviewed.
+	SecondReviewer *string `json:"secondReviewer,omitempty"`
+
+	// Source Provenance. Absent/`trial` = an admin ran this trial
+	// manually. `hitl` = auto-captured from a HITL attribute
+	// correction (mootd-admin#126) — excluded from the manual
+	// review list, but included in exports.
+	Source *TrainingTrialSource `json:"source,omitempty"`
+
+	// SourceImageUrl gridfs:// URI of the source garment photo both describers ran on.
+	SourceImageUrl *string             `json:"sourceImageUrl,omitempty"`
+	Status         TrainingTrialStatus `json:"status"`
+	SubmittedAt    *time.Time          `json:"submittedAt,omitempty"`
+	SubmittedBy    *string             `json:"submittedBy,omitempty"`
+
+	// TrialId Client-minted trial id; also the orchestrator poll key and the Mongo _id.
+	TrialId string `json:"trialId"`
+}
+
+// TrainingTrialSource Provenance. Absent/`trial` = an admin ran this trial
+// manually. `hitl` = auto-captured from a HITL attribute
+// correction (mootd-admin#126) — excluded from the manual
+// review list, but included in exports.
+type TrainingTrialSource string
+
+// TrainingTrialStatus defines model for TrainingTrial.Status.
+type TrainingTrialStatus string
+
+// TrainingTrialCreateRequest Register a trial review record so it appears in the list
+// immediately, before the describers finish.
+type TrainingTrialCreateRequest struct {
+	Label   *string `json:"label,omitempty"`
+	TrialId string  `json:"trialId"`
+}
+
+// TrainingTrialDetail Orchestrator-owned trial detail: every describer job for one
+// trial id. Proxied read-only by GET
+// /admin/v1/training/trials/{trialId}; the UI polls it until both
+// describers reach a terminal state.
+type TrainingTrialDetail struct {
+	Jobs    []TrainingTrialJob `json:"jobs"`
+	TrialId string             `json:"trial_id"`
+}
+
+// TrainingTrialJob One describer's output for a trial, as returned by the
+// orchestrator (proxied read-only). Slim subset the training UI
+// renders.
+type TrainingTrialJob struct {
+	ConfidenceOverall      *float64            `json:"confidence_overall,omitempty"`
+	ConfidencePerAttribute *map[string]float64 `json:"confidence_per_attribute,omitempty"`
+	CreatedAt              *string             `json:"created_at,omitempty"`
+
+	// Describer Which describer produced this job, e.g. `claude` or `gemma`.
+	Describer             string                  `json:"describer"`
+	GenerationImageUrl    *string                 `json:"generation_image_url,omitempty"`
+	HitlReason            *string                 `json:"hitl_reason,omitempty"`
+	HitlRequired          *bool                   `json:"hitl_required,omitempty"`
+	ImageUrl              *string                 `json:"image_url,omitempty"`
+	LockedAttributes      *[]string               `json:"locked_attributes,omitempty"`
+	MaskUrl               *string                 `json:"mask_url,omitempty"`
+	RequestId             string                  `json:"request_id"`
+	Status                string                  `json:"status"`
+	StructuredDescription *map[string]interface{} `json:"structured_description,omitempty"`
+}
+
+// TrainingTrialPage One page of training-review records, newest first.
+type TrainingTrialPage struct {
+	NextCursor *string         `json:"nextCursor,omitempty"`
+	Trials     []TrainingTrial `json:"trials"`
+}
+
+// TrainingTrialSubmitRequest Finalize a trial review: record the per-attribute picks and
+// flip status to `submitted`. The snapshot fields capture both
+// describers' full output so the saved record is self-contained
+// training data (mootd-admin#124).
+type TrainingTrialSubmitRequest struct {
+	AttrCount         int                         `json:"attrCount"`
+	ClaudeDescription *map[string]interface{}     `json:"claudeDescription,omitempty"`
+	ClaudeRequestId   *string                     `json:"claudeRequestId,omitempty"`
+	CustomValues      *map[string]string          `json:"customValues,omitempty"`
+	GemmaDescription  *map[string]interface{}     `json:"gemmaDescription,omitempty"`
+	GemmaRequestId    *string                     `json:"gemmaRequestId,omitempty"`
+	Picks             map[string]TrainingPickKind `json:"picks"`
+	SourceImageUrl    *string                     `json:"sourceImageUrl,omitempty"`
+}
+
 // UserBudget Per-user spend caps (P4-01 / mootd-admin#29). When the user
 // has no `user_budgets` row, the backend returns the system
 // defaults with `isDefault: true` so the UI knows to render
@@ -2125,6 +2328,47 @@ type AdminTracesSummaryParams struct {
 // AdminTracesSummaryParamsStatus defines parameters for AdminTracesSummary.
 type AdminTracesSummaryParamsStatus string
 
+// AdminExportTrainingDataParams defines parameters for AdminExportTrainingData.
+type AdminExportTrainingDataParams struct {
+	Format AdminExportTrainingDataParamsFormat `form:"format" json:"format"`
+
+	// Since Only trials submitted at/after this RFC3339 timestamp.
+	Since *time.Time `form:"since,omitempty" json:"since,omitempty"`
+
+	// MinAgreement Label-quality gate (mootd-admin#127). When > 0, emit only
+	// trials that were dual-reviewed AND whose reviewer agreement
+	// is at least this value — single-reviewed trials are excluded.
+	MinAgreement *float64 `form:"minAgreement,omitempty" json:"minAgreement,omitempty"`
+}
+
+// AdminExportTrainingDataParamsFormat defines parameters for AdminExportTrainingData.
+type AdminExportTrainingDataParamsFormat string
+
+// AdminTrainingProcessMultipartBody defines parameters for AdminTrainingProcess.
+type AdminTrainingProcessMultipartBody struct {
+	Image *openapi_types.File `json:"image,omitempty"`
+}
+
+// AdminTrainingProcessParams defines parameters for AdminTrainingProcess.
+type AdminTrainingProcessParams struct {
+	XTrialId   string                               `json:"X-Trial-Id"`
+	XDescriber AdminTrainingProcessParamsXDescriber `json:"X-Describer"`
+	XRequestId string                               `json:"X-Request-Id"`
+}
+
+// AdminTrainingProcessParamsXDescriber defines parameters for AdminTrainingProcess.
+type AdminTrainingProcessParamsXDescriber string
+
+// AdminListTrainingTrialsParams defines parameters for AdminListTrainingTrials.
+type AdminListTrainingTrialsParams struct {
+	Status *AdminListTrainingTrialsParamsStatus `form:"status,omitempty" json:"status,omitempty"`
+	Cursor *string                              `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit  *int                                 `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// AdminListTrainingTrialsParamsStatus defines parameters for AdminListTrainingTrials.
+type AdminListTrainingTrialsParamsStatus string
+
 // AdminListUsersParams defines parameters for AdminListUsers.
 type AdminListUsersParams struct {
 	// Q Case-insensitive contains-match on email.
@@ -2223,6 +2467,15 @@ type AdminPromotePromptVersionJSONRequestBody = PromptPromoteRequest
 
 // AdminRecordSessionEventJSONRequestBody defines body for AdminRecordSessionEvent for application/json ContentType.
 type AdminRecordSessionEventJSONRequestBody = SessionEventRequest
+
+// AdminTrainingProcessMultipartRequestBody defines body for AdminTrainingProcess for multipart/form-data ContentType.
+type AdminTrainingProcessMultipartRequestBody AdminTrainingProcessMultipartBody
+
+// AdminCreateTrainingTrialJSONRequestBody defines body for AdminCreateTrainingTrial for application/json ContentType.
+type AdminCreateTrainingTrialJSONRequestBody = TrainingTrialCreateRequest
+
+// AdminSubmitTrainingTrialJSONRequestBody defines body for AdminSubmitTrainingTrial for application/json ContentType.
+type AdminSubmitTrainingTrialJSONRequestBody = TrainingTrialSubmitRequest
 
 // AdminSeedWardrobeFromArchetypeJSONRequestBody defines body for AdminSeedWardrobeFromArchetype for application/json ContentType.
 type AdminSeedWardrobeFromArchetypeJSONRequestBody = SeedFromArchetypeRequest

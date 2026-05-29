@@ -72,9 +72,18 @@ export const TraitSelectionScreen: React.FC<TraitSelectionScreenProps> = ({
   const placeholderBg = fills.tertiary[colorScheme];
   const placeholderColor = labels.tertiary[colorScheme];
 
-  const allTraitsFilled = useMemo(() => {
+  // mootd#54 — Continue stays disabled until the user has SOMETHING
+  // to verify the model with. We previously required every trait
+  // filled, but the orchestrator's GarmentDescription schema doesn't
+  // produce style/occasion (judgment fields a single-photo vision
+  // model can't tag), so requiring them dead-ended every import on
+  // an empty form. Relaxed gate: as long as at least one trait
+  // carries a non-empty value (either auto-filled by detection or
+  // typed by the user), the user has confirmed they saw the model's
+  // output and Continue enables.
+  const hasAnyTraitFilled = useMemo(() => {
     if (!currentItem) return false;
-    return currentItem.traits.every(
+    return currentItem.traits.some(
       (trait) => trait.selectedValue !== null && trait.selectedValue.trim() !== ''
     );
   }, [currentItem]);
@@ -194,18 +203,12 @@ export const TraitSelectionScreen: React.FC<TraitSelectionScreenProps> = ({
             onPress={handleBack}
             style={styles.backButton}
           />
-          {/* mootd#54 — gate Continue until every trait is
-              picked. The detection backend tolerates partials,
-              but leaving the screen with empty fields gives the
-              user nothing to verify the model later, so we now
-              require completion. allTraitsFilled is the same
-              memo used to dim the button below. */}
           <Button
             label={isLast ? 'Done' : 'Next'}
             variant="primary"
             size="lg"
             onPress={handleNext}
-            disabled={!allTraitsFilled}
+            disabled={!hasAnyTraitFilled}
             style={styles.nextButton}
           />
         </View>

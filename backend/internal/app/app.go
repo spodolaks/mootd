@@ -140,6 +140,9 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 	adminTracesRepo := admin.NewTracesMongoRepository(a.MongoClient, a.MongoDB)
 	requireAdmin := middleware.RequireAdminAuth(a.AdminJWTSecret)
 	adminHandler := admin.NewHandler(a.Logger, adminRepo, adminUsersRepo, adminOverviewRepo, adminTracesRepo, a.AdminJWTSecret)
+	// Training-review records share the admin Mongo repo (one extra
+	// collection); powers the training list + Submit action (#36).
+	adminHandler.WithTrainingTrials(adminRepo)
 
 	// Weekly cost report (P4-04 / mootd-admin#32). The repo runs
 	// aggregations against llm_calls + users; SMTP config is
@@ -455,6 +458,10 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 		//      Returns mock data when the orchestrator is in default
 		//      USE_REAL_STAGE1=false mode, so we put Claude first.
 		adminHandler.WithImageStore(&wardrobeImageStoreAdapter{repo: wardrobeRepo})
+		// Same bg-removal service the mobile wardrobe upload uses
+		// — passed straight through; the *wardrobe.BackgroundRemover
+		// concrete type already satisfies admin.BackgroundRemover.
+		adminHandler.WithBackgroundRemover(bgRemover)
 		switch {
 		case a.AnthropicAPIKey != "":
 			adminHandler.WithItemDetector(admin.NewClaudeItemDetector(
