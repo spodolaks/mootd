@@ -74,8 +74,15 @@ func (c *CascadeGenerator) Generate(ctx context.Context, req GeneratorRequest) (
 
 	// First pass: only try healthy providers. Fast path for the
 	// typical case where the head of the chain is healthy.
+	//
+	// lastUsage holds the most recent non-nil Usage from a *failed*
+	// attempt. Providers (notably Anthropic) bill tokens before
+	// returning a 5xx/parse error, so a billed-but-failed attempt
+	// must still surface its Usage to the caller for the ledger —
+	// otherwise the cost vanishes when the whole chain exhausts.
 	any := false
 	var lastErr error
+	var lastUsage *Usage
 	for _, gen := range c.chain {
 		if !c.health.IsHealthy(gen.Name()) {
 			c.logger.Printf("cascade: skipping unhealthy provider %q", gen.Name())
@@ -86,6 +93,9 @@ func (c *CascadeGenerator) Generate(ctx context.Context, req GeneratorRequest) (
 		if err == nil {
 			c.health.RecordSuccess(gen.Name())
 			return outfits, usage, nil
+		}
+		if usage != nil {
+			lastUsage = usage
 		}
 		c.health.RecordFailure(gen.Name(), err)
 		lastErr = err
@@ -108,6 +118,9 @@ func (c *CascadeGenerator) Generate(ctx context.Context, req GeneratorRequest) (
 				c.health.RecordSuccess(gen.Name())
 				return outfits, usage, nil
 			}
+			if usage != nil {
+				lastUsage = usage
+			}
 			c.health.RecordFailure(gen.Name(), err)
 			lastErr = err
 			if shouldNotFallback(err) {
@@ -117,7 +130,9 @@ func (c *CascadeGenerator) Generate(ctx context.Context, req GeneratorRequest) (
 	}
 
 	if lastErr != nil {
-		return nil, nil, ErrAllProvidersFailed(lastErr)
+		// Return lastUsage (may be nil) so a billed-but-failed attempt
+		// is still recorded in the LLM-call ledger.
+		return nil, lastUsage, ErrAllProvidersFailed(lastErr)
 	}
 	return nil, nil, errors.New("cascade: no provider attempted")
 }
