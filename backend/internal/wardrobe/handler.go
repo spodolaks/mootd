@@ -598,6 +598,20 @@ func (h *Handler) updateItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Authorize BEFORE any image download/GridFS write. SaveImage keys
+	// GridFS by itemID alone (no ownership), so without this gate a
+	// caller could overwrite another user's item image even though the
+	// later UpdateItem would 404 — the destructive write already
+	// happened. 404 (not 403) to avoid leaking item existence.
+	if owned, err := h.repo.OwnsItem(r.Context(), itemID, userID); err != nil {
+		h.logger.Printf("wardrobe: update: ownership check for item %s user %s: %v", itemID, userID, err)
+		response.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to update item"})
+		return
+	} else if !owned {
+		response.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "item not found"})
+		return
+	}
+
 	var body struct {
 		Traits   map[string]string `json:"traits"`
 		Label    string            `json:"label"`
@@ -808,7 +822,7 @@ func (h *Handler) Search(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, ok := middleware.UserIDFromContext(r.Context())
+	userID, ok := middleware.UserIDFromContext(r.Context())
 	if !ok {
 		response.WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 		return
@@ -819,6 +833,19 @@ func (h *Handler) Search(w http.ResponseWriter, r *http.Request) {
 	itemID := strings.TrimSuffix(path, "/search")
 	if itemID == "" || itemID == path {
 		response.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "missing item id"})
+		return
+	}
+
+	// Authorize BEFORE reading the image. GetImage looks up GridFS by
+	// itemID alone, so without this gate any authenticated user could
+	// exfiltrate another user's item image (and run external searches
+	// on it) by supplying its id. 404 to avoid leaking existence.
+	if owned, err := h.repo.OwnsItem(r.Context(), itemID, userID); err != nil {
+		h.logger.Printf("wardrobe: search: ownership check for item %s user %s: %v", itemID, userID, err)
+		response.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "search failed"})
+		return
+	} else if !owned {
+		response.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "item not found"})
 		return
 	}
 
