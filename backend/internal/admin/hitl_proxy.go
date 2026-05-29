@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -386,6 +387,12 @@ func (h *Handler) HitlItemsRouter(w http.ResponseWriter, r *http.Request) {
 	if idx := strings.Index(rest, "/"); idx > 0 {
 		id, sub = rest[:idx], rest[idx+1:]
 	}
+	// Reject traversal / injection in the item id before it's
+	// interpolated into the orchestrator URL (#108 B2).
+	if !safePathSegment(id) {
+		response.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid item id"})
+		return
+	}
 	switch sub {
 	case "":
 		h.HitlItem(w, r, id)
@@ -402,19 +409,33 @@ func (h *Handler) HitlItemsRouter(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// urlPathEscape is a tiny helper so the handlers don't pull in
-// net/url for one call. Item IDs are server-minted and don't
-// contain unsafe characters today, but escaping is cheap
-// insurance against a future ID format change.
+// urlPathEscape escapes a string for safe interpolation as a URL path
+// segment. Callers MUST also validate the segment with safePathSegment
+// first — escaping alone does NOT stop traversal, because "." and ".."
+// contain no characters to escape (#108 B2).
 func urlPathEscape(s string) string {
-	// Reuse net/http's standard encoding via Request.URL.Path
-	// would require an extra request build. The orchestrator
-	// generates IDs from `[a-zA-Z0-9_-]` so a no-op replace is
-	// safe here; if that ever changes, switch to url.PathEscape.
-	return strings.NewReplacer(
-		"/", "%2F",
-		"?", "%3F",
-		"#", "%23",
-		" ", "%20",
-	).Replace(s)
+	return url.PathEscape(s)
+}
+
+// safePathSegment reports whether s is safe to interpolate as a single
+// upstream-URL path segment. It rejects empty, "." and ".." (path
+// traversal) and any character outside [A-Za-z0-9_-] — which also
+// blocks raw or encoded slashes injecting extra path components into
+// the orchestrator URL. The orchestrator's ids (24-hex), trial ids, and
+// buckets ([a-z]+) all fall inside this class, so this never rejects a
+// legitimate value. Without it, a bucket/id of ".." reached other
+// orchestrator paths via the service-token-authenticated proxy.
+func safePathSegment(s string) bool {
+	if s == "" || s == "." || s == ".." {
+		return false
+	}
+	for _, c := range s {
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
+		case c == '_' || c == '-':
+		default:
+			return false
+		}
+	}
+	return true
 }
