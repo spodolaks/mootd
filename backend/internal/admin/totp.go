@@ -34,10 +34,10 @@ import (
 // ────────────────────────────────────────────────────────────────────
 
 const (
-	totpDigits  = 6
-	totpPeriod  = 30 // seconds
-	totpSkew    = 1  // accept ±1 step (so a code is valid for ~90 seconds)
-	totpIssuer  = "mootd-admin"
+	totpDigits      = 6
+	totpPeriod      = 30 // seconds
+	totpSkew        = 1  // accept ±1 step (so a code is valid for ~90 seconds)
+	totpIssuer      = "mootd-admin"
 	totpSecretBytes = 20 // 160 bits = 32 base32 chars, RFC 4226 recommended
 )
 

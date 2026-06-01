@@ -146,11 +146,11 @@ func (g *OpenAIGenerator) Generate(ctx context.Context, req GeneratorRequest) ([
 // ── OpenAI Chat Completions wire types ─────────────────────────────────────
 
 type openaiChatRequest struct {
-	Model          string               `json:"model"`
-	Messages       []openaiMessage      `json:"messages"`
+	Model          string                `json:"model"`
+	Messages       []openaiMessage       `json:"messages"`
 	ResponseFormat *openaiResponseFormat `json:"response_format,omitempty"`
-	Temperature    float64              `json:"temperature,omitempty"`
-	MaxTokens      int                  `json:"max_tokens,omitempty"`
+	Temperature    float64               `json:"temperature,omitempty"`
+	MaxTokens      int                   `json:"max_tokens,omitempty"`
 }
 
 type openaiMessage struct {

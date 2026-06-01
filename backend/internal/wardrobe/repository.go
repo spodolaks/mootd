@@ -357,8 +357,8 @@ func (r *MongoRepository) FindBySeededDefault(ctx context.Context, userID, defau
 	}
 	var item ClothingItem
 	err := r.collection().FindOne(ctx, bson.M{
-		"userId":                       userID,
-		"traits.seededFromDefaultId":   defaultID,
+		"userId":                     userID,
+		"traits.seededFromDefaultId": defaultID,
 	}).Decode(&item)
 	if errors.Is(err, mongo.ErrNoDocuments) {
 		return nil, nil

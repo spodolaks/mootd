@@ -52,13 +52,13 @@ type UsersListResponse struct {
 // of the outfit_jobs collection (admin doesn't import the outfit
 // package — same one-way pattern as wardrobe / moodboards).
 type UserOutfitBatch struct {
-	ID         string                   `bson:"_id"                json:"id"`
-	UserID     string                   `bson:"userId"             json:"userId,omitempty"`
-	Status     string                   `bson:"status"             json:"status"`
-	Error      string                   `bson:"error,omitempty"    json:"error,omitempty"`
-	CreatedAt  time.Time                `bson:"createdAt"          json:"createdAt"`
-	UpdatedAt  time.Time                `bson:"updatedAt,omitempty" json:"updatedAt,omitempty"`
-	Candidates []map[string]any         `bson:"outfits,omitempty"  json:"candidates,omitempty"`
+	ID         string           `bson:"_id"                json:"id"`
+	UserID     string           `bson:"userId"             json:"userId,omitempty"`
+	Status     string           `bson:"status"             json:"status"`
+	Error      string           `bson:"error,omitempty"    json:"error,omitempty"`
+	CreatedAt  time.Time        `bson:"createdAt"          json:"createdAt"`
+	UpdatedAt  time.Time        `bson:"updatedAt,omitempty" json:"updatedAt,omitempty"`
+	Candidates []map[string]any `bson:"outfits,omitempty"  json:"candidates,omitempty"`
 }
 
 // UserOutfitsPage is the response shape for /admin/v1/users/{id}/outfits.

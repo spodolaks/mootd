@@ -10,12 +10,12 @@ import (
 
 func TestHexToRGB(t *testing.T) {
 	tests := []struct {
-		name          string
-		in            string
-		wantR         uint8
-		wantG         uint8
-		wantB         uint8
-		wantOK        bool
+		name   string
+		in     string
+		wantR  uint8
+		wantG  uint8
+		wantB  uint8
+		wantOK bool
 	}{
 		{"lowercase", "#112233", 17, 34, 51, true},
 		{"uppercase", "#AABBCC", 170, 187, 204, true},

@@ -48,4 +48,3 @@ func (g *OllamaGenerator) Generate(ctx context.Context, req GeneratorRequest) ([
 	}
 	return parsed, usage, nil
 }
-

@@ -41,9 +41,9 @@ import (
 // the proxy handlers use. nil means HITL is disabled (the admin
 // endpoints return 503 — same shape as other optional admin deps).
 type HitlProxy struct {
-	BaseURL  string // e.g. http://orchestrator:8080
-	APIKey   string // service-to-service token; sent as X-API-Key
-	Client   *http.Client
+	BaseURL string // e.g. http://orchestrator:8080
+	APIKey  string // service-to-service token; sent as X-API-Key
+	Client  *http.Client
 }
 
 // NewHitlProxy constructs a HitlProxy. baseURL = "" → returns nil so

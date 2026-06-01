@@ -35,7 +35,7 @@ func RequirePermission(perm Permission) func(http.Handler) http.Handler {
 			}
 			if !HasPermission(roles, perm) {
 				response.WriteJSON(w, http.StatusForbidden, map[string]any{
-					"error":            "permission denied",
+					"error":             "permission denied",
 					"missingPermission": perm,
 				})
 				return

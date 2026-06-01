@@ -72,11 +72,11 @@ type OutfitSnapshot struct {
 
 // Event is a single user reaction to a generation batch. It is append-only.
 type Event struct {
-	ID             string           `bson:"_id"                       json:"id"`
-	UserID         string           `bson:"userId"                    json:"userId"`
-	JobID          string           `bson:"jobId,omitempty"           json:"jobId,omitempty"`
-	ChosenOutfitID string           `bson:"chosenOutfitId,omitempty"  json:"chosenOutfitId,omitempty"`
-	Action         Action           `bson:"action"                    json:"action"`
+	ID             string `bson:"_id"                       json:"id"`
+	UserID         string `bson:"userId"                    json:"userId"`
+	JobID          string `bson:"jobId,omitempty"           json:"jobId,omitempty"`
+	ChosenOutfitID string `bson:"chosenOutfitId,omitempty"  json:"chosenOutfitId,omitempty"`
+	Action         Action `bson:"action"                    json:"action"`
 	// Rating is a 1–5 scalar when Action == rated, nil otherwise.
 	Rating *int `bson:"rating,omitempty" json:"rating,omitempty"`
 	// GeneratedBatch is the full set of outfits the user was shown. This is
@@ -92,10 +92,10 @@ type Event struct {
 	// record the wardrobe item IDs involved in the swap, giving training an
 	// explicit (rejected → accepted) pair within the same outfit without
 	// needing to diff sequential GeneratedBatch snapshots.
-	SwappedFrom      string `bson:"swappedFrom,omitempty"      json:"swappedFrom,omitempty"`
-	SwappedTo        string `bson:"swappedTo,omitempty"        json:"swappedTo,omitempty"`
-	SchemaVersion    int       `bson:"schemaVersion"           json:"schemaVersion"`
-	CreatedAt        time.Time `bson:"createdAt"               json:"createdAt"`
+	SwappedFrom   string    `bson:"swappedFrom,omitempty"      json:"swappedFrom,omitempty"`
+	SwappedTo     string    `bson:"swappedTo,omitempty"        json:"swappedTo,omitempty"`
+	SchemaVersion int       `bson:"schemaVersion"           json:"schemaVersion"`
+	CreatedAt     time.Time `bson:"createdAt"               json:"createdAt"`
 }
 
 // SubmitRequest is the POST /v1/outfits/feedback body. UserID is taken from

@@ -23,19 +23,19 @@ import (
 // Indexed by (userId, createdAt desc) so the per-user detail tab can
 // page through them. The trace-detail panel looks up by _id directly.
 type DetectionRun struct {
-	ID                    string                  `bson:"_id"`
-	UserID                string                  `bson:"userId"`
-	CreatedAt             time.Time               `bson:"createdAt"`
-	DurationMs            int64                   `bson:"durationMs"`
-	InputImageID          string                  `bson:"inputImageId,omitempty"`
-	InputImageHash        string                  `bson:"inputImageHash,omitempty"`
-	InputImageContentType string                  `bson:"inputImageContentType,omitempty"`
-	InputImageBytes       int64                   `bson:"inputImageBytes,omitempty"`
-	OverallStyle          string                  `bson:"overallStyle,omitempty"`
-	AnalyzeStats          *detectionStats         `bson:"analyzeStats,omitempty"`
-	GenerateStats         *detectionStats         `bson:"generateStats,omitempty"`
-	TotalCostUSD          float64                 `bson:"totalCostUsd,omitempty"`
-	Items                 []DetectionRunItem      `bson:"items,omitempty"`
+	ID                    string             `bson:"_id"`
+	UserID                string             `bson:"userId"`
+	CreatedAt             time.Time          `bson:"createdAt"`
+	DurationMs            int64              `bson:"durationMs"`
+	InputImageID          string             `bson:"inputImageId,omitempty"`
+	InputImageHash        string             `bson:"inputImageHash,omitempty"`
+	InputImageContentType string             `bson:"inputImageContentType,omitempty"`
+	InputImageBytes       int64              `bson:"inputImageBytes,omitempty"`
+	OverallStyle          string             `bson:"overallStyle,omitempty"`
+	AnalyzeStats          *detectionStats    `bson:"analyzeStats,omitempty"`
+	GenerateStats         *detectionStats    `bson:"generateStats,omitempty"`
+	TotalCostUSD          float64            `bson:"totalCostUsd,omitempty"`
+	Items                 []DetectionRunItem `bson:"items,omitempty"`
 
 	// P1-10 (mootd-admin#15) — admin-triggered re-runs.
 	// ParentRunID points back at the original detection_run whose
@@ -52,12 +52,12 @@ type DetectionRun struct {
 // DetectionRunItem is one generated image inside a run. Mirrors the
 // wire shape returned by /admin/v1/detection-runs/{id}.
 type DetectionRunItem struct {
-	ItemType        string  `bson:"itemType"        json:"itemType"`
-	Category        string  `bson:"category"        json:"category"`
-	PromptUsed      string  `bson:"promptUsed,omitempty"     json:"promptUsed,omitempty"`
-	RevisedPrompt   string  `bson:"revisedPrompt,omitempty"  json:"revisedPrompt,omitempty"`
-	CostUSD         float64 `bson:"costUsd,omitempty"        json:"costUsd,omitempty"`
-	WardrobeItemID  string  `bson:"wardrobeItemId,omitempty" json:"wardrobeItemId,omitempty"`
+	ItemType       string  `bson:"itemType"        json:"itemType"`
+	Category       string  `bson:"category"        json:"category"`
+	PromptUsed     string  `bson:"promptUsed,omitempty"     json:"promptUsed,omitempty"`
+	RevisedPrompt  string  `bson:"revisedPrompt,omitempty"  json:"revisedPrompt,omitempty"`
+	CostUSD        float64 `bson:"costUsd,omitempty"        json:"costUsd,omitempty"`
+	WardrobeItemID string  `bson:"wardrobeItemId,omitempty" json:"wardrobeItemId,omitempty"`
 }
 
 // DetectionStatsToMap exposes a *detectionStats to outside packages

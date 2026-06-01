@@ -247,13 +247,13 @@ func (r *PromptTemplatesMongoRepository) Get(ctx context.Context, id string) (*P
 // `BodyOrFallback("outfit_system_base")` — that returns the
 // cached production body if present, the fallback otherwise.
 type CachedPromptTemplates struct {
-	repo      PromptTemplatesRepository
-	fallback  map[string]string
-	mu        sync.RWMutex
-	cache     map[string]string
-	exp       time.Time
-	ttl       time.Duration
-	logger    interface{ Printf(string, ...any) }
+	repo     PromptTemplatesRepository
+	fallback map[string]string
+	mu       sync.RWMutex
+	cache    map[string]string
+	exp      time.Time
+	ttl      time.Duration
+	logger   interface{ Printf(string, ...any) }
 }
 
 // NewCachedPromptTemplates wires the repo + a fallback map

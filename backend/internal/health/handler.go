@@ -18,11 +18,11 @@ import (
 
 // Handler handles health check endpoints.
 type Handler struct {
-	logger      *log.Logger
-	db          *mongo.Client
-	mongodb     string
-	redis       *redis.Client // optional; nil in dev-without-Redis mode
-	requireRedis bool         // /readyz returns 503 if Redis is required + unreachable
+	logger       *log.Logger
+	db           *mongo.Client
+	mongodb      string
+	redis        *redis.Client // optional; nil in dev-without-Redis mode
+	requireRedis bool          // /readyz returns 503 if Redis is required + unreachable
 }
 
 // NewHandler creates a new health Handler.
@@ -136,11 +136,11 @@ func (h *Handler) Readyz(w http.ResponseWriter, r *http.Request) {
 // Configuration is via env (no DB roundtrip — this endpoint
 // must be reachable even when Mongo is degraded):
 //
-//   MIN_CLIENT_VERSION  — bumped by hand when shipping a
-//                         breaking change. Defaults to "0.0.0"
-//                         (every version is accepted).
-//   MAINTENANCE         — "true" to advertise a maintenance
-//                         window. Defaults to false.
+//	MIN_CLIENT_VERSION  — bumped by hand when shipping a
+//	                      breaking change. Defaults to "0.0.0"
+//	                      (every version is accepted).
+//	MAINTENANCE         — "true" to advertise a maintenance
+//	                      window. Defaults to false.
 //
 // Auth-optional. The endpoint already lives behind the global
 // rate limiter; pin clients to one fetch per foreground.

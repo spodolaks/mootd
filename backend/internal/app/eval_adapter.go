@@ -19,14 +19,14 @@ import (
 //
 // The adapter is the bridge between two abstraction levels:
 //
-//   admin.EvalTuple (wire-shaped, untyped maps)
-//     ↓
-//   eval.Tuple (fully typed; built by translateTuple below)
-//     ↓
-//   outfit.GeneratorRequest + outfit.Generator.Generate(...)
-//     ↓
-//   admin.EvalGenerator return shape (JSON-encoded outfits, count
-//   of automated checks passed/total, dollar cost)
+//	admin.EvalTuple (wire-shaped, untyped maps)
+//	  ↓
+//	eval.Tuple (fully typed; built by translateTuple below)
+//	  ↓
+//	outfit.GeneratorRequest + outfit.Generator.Generate(...)
+//	  ↓
+//	admin.EvalGenerator return shape (JSON-encoded outfits, count
+//	of automated checks passed/total, dollar cost)
 type evalGeneratorAdapter struct {
 	gen           outfit.Generator
 	promptVersion string

@@ -30,8 +30,8 @@ type UserDocument struct {
 // UpdateProfileRequest is the request body for PUT /v1/user/profile.
 // Every field is optional; at least one must be supplied.
 type UpdateProfileRequest struct {
-	Name      *string  `json:"name,omitempty"`
-	AvatarURL *string  `json:"avatarUrl,omitempty"`
+	Name      *string `json:"name,omitempty"`
+	AvatarURL *string `json:"avatarUrl,omitempty"`
 	// Creativity is clamped to [0, 1] in the handler
 	// (mootd#67). Pass *float64 so a caller can deliberately
 	// reset to 0 (the slider's left-end "predictable" extreme)

@@ -506,10 +506,10 @@ type claudeToolChoice struct {
 }
 
 type claudeResponse struct {
-	ID         string                 `json:"id"`
-	StopReason string                 `json:"stop_reason"`
-	Content    []claudeResponseBlock  `json:"content"`
-	Usage map[string]any `json:"usage,omitempty"`
+	ID         string                `json:"id"`
+	StopReason string                `json:"stop_reason"`
+	Content    []claudeResponseBlock `json:"content"`
+	Usage      map[string]any        `json:"usage,omitempty"`
 }
 
 type claudeResponseBlock struct {

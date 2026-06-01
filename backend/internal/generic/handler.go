@@ -204,9 +204,9 @@ func (h *Handler) TriggerGeneration(w http.ResponseWriter, r *http.Request) {
 		userID, len(predictions), created, reused)
 
 	response.WriteJSON(w, http.StatusOK, map[string]any{
-		"status":      "ok",
-		"predicted":   len(predictions),
-		"created":     created,
-		"reused":      reused,
+		"status":    "ok",
+		"predicted": len(predictions),
+		"created":   created,
+		"reused":    reused,
 	})
 }

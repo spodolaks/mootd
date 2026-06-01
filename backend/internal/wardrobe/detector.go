@@ -44,10 +44,10 @@ type Detector struct {
 // comma-separated list (mootd#56).
 func NewDetector(baseURL, apiKey string, logger *log.Logger) *Detector {
 	return &Detector{
-		pool:    endpoints.NewPool(baseURL),
-		apiKey:  apiKey,
-		client:  &http.Client{Timeout: 3 * time.Minute},
-		logger:  logger,
+		pool:   endpoints.NewPool(baseURL),
+		apiKey: apiKey,
+		client: &http.Client{Timeout: 3 * time.Minute},
+		logger: logger,
 	}
 }
 
@@ -104,11 +104,11 @@ type generateResponse struct {
 // uses these to write llm_calls rows so detection costs surface in
 // /admin/v1/traces alongside outfit-generation costs.
 type detectionStats struct {
-	Claude           *modelStats        `json:"claude,omitempty"`
-	OpenAIImages     *modelStats        `json:"openai_images,omitempty"`
-	LocalModels      []localModelStats  `json:"local_models,omitempty"`
-	TotalWallSeconds float64            `json:"total_wall_seconds,omitempty"`
-	ModelsUsed       []string           `json:"models_used,omitempty"`
+	Claude           *modelStats       `json:"claude,omitempty"`
+	OpenAIImages     *modelStats       `json:"openai_images,omitempty"`
+	LocalModels      []localModelStats `json:"local_models,omitempty"`
+	TotalWallSeconds float64           `json:"total_wall_seconds,omitempty"`
+	ModelsUsed       []string          `json:"models_used,omitempty"`
 }
 
 type modelStats struct {
@@ -120,9 +120,9 @@ type modelStats struct {
 }
 
 type localModelStats struct {
-	ModelName    string  `json:"model_name"`
-	CPUSeconds   float64 `json:"cpu_seconds"`
-	WallSeconds  float64 `json:"wall_seconds"`
+	ModelName   string  `json:"model_name"`
+	CPUSeconds  float64 `json:"cpu_seconds"`
+	WallSeconds float64 `json:"wall_seconds"`
 }
 
 type generatedImage struct {
@@ -172,8 +172,8 @@ type patternInfo struct {
 }
 
 type brandInfo struct {
-	Detected   bool    `json:"detected"`
-	Name       *string `json:"name"`
+	Detected   bool     `json:"detected"`
+	Name       *string  `json:"name"`
 	Confidence *float64 `json:"confidence"`
 }
 
@@ -203,8 +203,8 @@ type jobItem struct {
 	// metadata so the wardrobe handler can stamp them onto the
 	// detection_run archive (P1-04 / mootd-admin#16). Empty when the
 	// item came from /analyze only (no generated image).
-	PromptUsed       string  `json:"-"`
-	GenerateCostUSD  float64 `json:"-"`
+	PromptUsed      string  `json:"-"`
+	GenerateCostUSD float64 `json:"-"`
 }
 
 // DetectionRunData is the per-call archive produced by Detect.
@@ -213,12 +213,12 @@ type jobItem struct {
 // generation metadata, and the timing window. The handler owns
 // persistence; the detector just produces the data.
 type DetectionRunData struct {
-	AnalyzeStats     *detectionStats
-	GenerateStats    *detectionStats
-	OverallStyle     string
-	StartedAt        time.Time
-	EndedAt          time.Time
-	TotalCostUSD     float64
+	AnalyzeStats  *detectionStats
+	GenerateStats *detectionStats
+	OverallStyle  string
+	StartedAt     time.Time
+	EndedAt       time.Time
+	TotalCostUSD  float64
 }
 
 // Detect submits an image to the local detection service.
@@ -237,10 +237,10 @@ func (d *Detector) Detect(ctx context.Context, userID, runID string, imageData [
 	overallStart := time.Now().UTC()
 	// Run analyze and generate in parallel.
 	type analyzeResult struct {
-		resp     *analyzeResponse
-		err      error
+		resp      *analyzeResponse
+		err       error
 		startedAt time.Time
-		endedAt  time.Time
+		endedAt   time.Time
 	}
 	type generateResult struct {
 		resp      *generateResponse

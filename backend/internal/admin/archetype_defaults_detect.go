@@ -239,4 +239,3 @@ func (h *Handler) detectArchetypeDefault(w http.ResponseWriter, r *http.Request)
 		StructuredDescription: prefill.StructuredDescription,
 	})
 }
-

@@ -23,10 +23,10 @@ import "time"
 // to the caller and recorded on the audit row so we can answer
 // "what got wiped?" later.
 type PurgeReport struct {
-	UserID     string         `json:"userId"`
-	PurgedAt   time.Time      `json:"purgedAt"`
+	UserID      string           `json:"userId"`
+	PurgedAt    time.Time        `json:"purgedAt"`
 	Collections map[string]int64 `json:"collections"` // name → docs deleted
-	Total      int64          `json:"total"`
+	Total       int64            `json:"total"`
 }
 
 // ExportData is the in-memory shape of a user export. Each
@@ -35,16 +35,16 @@ type PurgeReport struct {
 // layer holds — we don't want a privacy export that silently
 // drops a field because the Go struct is out of date.
 type ExportData struct {
-	UserID         string        `json:"userId"`
-	GeneratedAt    time.Time     `json:"generatedAt"`
-	User           any           `json:"user,omitempty"`
-	WardrobeItems  []any         `json:"wardrobeItems,omitempty"`
-	Outfits        []any         `json:"outfits,omitempty"`
-	OutfitJobs     []any         `json:"outfitJobs,omitempty"`
-	Moodboards     []any         `json:"moodboards,omitempty"`
-	OutfitFeedback []any         `json:"outfitFeedback,omitempty"`
-	Events         []any         `json:"events,omitempty"`
-	LLMCalls       []any         `json:"llmCalls,omitempty"`
-	DetectionRuns  []any         `json:"detectionRuns,omitempty"`
-	UserBudget     any           `json:"userBudget,omitempty"`
+	UserID         string    `json:"userId"`
+	GeneratedAt    time.Time `json:"generatedAt"`
+	User           any       `json:"user,omitempty"`
+	WardrobeItems  []any     `json:"wardrobeItems,omitempty"`
+	Outfits        []any     `json:"outfits,omitempty"`
+	OutfitJobs     []any     `json:"outfitJobs,omitempty"`
+	Moodboards     []any     `json:"moodboards,omitempty"`
+	OutfitFeedback []any     `json:"outfitFeedback,omitempty"`
+	Events         []any     `json:"events,omitempty"`
+	LLMCalls       []any     `json:"llmCalls,omitempty"`
+	DetectionRuns  []any     `json:"detectionRuns,omitempty"`
+	UserBudget     any       `json:"userBudget,omitempty"`
 }

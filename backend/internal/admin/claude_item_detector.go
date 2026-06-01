@@ -161,9 +161,9 @@ type claudeDescribeMessage struct {
 }
 
 type claudeDescribeContent struct {
-	Type   string                       `json:"type"`
-	Text   string                       `json:"text,omitempty"`
-	Source *claudeDescribeImageSource   `json:"source,omitempty"`
+	Type   string                     `json:"type"`
+	Text   string                     `json:"text,omitempty"`
+	Source *claudeDescribeImageSource `json:"source,omitempty"`
 }
 
 type claudeDescribeImageSource struct {
@@ -184,8 +184,8 @@ type claudeDescribeToolPick struct {
 }
 
 type claudeDescribeResponse struct {
-	StopReason string                  `json:"stop_reason"`
-	Content    []claudeDescribeBlock   `json:"content"`
+	StopReason string                `json:"stop_reason"`
+	Content    []claudeDescribeBlock `json:"content"`
 }
 
 type claudeDescribeBlock struct {

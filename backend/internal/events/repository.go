@@ -31,7 +31,7 @@ type MongoRepository struct {
 //   - (createdAt desc)            — firehose / time-range queries
 //   - (userId, createdAt desc)    — per-user feed (P2-03 admin UI)
 //   - (name, createdAt desc)      — per-event-name slices
-//                                    (P2-04 funnels, P2-05 cohorts)
+//     (P2-04 funnels, P2-05 cohorts)
 //   - (sessionId)                 — session aggregation
 func NewMongoRepository(ctx context.Context, client *mongo.Client, dbName string) (*MongoRepository, error) {
 	r := &MongoRepository{client: client, dbName: dbName}

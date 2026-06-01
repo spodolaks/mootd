@@ -42,22 +42,22 @@ type DailySummary struct {
 	WindowStart time.Time `json:"windowStart"`
 	WindowEnd   time.Time `json:"windowEnd"`
 
-	DAU            int64   `json:"dau"`
-	Generations    int64   `json:"generations"`
-	Errors         int64   `json:"errors"`
-	SpendUSD       float64 `json:"spendUsd"`
-	PriorSpendUSD  float64 `json:"priorSpendUsd"`
-	NewSignups     int64   `json:"newSignups"`
+	DAU           int64   `json:"dau"`
+	Generations   int64   `json:"generations"`
+	Errors        int64   `json:"errors"`
+	SpendUSD      float64 `json:"spendUsd"`
+	PriorSpendUSD float64 `json:"priorSpendUsd"`
+	NewSignups    int64   `json:"newSignups"`
 
 	TopUsersByCost []DailyTopUser `json:"topUsersByCost,omitempty"`
 }
 
 // DailyTopUser is one entry in the top-3 by cost list.
 type DailyTopUser struct {
-	UserID   string  `json:"userId"`
-	Email    string  `json:"email,omitempty"`
-	CostUSD  float64 `json:"costUsd"`
-	Calls    int64   `json:"calls"`
+	UserID  string  `json:"userId"`
+	Email   string  `json:"email,omitempty"`
+	CostUSD float64 `json:"costUsd"`
+	Calls   int64   `json:"calls"`
 }
 
 // DailySummaryBuilder packages the dependencies the cron + the

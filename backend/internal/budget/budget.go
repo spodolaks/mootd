@@ -158,6 +158,7 @@ var ErrNotConfigured = errors.New("budget: enforcer not configured")
 //  3. Over 100% (current + estimate > daily cap)? → Deny with
 //     "over_daily_cap". (Future: Downgrade.)
 //  4. Otherwise → Allow.
+//
 // Check now atomically RESERVES the estimate against today's spend
 // when it returns Allow (and a cap is configured). The returned
 // reservedUSD is the amount the caller MUST hand back via Release once
@@ -434,10 +435,12 @@ func (t *RedisSpendTracker) SuspendedUntil(ctx context.Context, userID string) (
 // every outfit generation closed, which is worse).
 type NoopSpendTracker struct{}
 
-func (NoopSpendTracker) TodaySpend(context.Context, string) (float64, error)         { return 0, nil }
-func (NoopSpendTracker) Increment(context.Context, string, float64) error            { return nil }
-func (NoopSpendTracker) Reserve(context.Context, string, float64) (float64, error)   { return 0, nil }
-func (NoopSpendTracker) Release(context.Context, string, float64) error              { return nil }
-func (NoopSpendTracker) IsSuspended(context.Context, string) (bool, error)           { return false, nil }
-func (NoopSpendTracker) Suspend(context.Context, string, time.Time) error            { return nil }
-func (NoopSpendTracker) SuspendedUntil(context.Context, string) (time.Time, error)   { return time.Time{}, nil }
+func (NoopSpendTracker) TodaySpend(context.Context, string) (float64, error)       { return 0, nil }
+func (NoopSpendTracker) Increment(context.Context, string, float64) error          { return nil }
+func (NoopSpendTracker) Reserve(context.Context, string, float64) (float64, error) { return 0, nil }
+func (NoopSpendTracker) Release(context.Context, string, float64) error            { return nil }
+func (NoopSpendTracker) IsSuspended(context.Context, string) (bool, error)         { return false, nil }
+func (NoopSpendTracker) Suspend(context.Context, string, time.Time) error          { return nil }
+func (NoopSpendTracker) SuspendedUntil(context.Context, string) (time.Time, error) {
+	return time.Time{}, nil
+}

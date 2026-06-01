@@ -88,10 +88,10 @@ var CatalogNames = map[string]bool{
 	"session_heartbeat": true,
 
 	// Wardrobe flows
-	"photo_uploaded":   true,
-	"items_detected":   true,
-	"item_confirmed":   true,
-	"item_rejected":    true,
+	"photo_uploaded": true,
+	"items_detected": true,
+	"item_confirmed": true,
+	"item_rejected":  true,
 
 	// Outfit flows
 	"generate_outfit_requested": true,

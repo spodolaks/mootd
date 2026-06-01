@@ -14,11 +14,11 @@ import (
 // detection-runs, and tier routing.
 //
 // At call time:
-//   1. If an A/B test is active for this template AND the
-//      user falls in the candidate cohort, fetch + return the
-//      candidate version's body (admin.repo.Get).
-//   2. Otherwise return the production body via
-//      CachedPromptTemplates.BodyOrFallback.
+//  1. If an A/B test is active for this template AND the
+//     user falls in the candidate cohort, fetch + return the
+//     candidate version's body (admin.repo.Get).
+//  2. Otherwise return the production body via
+//     CachedPromptTemplates.BodyOrFallback.
 //
 // The candidate-fetch hits Mongo per call (no caching of the
 // candidate body today). Fine: A/B tests are admin-controlled,
@@ -26,9 +26,9 @@ import (
 // indexed lookup. If that becomes a bottleneck a follow-up can
 // add a small per-version body cache.
 type promptTemplateAdapter struct {
-	cache       *admin.CachedPromptTemplates
-	abCache     *admin.CachedABTests
-	templates   admin.PromptTemplatesRepository
+	cache     *admin.CachedPromptTemplates
+	abCache   *admin.CachedABTests
+	templates admin.PromptTemplatesRepository
 }
 
 func newPromptTemplateAdapter(

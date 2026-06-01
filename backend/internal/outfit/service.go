@@ -188,12 +188,12 @@ type recentOutfitProvider interface {
 }
 
 type recentBoard struct {
-	OutfitName    string
-	ItemIDs       []string
-	Description   string // free-text description saved with the outfit
-	Rationale     string // one-line stylist reasoning saved with the outfit
-	TopArchetype  string // highest-scoring archetype at save time (may be empty)
-	Palette       []string // dominant colors as #RRGGBB (may be empty)
+	OutfitName   string
+	ItemIDs      []string
+	Description  string   // free-text description saved with the outfit
+	Rationale    string   // one-line stylist reasoning saved with the outfit
+	TopArchetype string   // highest-scoring archetype at save time (may be empty)
+	Palette      []string // dominant colors as #RRGGBB (may be empty)
 }
 
 // RecentOutfitFunc is a function type that satisfies recentOutfitProvider.

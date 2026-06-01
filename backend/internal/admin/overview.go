@@ -88,16 +88,16 @@ type SinceDelta struct {
 // period — not always today. dauApprox stays today-only (it's the
 // "who is here right now" signal, period-independent).
 type OverviewMetrics struct {
-	Period          OverviewPeriod    `json:"period"`
-	SpendUSD        float64           `json:"spendUsd"`
-	CallCount       int64             `json:"callCount"`
-	DauApprox       int64             `json:"dauApprox"`
-	SpendUSDPrior   float64           `json:"spendUsdPrior,omitempty"`
-	CallCountPrior  int64             `json:"callCountPrior,omitempty"`
-	DauPrior        int64             `json:"dauPrior,omitempty"`
-	SpendSeries     []DailyMetric     `json:"spendSeries,omitempty"`
-	CallCountSeries []DailyMetric     `json:"callCountSeries,omitempty"`
-	DauSeries       []DailyMetric     `json:"dauSeries,omitempty"`
+	Period          OverviewPeriod `json:"period"`
+	SpendUSD        float64        `json:"spendUsd"`
+	CallCount       int64          `json:"callCount"`
+	DauApprox       int64          `json:"dauApprox"`
+	SpendUSDPrior   float64        `json:"spendUsdPrior,omitempty"`
+	CallCountPrior  int64          `json:"callCountPrior,omitempty"`
+	DauPrior        int64          `json:"dauPrior,omitempty"`
+	SpendSeries     []DailyMetric  `json:"spendSeries,omitempty"`
+	CallCountSeries []DailyMetric  `json:"callCountSeries,omitempty"`
+	DauSeries       []DailyMetric  `json:"dauSeries,omitempty"`
 	// SpendSeriesByFeature is one zero-filled 30-day spark per
 	// feature ordered by total spend desc (mootd-admin#94).
 	// Sum across features equals SpendSeries day-for-day. Used
@@ -109,10 +109,10 @@ type OverviewMetrics struct {
 	// carries a `since=<RFC-3339>` query param. When the
 	// caller's lastActiveAt is too recent or too old (heuristic
 	// gate inside the handler) the field is omitted.
-	SinceLastVisit *SinceDelta `json:"sinceLastVisit,omitempty"`
-	LastCalls       []LLMCallSnapshot `json:"lastCalls"`
-	CacheMetrics    *CacheMetrics     `json:"cacheMetrics,omitempty"`
-	GeneratedAt     time.Time         `json:"generatedAt"`
+	SinceLastVisit *SinceDelta       `json:"sinceLastVisit,omitempty"`
+	LastCalls      []LLMCallSnapshot `json:"lastCalls"`
+	CacheMetrics   *CacheMetrics     `json:"cacheMetrics,omitempty"`
+	GeneratedAt    time.Time         `json:"generatedAt"`
 }
 
 // CacheMetrics summarises Anthropic prompt-cache effectiveness over
@@ -409,7 +409,7 @@ func (r *OverviewMongoRepository) DailySeriesByFeature(ctx context.Context, now 
 // caller can decide which to show. Two Mongo round-trips:
 //
 //   - llm_calls match `createdAt ∈ [since, now)` → spend total
-//     + error count via $facet.
+//   - error count via $facet.
 //   - events match `name=signed_up` in the same window → signup
 //     count.
 //

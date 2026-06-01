@@ -49,18 +49,18 @@ import (
 
 // WeeklyReport mirrors the wire shape.
 type WeeklyReport struct {
-	WeekLabel        string                 `json:"weekLabel"`
-	WeekStart        time.Time              `json:"weekStart"`
-	WeekEnd          time.Time              `json:"weekEnd"`
-	TotalCostUSD     float64                `json:"totalCostUsd"`
-	PriorWeekCostUSD float64                `json:"priorWeekCostUsd,omitempty"`
-	DAU              int                    `json:"dau"`
-	CostPerDAUUSD    float64                `json:"costPerDauUsd"`
-	TopUsers         []WeeklyReportUserRow  `json:"topUsers"`
-	ByModel          []WeeklyReportFacet    `json:"byModel"`
-	ByFeature        []WeeklyReportFacet    `json:"byFeature"`
-	Incidents        []string               `json:"incidents,omitempty"`
-	Recommendations  []string               `json:"recommendations,omitempty"`
+	WeekLabel        string                `json:"weekLabel"`
+	WeekStart        time.Time             `json:"weekStart"`
+	WeekEnd          time.Time             `json:"weekEnd"`
+	TotalCostUSD     float64               `json:"totalCostUsd"`
+	PriorWeekCostUSD float64               `json:"priorWeekCostUsd,omitempty"`
+	DAU              int                   `json:"dau"`
+	CostPerDAUUSD    float64               `json:"costPerDauUsd"`
+	TopUsers         []WeeklyReportUserRow `json:"topUsers"`
+	ByModel          []WeeklyReportFacet   `json:"byModel"`
+	ByFeature        []WeeklyReportFacet   `json:"byFeature"`
+	Incidents        []string              `json:"incidents,omitempty"`
+	Recommendations  []string              `json:"recommendations,omitempty"`
 }
 
 // WeeklyReportUserRow is one row of the top-N table.
@@ -540,7 +540,7 @@ func LastCompletedISOWeek(now time.Time) (start, end time.Time) {
 	}
 	// Monday of the current week.
 	thisMon := time.Date(now.Year(), now.Month(), now.Day()-(weekday-1), 0, 0, 0, 0, time.UTC)
-	end = thisMon                          // exclusive
+	end = thisMon // exclusive
 	start = thisMon.Add(-7 * 24 * time.Hour)
 	return start, end
 }
