@@ -86,11 +86,11 @@ type flatlayImage struct {
 }
 
 type flatlayTimings struct {
-	Resize        float64 `json:"resize"`
-	Detect        float64 `json:"detect"`
-	Generate      float64 `json:"generate"`
-	BgRemove      float64 `json:"bg_remove"`
-	TotalService  float64 `json:"total_service"`
+	Resize       float64 `json:"resize"`
+	Detect       float64 `json:"detect"`
+	Generate     float64 `json:"generate"`
+	BgRemove     float64 `json:"bg_remove"`
+	TotalService float64 `json:"total_service"`
 }
 
 type flatlayTokens struct {
@@ -104,11 +104,11 @@ type flatlayDetectTokens struct {
 }
 
 type flatlayConfig struct {
-	DetectModel     string `json:"detect_model"`
-	DetectDetail    string `json:"detect_detail"`
-	GeminiModel     string `json:"gemini_model"`
-	RembgModel      string `json:"rembg_model"`
-	MaxInputEdgePx  int    `json:"max_input_edge_px"`
+	DetectModel    string `json:"detect_model"`
+	DetectDetail   string `json:"detect_detail"`
+	GeminiModel    string `json:"gemini_model"`
+	RembgModel     string `json:"rembg_model"`
+	MaxInputEdgePx int    `json:"max_input_edge_px"`
 }
 
 // Detect submits the image to the flatlay service and translates

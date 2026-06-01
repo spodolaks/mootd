@@ -71,14 +71,14 @@ type LLMCall struct {
 	// version" without re-scanning the prompt text. All optional —
 	// older rows / non-outfit features can leave them at zero.
 	WardrobeItemCount int `bson:"wardrobeItemCount,omitempty"`
-	ImageCount        int `bson:"imageCount,omitempty"`        // 0 for non-vision providers
-	RecentBoardCount  int `bson:"recentBoardCount,omitempty"`  // positive examples injected
+	ImageCount        int `bson:"imageCount,omitempty"`       // 0 for non-vision providers
+	RecentBoardCount  int `bson:"recentBoardCount,omitempty"` // positive examples injected
 	// SystemTokens / UserTokens / ResponseTokens split InputTokens
 	// + OutputTokens into the three regions caller-supplied. The
 	// existing InputTokens/OutputTokens stay as the totals.
-	SystemTokens   int     `bson:"systemTokens,omitempty"`
-	UserTokens     int     `bson:"userTokens,omitempty"`
-	ResponseTokens int     `bson:"responseTokens,omitempty"`
+	SystemTokens   int `bson:"systemTokens,omitempty"`
+	UserTokens     int `bson:"userTokens,omitempty"`
+	ResponseTokens int `bson:"responseTokens,omitempty"`
 	// CacheHitRatio = cacheRead / (cacheRead + cacheWrite +
 	// inputTokens). Stored at write time so analytics can $group
 	// without re-deriving on every read; the per-call inputs are
@@ -117,15 +117,15 @@ func (r *MongoLLMCallRepository) col() *mongo.Collection {
 func (r *MongoLLMCallRepository) ensureIndexes(ctx context.Context) error {
 	_, err := r.col().Indexes().CreateMany(ctx, []mongo.IndexModel{
 		{
-			Keys: bson.D{{Key: "userId", Value: 1}, {Key: "createdAt", Value: -1}},
+			Keys:    bson.D{{Key: "userId", Value: 1}, {Key: "createdAt", Value: -1}},
 			Options: options.Index().SetName("llm_calls_user_created"),
 		},
 		{
-			Keys: bson.D{{Key: "model", Value: 1}, {Key: "createdAt", Value: -1}},
+			Keys:    bson.D{{Key: "model", Value: 1}, {Key: "createdAt", Value: -1}},
 			Options: options.Index().SetName("llm_calls_model_created"),
 		},
 		{
-			Keys: bson.D{{Key: "feature", Value: 1}, {Key: "createdAt", Value: -1}},
+			Keys:    bson.D{{Key: "feature", Value: 1}, {Key: "createdAt", Value: -1}},
 			Options: options.Index().SetName("llm_calls_feature_created"),
 		},
 		{
@@ -138,7 +138,7 @@ func (r *MongoLLMCallRepository) ensureIndexes(ctx context.Context) error {
 			Options: options.Index().SetName("llm_calls_status_created"),
 		},
 		{
-			Keys: bson.D{{Key: "promptVersion", Value: 1}, {Key: "createdAt", Value: -1}},
+			Keys:    bson.D{{Key: "promptVersion", Value: 1}, {Key: "createdAt", Value: -1}},
 			Options: options.Index().SetName("llm_calls_promptversion_created"),
 		},
 		{
@@ -149,7 +149,7 @@ func (r *MongoLLMCallRepository) ensureIndexes(ctx context.Context) error {
 		},
 		{
 			// Time-series scans — "everything from the last hour".
-			Keys: bson.D{{Key: "createdAt", Value: -1}},
+			Keys:    bson.D{{Key: "createdAt", Value: -1}},
 			Options: options.Index().SetName("llm_calls_created_desc"),
 		},
 	})

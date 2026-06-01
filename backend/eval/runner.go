@@ -35,13 +35,13 @@ import (
 
 // Tuple is one entry in the golden set. Loaded from JSON.
 type Tuple struct {
-	ID            string                       `json:"id"`
-	Description   string                       `json:"description"`
-	UserID        string                       `json:"userID"`
-	Items         []ItemSpec                   `json:"items"`
-	TopArchetypes []archetype.ScoredArchetype  `json:"topArchetypes"`
-	Weather       outfit.Weather               `json:"weather"`
-	Expectations  Expectations                 `json:"expectations"`
+	ID            string                      `json:"id"`
+	Description   string                      `json:"description"`
+	UserID        string                      `json:"userID"`
+	Items         []ItemSpec                  `json:"items"`
+	TopArchetypes []archetype.ScoredArchetype `json:"topArchetypes"`
+	Weather       outfit.Weather              `json:"weather"`
+	Expectations  Expectations                `json:"expectations"`
 }
 
 // ItemSpec is a serializable wardrobe item for the golden set.
@@ -61,8 +61,8 @@ type Expectations struct {
 	PreferTraits          []string `json:"preferTraits"`
 	AvoidBannedWords      bool     `json:"avoidBannedWords"`
 	// Adversarial expectations (injection-attempt tuple).
-	MustNotContain         []string `json:"mustNotContain"`
-	ExpectedRedactionMark  string   `json:"expectedRedactionMarker"`
+	MustNotContain        []string `json:"mustNotContain"`
+	ExpectedRedactionMark string   `json:"expectedRedactionMarker"`
 }
 
 // LoadGoldenSet reads every *.json file in dir and returns the
@@ -95,23 +95,23 @@ func LoadGoldenSet(dir string) ([]Tuple, error) {
 
 // Result is one tuple's run outcome.
 type Result struct {
-	TupleID        string         `json:"tupleId"`
-	PromptVersion  string         `json:"promptVersion"`
-	SystemPrompt   string         `json:"systemPrompt"`
-	UserMessage    string         `json:"userMessage"`
-	SystemTokens   int            `json:"systemTokens"`
-	UserTokens     int            `json:"userTokens"`
-	DurationMs     int64          `json:"durationMs"`
-	Outfits        []outfit.Outfit `json:"outfits,omitempty"`
-	Error          string         `json:"error,omitempty"`
-	Checks         []Check        `json:"checks"`
+	TupleID       string          `json:"tupleId"`
+	PromptVersion string          `json:"promptVersion"`
+	SystemPrompt  string          `json:"systemPrompt"`
+	UserMessage   string          `json:"userMessage"`
+	SystemTokens  int             `json:"systemTokens"`
+	UserTokens    int             `json:"userTokens"`
+	DurationMs    int64           `json:"durationMs"`
+	Outfits       []outfit.Outfit `json:"outfits,omitempty"`
+	Error         string          `json:"error,omitempty"`
+	Checks        []Check         `json:"checks"`
 }
 
 // Check is a single boolean expectation evaluated against a result.
 type Check struct {
-	Name    string `json:"name"`
-	Pass    bool   `json:"pass"`
-	Detail  string `json:"detail,omitempty"`
+	Name   string `json:"name"`
+	Pass   bool   `json:"pass"`
+	Detail string `json:"detail,omitempty"`
 }
 
 // RunOptions controls a single run.

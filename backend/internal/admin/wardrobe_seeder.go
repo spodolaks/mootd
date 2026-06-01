@@ -117,8 +117,8 @@ func (h *Handler) SeedWardrobeRouter(w http.ResponseWriter, r *http.Request) {
 			TargetUserID: userID,
 			TargetEntity: "users/" + userID,
 			Metadata: map[string]any{
-				"archetype":  body.Archetype,
-				"notes":      body.Notes,
+				"archetype":   body.Archetype,
+				"notes":       body.Notes,
 				"seededCount": count,
 			},
 			At:        time.Now().UTC(),

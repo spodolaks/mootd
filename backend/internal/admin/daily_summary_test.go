@@ -46,9 +46,9 @@ func TestParseFounderEmails(t *testing.T) {
 		{"a@x.com", []string{"a@x.com"}},
 		{"a@x.com, b@y.com", []string{"a@x.com", "b@y.com"}},
 		{"  a@x.com  ,  b@y.com  ", []string{"a@x.com", "b@y.com"}},
-		{"a@x.com,a@x.com", []string{"a@x.com"}},                          // dedup
-		{"a@x.com,A@X.COM", []string{"a@x.com"}},                          // dedup case-insensitive (first wins)
-		{"b@y.com,a@x.com", []string{"a@x.com", "b@y.com"}},               // sorted
+		{"a@x.com,a@x.com", []string{"a@x.com"}},            // dedup
+		{"a@x.com,A@X.COM", []string{"a@x.com"}},            // dedup case-insensitive (first wins)
+		{"b@y.com,a@x.com", []string{"a@x.com", "b@y.com"}}, // sorted
 	}
 	for _, c := range cases {
 		got := ParseFounderEmails(c.in)

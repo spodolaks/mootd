@@ -135,4 +135,3 @@ func rankByArchetype(items []wardrobe.ClothingItem, top []archetype.ScoredArchet
 		return itemScores[items[i].ID] > itemScores[items[j].ID]
 	})
 }
-

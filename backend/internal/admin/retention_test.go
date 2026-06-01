@@ -47,11 +47,11 @@ func TestBucketIndex(t *testing.T) {
 		t    time.Time
 		want int
 	}{
-		{start, 0},                                              // start itself
-		{start.Add(2 * day), 2},                                 // 2 days in
-		{start.Add(2*day + 5*time.Hour), 2},                     // mid-day rounds down
-		{start.Add(-1 * time.Hour), -1},                         // before start
-		{time.Date(2026, 5, 6, 0, 0, 0, 0, time.UTC), 5},        // 5 days
+		{start, 0},                                       // start itself
+		{start.Add(2 * day), 2},                          // 2 days in
+		{start.Add(2*day + 5*time.Hour), 2},              // mid-day rounds down
+		{start.Add(-1 * time.Hour), -1},                  // before start
+		{time.Date(2026, 5, 6, 0, 0, 0, 0, time.UTC), 5}, // 5 days
 	}
 	for _, c := range cases {
 		got := bucketIndex(c.t, start, day)

@@ -67,8 +67,8 @@ func (h *Handler) MFASetup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response.WriteJSON(w, http.StatusOK, map[string]string{
-		"secret":      secret,
-		"otpauthUri":  OTPAuthURI(secret, a.Email),
+		"secret":     secret,
+		"otpauthUri": OTPAuthURI(secret, a.Email),
 	})
 }
 

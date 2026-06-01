@@ -17,7 +17,7 @@ var chromaKeyTarget = []struct {
 	keywords []string
 	bg       [3]float64 // R, G, B  (0-255)
 }{
-	{[]string{"green", "olive", "khaki", "army", "lime", "emerald", "teal", "sage", "mint"}, [3]float64{255, 0, 255}},       // magenta
+	{[]string{"green", "olive", "khaki", "army", "lime", "emerald", "teal", "sage", "mint"}, [3]float64{255, 0, 255}},         // magenta
 	{[]string{"red", "maroon", "burgundy", "crimson", "scarlet", "wine", "cherry", "coral", "rust"}, [3]float64{0, 255, 255}}, // cyan
 	{[]string{"blue", "navy", "cobalt", "indigo", "denim", "azure", "royal"}, [3]float64{255, 255, 0}},                        // yellow
 	{[]string{"yellow", "gold", "mustard", "amber", "lemon"}, [3]float64{0, 0, 255}},                                          // blue

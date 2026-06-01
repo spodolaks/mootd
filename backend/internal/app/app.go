@@ -1582,7 +1582,6 @@ func toFeedbackContext(chosen moodboard.Outfit) feedback.Context {
 	return ctx
 }
 
-
 // providerNamesFor returns sorted provider names from a generator
 // map. Used for the routing UI dropdown + the validator on PUT.
 // Sorting makes the order deterministic across boots.

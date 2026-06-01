@@ -230,4 +230,3 @@ func (r *MongoRepository) FindRecent(ctx context.Context, userID string, limit i
 	}
 	return boards, nil
 }
-

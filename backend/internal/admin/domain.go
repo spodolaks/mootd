@@ -49,19 +49,19 @@ func IsValidRole(r Role) bool {
 // Admin is the MongoDB representation of an administrator. Stored in the
 // dedicated `admins` collection; never joined to the `users` collection.
 type Admin struct {
-	ID           string    `bson:"_id"`
-	Email        string    `bson:"email"`
-	PasswordHash string    `bson:"passwordHash"` // argon2id encoded string
+	ID           string `bson:"_id"`
+	Email        string `bson:"email"`
+	PasswordHash string `bson:"passwordHash"` // argon2id encoded string
 	// MFA slots below are populated from P5-02 onwards. Carried in Phase 0
 	// so the schema is stable and claim checks can key off MFAEnforced
 	// without a later migration.
-	MFASecret        string    `bson:"mfaSecret,omitempty"`        // base32 TOTP seed
-	MFAEnforced      bool      `bson:"mfaEnforced,omitempty"`      // require TOTP on login
-	MFARecoveryCodes []string  `bson:"mfaRecoveryCodes,omitempty"` // sha256 hex of each
-	Roles            []Role    `bson:"roles"`
-	CreatedAt        time.Time `bson:"createdAt"`
-	UpdatedAt        time.Time `bson:"updatedAt"`
-	LastActiveAt     time.Time `bson:"lastActiveAt,omitempty"`
+	MFASecret        string     `bson:"mfaSecret,omitempty"`        // base32 TOTP seed
+	MFAEnforced      bool       `bson:"mfaEnforced,omitempty"`      // require TOTP on login
+	MFARecoveryCodes []string   `bson:"mfaRecoveryCodes,omitempty"` // sha256 hex of each
+	Roles            []Role     `bson:"roles"`
+	CreatedAt        time.Time  `bson:"createdAt"`
+	UpdatedAt        time.Time  `bson:"updatedAt"`
+	LastActiveAt     time.Time  `bson:"lastActiveAt,omitempty"`
 	DisabledAt       *time.Time `bson:"disabledAt,omitempty"`
 }
 
@@ -81,13 +81,13 @@ func (a *Admin) RolesAsStrings() []string {
 // rotated, when revoked). The raw token is never stored — only its
 // sha256 digest.
 type RefreshToken struct {
-	ID        string    `bson:"_id"` // sha256 hex of the raw token
-	AdminID   string    `bson:"adminId"`
-	ExpiresAt time.Time `bson:"expiresAt"`
-	CreatedAt time.Time `bson:"createdAt"`
+	ID        string     `bson:"_id"` // sha256 hex of the raw token
+	AdminID   string     `bson:"adminId"`
+	ExpiresAt time.Time  `bson:"expiresAt"`
+	CreatedAt time.Time  `bson:"createdAt"`
 	RevokedAt *time.Time `bson:"revokedAt,omitempty"`
-	UserAgent string    `bson:"userAgent,omitempty"`
-	IP        string    `bson:"ip,omitempty"`
+	UserAgent string     `bson:"userAgent,omitempty"`
+	IP        string     `bson:"ip,omitempty"`
 }
 
 // ── HTTP wire types ─────────────────────────────────────────────────────

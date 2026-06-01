@@ -45,9 +45,9 @@ import (
 // facing wardrobe.ClothingItem shape minus userId (defaults are
 // pool entries — userId is stamped at copy time).
 type ArchetypeDefaultItem struct {
-	ID                    string            `bson:"_id"                              json:"id"`
-	Archetype             string            `bson:"archetype"                        json:"archetype"`
-	Category              string            `bson:"category"                         json:"category"`
+	ID        string `bson:"_id"                              json:"id"`
+	Archetype string `bson:"archetype"                        json:"archetype"`
+	Category  string `bson:"category"                         json:"category"`
 	// Gender — "male", "female", or "unisex". Decides which users
 	// this default is mixed into moodboards for. "unisex" (the
 	// default when unset) participates for every user.
@@ -119,7 +119,7 @@ func NewArchetypeDefaultsMongoRepository(ctx context.Context, client *mongo.Clie
 	r := &ArchetypeDefaultsMongoRepository{client: client, dbName: dbName}
 	_, err := r.col().Indexes().CreateMany(ctx, []mongo.IndexModel{
 		{
-			Keys: bson.D{{Key: "archetype", Value: 1}, {Key: "createdAt", Value: -1}},
+			Keys:    bson.D{{Key: "archetype", Value: 1}, {Key: "createdAt", Value: -1}},
 			Options: options.Index().SetName("archetype_defaults_archetype_created_desc"),
 		},
 		{

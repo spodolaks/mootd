@@ -13,12 +13,12 @@ func TestCreativityToTemperature_Mapping(t *testing.T) {
 	cases := []struct {
 		creativity, want float64
 	}{
-		{0, 0},          // sentinel: "no preference" → 0 → caller keeps default
-		{0.01, 0.508},   // floor of the live range
-		{0.25, 0.7},     // half-way in the conservative arc
-		{0.5, 0.9},      // current default
-		{0.75, 1.05},    // half-way in the high-variance arc
-		{1.0, 1.2},      // ceiling
+		{0, 0},        // sentinel: "no preference" → 0 → caller keeps default
+		{0.01, 0.508}, // floor of the live range
+		{0.25, 0.7},   // half-way in the conservative arc
+		{0.5, 0.9},    // current default
+		{0.75, 1.05},  // half-way in the high-variance arc
+		{1.0, 1.2},    // ceiling
 	}
 	for _, c := range cases {
 		got := CreativityToTemperature(c.creativity)

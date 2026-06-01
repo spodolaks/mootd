@@ -12,10 +12,10 @@ import "time"
 // retrying forever. JSON tags are omitted on those fields: they're
 // server-only observability, not part of the wire shape clients see.
 type ClothingItem struct {
-	ID               string            `bson:"_id"          json:"id"`
-	UserID           string            `bson:"userId"       json:"userId"`
-	Category         string            `bson:"category"     json:"category"`
-	Label            string            `bson:"label"        json:"label"`
+	ID       string `bson:"_id"          json:"id"`
+	UserID   string `bson:"userId"       json:"userId"`
+	Category string `bson:"category"     json:"category"`
+	Label    string `bson:"label"        json:"label"`
 	// Gender is "male", "female", or "unisex" (internal/shared/
 	// gender). Stamped from the owner's profile gender when the item
 	// is detected; empty on legacy items (treated as unisex).

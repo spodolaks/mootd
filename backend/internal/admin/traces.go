@@ -69,10 +69,10 @@ type LLMCallDetail struct {
 // Independent of pagination; powers the "1,234 calls · $45.20 ·
 // avg 4.2s · p95 12.1s" strip on the /traces page.
 type TracesSummary struct {
-	TotalCount     int64   `json:"totalCount"`
-	TotalCostUSD   float64 `json:"totalCostUsd"`
-	AvgDurationMs  int64   `json:"avgDurationMs"`
-	P95DurationMs  int64   `json:"p95DurationMs"`
+	TotalCount    int64   `json:"totalCount"`
+	TotalCostUSD  float64 `json:"totalCostUsd"`
+	AvgDurationMs int64   `json:"avgDurationMs"`
+	P95DurationMs int64   `json:"p95DurationMs"`
 }
 
 // TracesRepository owns the read side of llm_calls. We deliberately

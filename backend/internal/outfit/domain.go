@@ -9,22 +9,22 @@ import (
 
 // Outfit is a suggested combination of wardrobe items.
 type Outfit struct {
-	Name            string             `json:"name"`
-	Description     string             `json:"description"`
-	Items           []string           `json:"items"`                     // wardrobe item IDs (tops, bottoms, shoes, accessories)
-	ItemSnapshots   []OutfitItemSnapshot `json:"itemSnapshots,omitempty"` // resolved per-item metadata (id, label, imageUrl, source). FE renders directly from these so it doesn't have to look up filler ad_<hex> ids in the wardrobe response.
-	Rationale       string             `json:"rationale,omitempty"`       // 1-line stylist explanation tied to archetype/weather
-	LayoutRoles     map[string]string  `json:"layoutRoles,omitempty"`     // itemID → "hero" | "support" | "accent"
-	VisualWeights   map[string]string  `json:"visualWeights,omitempty"`   // itemID → "statement" | "supporting" | "minor"; marks the signature piece per outfit (P1-H)
-	Suggestions     []string           `json:"suggestions,omitempty"`     // text hints for complementary items not in wardrobe
-	ArchetypeScores map[string]float64 `json:"archetypeScores,omitempty"` // per-outfit archetype alignment
-	SmartSuggestion string             `json:"smartSuggestion,omitempty"` // archetype-driven item suggestion (<20 items)
-	Weather         *Weather           `json:"weather,omitempty"`         // weather context the outfit was generated for (display chip)
-	Palette         []string           `json:"palette,omitempty"`         // dominant colors per item as #RRGGBB, up to 4, deduped
-		PanelID         string             `json:"panelId,omitempty"`         // LLM-picked surface id; read on input, kept on output for debug
-	BackgroundID    string             `json:"backgroundId,omitempty"`    // LLM-picked surface id; read on input, kept on output for debug
-	PanelURL        string             `json:"panelUrl,omitempty"`        // resolved URL for the panel texture
-	BackgroundURL   string             `json:"backgroundUrl,omitempty"`   // resolved URL for the ambient background
+	Name            string               `json:"name"`
+	Description     string               `json:"description"`
+	Items           []string             `json:"items"`                     // wardrobe item IDs (tops, bottoms, shoes, accessories)
+	ItemSnapshots   []OutfitItemSnapshot `json:"itemSnapshots,omitempty"`   // resolved per-item metadata (id, label, imageUrl, source). FE renders directly from these so it doesn't have to look up filler ad_<hex> ids in the wardrobe response.
+	Rationale       string               `json:"rationale,omitempty"`       // 1-line stylist explanation tied to archetype/weather
+	LayoutRoles     map[string]string    `json:"layoutRoles,omitempty"`     // itemID → "hero" | "support" | "accent"
+	VisualWeights   map[string]string    `json:"visualWeights,omitempty"`   // itemID → "statement" | "supporting" | "minor"; marks the signature piece per outfit (P1-H)
+	Suggestions     []string             `json:"suggestions,omitempty"`     // text hints for complementary items not in wardrobe
+	ArchetypeScores map[string]float64   `json:"archetypeScores,omitempty"` // per-outfit archetype alignment
+	SmartSuggestion string               `json:"smartSuggestion,omitempty"` // archetype-driven item suggestion (<20 items)
+	Weather         *Weather             `json:"weather,omitempty"`         // weather context the outfit was generated for (display chip)
+	Palette         []string             `json:"palette,omitempty"`         // dominant colors per item as #RRGGBB, up to 4, deduped
+	PanelID         string               `json:"panelId,omitempty"`         // LLM-picked surface id; read on input, kept on output for debug
+	BackgroundID    string               `json:"backgroundId,omitempty"`    // LLM-picked surface id; read on input, kept on output for debug
+	PanelURL        string               `json:"panelUrl,omitempty"`        // resolved URL for the panel texture
+	BackgroundURL   string               `json:"backgroundUrl,omitempty"`   // resolved URL for the ambient background
 }
 
 // OutfitItemSnapshot is the resolved per-item metadata returned
@@ -164,7 +164,9 @@ func parseLLMResponse(raw string) ([]Outfit, error) {
 				itemIDs = strItems
 			} else {
 				// Try as array of objects with "id" field.
-				var objItems []struct{ ID string `json:"id"` }
+				var objItems []struct {
+					ID string `json:"id"`
+				}
 				if err := json.Unmarshal(v, &objItems); err == nil {
 					for _, obj := range objItems {
 						if obj.ID != "" {
@@ -183,7 +185,9 @@ func parseLLMResponse(raw string) ([]Outfit, error) {
 					continue
 				}
 				// Could be a single object {"id": "..."} or a string ID.
-				var obj struct{ ID string `json:"id"` }
+				var obj struct {
+					ID string `json:"id"`
+				}
 				if err := json.Unmarshal(v, &obj); err == nil && obj.ID != "" {
 					itemIDs = append(itemIDs, obj.ID)
 					continue
@@ -197,7 +201,9 @@ func parseLLMResponse(raw string) ([]Outfit, error) {
 				var arr []json.RawMessage
 				if err := json.Unmarshal(v, &arr); err == nil {
 					for _, elem := range arr {
-						var aObj struct{ ID string `json:"id"` }
+						var aObj struct {
+							ID string `json:"id"`
+						}
 						if err := json.Unmarshal(elem, &aObj); err == nil && aObj.ID != "" {
 							itemIDs = append(itemIDs, aObj.ID)
 						} else {

@@ -296,13 +296,13 @@ type EvalSetSummary struct {
 // admin/ shouldn't import eval/). The runner is responsible for
 // translating EvalTuple into eval.Tuple at the boundary.
 type EvalTuple struct {
-	ID            string                  `json:"id"`
-	Description   string                  `json:"description,omitempty"`
-	UserID        string                  `json:"userId,omitempty"`
-	Items         []map[string]any        `json:"items"`
-	Weather       map[string]any          `json:"weather,omitempty"`
-	TopArchetypes []map[string]any        `json:"topArchetypes,omitempty"`
-	Expectations  *map[string]any         `json:"expectations,omitempty"`
+	ID            string           `json:"id"`
+	Description   string           `json:"description,omitempty"`
+	UserID        string           `json:"userId,omitempty"`
+	Items         []map[string]any `json:"items"`
+	Weather       map[string]any   `json:"weather,omitempty"`
+	TopArchetypes []map[string]any `json:"topArchetypes,omitempty"`
+	Expectations  *map[string]any  `json:"expectations,omitempty"`
 }
 
 // FilesystemSetLoader is the production loader. Pointed at

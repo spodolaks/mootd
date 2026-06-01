@@ -33,9 +33,9 @@ type Handler struct {
 	searcher            *Searcher
 	repo                Repository
 	bgRemover           *BackgroundRemover
-	workerCtx           context.Context // server-scoped context for background goroutines
-	detectJobs          *DetectJobStore // optional — when nil, the async path is unavailable
-	detectionRuns       DetectionRunRepository // optional — when nil, runs aren't archived (P1-04)
+	workerCtx           context.Context               // server-scoped context for background goroutines
+	detectJobs          *DetectJobStore               // optional — when nil, the async path is unavailable
+	detectionRuns       DetectionRunRepository        // optional — when nil, runs aren't archived (P1-04)
 	archetypeSeeder     ArchetypeFillerSeeder         // optional — pairs with archetypeRejections to power the FE filler tap-resolve flow
 	archetypeRejections ArchetypeRejectionsRepository // optional — when nil, /archetype-rejections returns 503
 	genderOf            GenderLookup                  // optional — when nil, detected items are saved with empty gender

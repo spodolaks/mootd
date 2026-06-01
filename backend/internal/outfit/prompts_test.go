@@ -188,11 +188,11 @@ func TestSanitiseUserText_RedactsPairedDelimiterSpans(t *testing.T) {
 // happens to look tag-ish shouldn't get clobbered.
 func TestSanitiseUserText_LegitimateTagsLikeContent_NoFalsePositives(t *testing.T) {
 	cases := []string{
-		"black tee, size: M",                        // colon should not trigger
-		"a 5/10 fit",                                // slash, no /tag
-		"navy <heart> red <2026 release",            // bare <…> without paired close (no system tag form)
-		"jacket: oversized boxy fit",                // legit prose
-		"silver-gray suede sneakers",                // hyphen
+		"black tee, size: M",             // colon should not trigger
+		"a 5/10 fit",                     // slash, no /tag
+		"navy <heart> red <2026 release", // bare <…> without paired close (no system tag form)
+		"jacket: oversized boxy fit",     // legit prose
+		"silver-gray suede sneakers",     // hyphen
 	}
 	for _, in := range cases {
 		got := sanitiseUserText(in)

@@ -353,8 +353,8 @@ func (h *Handler) Overview(w http.ResponseWriter, r *http.Request) {
 // GetUser handles GET /admin/v1/users/{id} and dispatches on
 // sub-path:
 //
-//   /admin/v1/users/{id}            → user detail (P1-06)
-//   /admin/v1/users/{id}/wardrobe   → wardrobe page (mootd-admin#11)
+//	/admin/v1/users/{id}            → user detail (P1-06)
+//	/admin/v1/users/{id}/wardrobe   → wardrobe page (mootd-admin#11)
 //
 // Until Go 1.22 path variables, this dispatch lives inside the
 // handler instead of the mux. Adding new sub-paths (outfits /
@@ -745,12 +745,12 @@ func (h *Handler) updateUserBudget(w http.ResponseWriter, r *http.Request, id st
 			IP:           clientIP(r),
 			UserAgent:    r.Header.Get("User-Agent"),
 			Metadata: map[string]any{
-				"reason":         reason,
-				"priorDailyUSD":  prior.DailyUSD,
+				"reason":          reason,
+				"priorDailyUSD":   prior.DailyUSD,
 				"priorMonthlyUSD": prior.MonthlyUSD,
-				"priorIsDefault": prior.IsDefault,
-				"newDailyUSD":    body.DailyUSD,
-				"newMonthlyUSD":  body.MonthlyUSD,
+				"priorIsDefault":  prior.IsDefault,
+				"newDailyUSD":     body.DailyUSD,
+				"newMonthlyUSD":   body.MonthlyUSD,
 			},
 		})
 	}
@@ -1047,9 +1047,9 @@ func (h *Handler) updateModelRouting(w http.ResponseWriter, r *http.Request) {
 			IP:         clientIP(r),
 			UserAgent:  r.Header.Get("User-Agent"),
 			Metadata: map[string]any{
-				"notes":    notes,
-				"prior":    priorMap,
-				"new":      newMap,
+				"notes": notes,
+				"prior": priorMap,
+				"new":   newMap,
 			},
 		})
 	}
@@ -1455,8 +1455,8 @@ func (h *Handler) exportTracesCSV(w http.ResponseWriter, r *http.Request, q Trac
 			IP:         clientIP(r),
 			UserAgent:  r.Header.Get("User-Agent"),
 			Metadata: map[string]any{
-				"format":   "csv",
-				"rowCount": rowCount,
+				"format":    "csv",
+				"rowCount":  rowCount,
 				"truncated": rowCount == maxExportRows,
 				"filter": map[string]any{
 					"userId":  q.UserID,

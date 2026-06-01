@@ -71,13 +71,13 @@ type FunnelStep struct {
 
 // Funnel is one saved row.
 type Funnel struct {
-	ID          string       `bson:"_id"          json:"id"`
-	Name        string       `bson:"name"         json:"name"`
-	Steps       []FunnelStep `bson:"steps"        json:"steps"`
-	WindowDays  int          `bson:"windowDays"   json:"windowDays"` // step-to-step window
-	AnalysisDays int         `bson:"analysisDays" json:"analysisDays"` // how far back to anchor on step 0
-	CreatedBy   string       `bson:"createdBy,omitempty" json:"createdBy,omitempty"`
-	CreatedAt   time.Time    `bson:"createdAt"    json:"createdAt"`
+	ID           string       `bson:"_id"          json:"id"`
+	Name         string       `bson:"name"         json:"name"`
+	Steps        []FunnelStep `bson:"steps"        json:"steps"`
+	WindowDays   int          `bson:"windowDays"   json:"windowDays"`   // step-to-step window
+	AnalysisDays int          `bson:"analysisDays" json:"analysisDays"` // how far back to anchor on step 0
+	CreatedBy    string       `bson:"createdBy,omitempty" json:"createdBy,omitempty"`
+	CreatedAt    time.Time    `bson:"createdAt"    json:"createdAt"`
 }
 
 // FunnelStepStat is one row in the stats response.
@@ -91,11 +91,11 @@ type FunnelStepStat struct {
 
 // FunnelStats is the wire shape for GET /funnels/{id}/stats.
 type FunnelStats struct {
-	FunnelID    string           `json:"funnelId"`
-	WindowDays  int              `json:"windowDays"`
-	AnalysisDays int             `json:"analysisDays"`
-	Steps       []FunnelStepStat `json:"steps"`
-	GeneratedAt time.Time        `json:"generatedAt"`
+	FunnelID     string           `json:"funnelId"`
+	WindowDays   int              `json:"windowDays"`
+	AnalysisDays int              `json:"analysisDays"`
+	Steps        []FunnelStepStat `json:"steps"`
+	GeneratedAt  time.Time        `json:"generatedAt"`
 }
 
 // FunnelsRepository is the persistence boundary.
@@ -233,8 +233,8 @@ func (r *FunnelsMongoRepository) Stats(ctx context.Context, id string) (*FunnelS
 	pipeline := mongo.Pipeline{
 		{{Key: "$match", Value: step0Match}},
 		{{Key: "$group", Value: bson.M{
-			"_id":     "$userId",
-			"anchor":  bson.M{"$min": "$createdAt"},
+			"_id":    "$userId",
+			"anchor": bson.M{"$min": "$createdAt"},
 		}}},
 	}
 	cur, err := r.eventsCol().Aggregate(ctx, pipeline)

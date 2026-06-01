@@ -14,7 +14,7 @@ func TestParseLLMResponse(t *testing.T) {
 	tests := []struct {
 		name      string
 		raw       string
-		wantNames []string          // outfit names in order
+		wantNames []string            // outfit names in order
 		wantItems map[string][]string // outfit name → sorted item IDs
 	}{
 		{

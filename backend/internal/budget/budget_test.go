@@ -23,9 +23,9 @@ func (f *fakeReader) BudgetForUser(_ context.Context, userID string) (Cap, error
 // fakeTracker is an in-memory SpendTracker. Lets us inspect the
 // Suspend call after a 200% breach without spinning up Redis.
 type fakeTracker struct {
-	mu        sync.Mutex
-	spend     map[string]float64
-	suspended map[string]bool
+	mu             sync.Mutex
+	spend          map[string]float64
+	suspended      map[string]bool
 	suspendedUntil map[string]time.Time
 }
 

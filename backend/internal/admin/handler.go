@@ -17,38 +17,38 @@ import (
 // current admin (/admin/v1/me). Domain endpoints under /admin/v1/users,
 // /admin/v1/traces, etc. live in their own handlers within this package.
 type Handler struct {
-	logger        *log.Logger
-	repo          Repository
-	usersRepo     UsersRepository
-	overviewRepo  OverviewRepository
-	tracesRepo    TracesRepository
-	detectionRuns DetectionRunRepository  // optional — when nil, /detection-runs returns 503
-	budgets       UserBudgetsRepository   // optional — when nil, /users/{id}/budget returns defaults read-only
-	budgetState   BudgetStateReader       // optional — when nil, /users/{id}/budget GET omits live spend
-	evalsRepo     EvalsRepository         // optional — when nil, /evals/* returns 503
-	evalsLoader   EvalSetLoader           // optional — pairs with evalsRepo
-	evalsRunner   *EvalRunner             // optional — pairs with evalsRepo
-	routingRepo   RoutingRepository       // optional — when nil, /model-routing returns 503
-	routingCache  *CachedRoutingReader    // optional — cleared on PUT to invalidate
-	routingProviders []string             // boot-time provider names; populated alongside routingRepo
-	reportsRepo   ReportsRepository       // optional — when nil, /reports/weekly returns 503
-	smtpCfg       *SMTPConfig             // optional — when nil, /reports/weekly/send returns 503
-	sessionsRepo  SessionsRepository      // optional — when nil, /sessions returns 503
-	templatesRepo PromptTemplatesRepository // optional — when nil, /prompts returns 503
-	templatesCache *CachedPromptTemplates    // optional — invalidated on Promote
-	abTestsRepo   ABTestRepository          // optional — when nil, /prompts/{name}/ab-tests returns 503
-	abTestsCache  *CachedABTests            // optional — invalidated on Start/End
-	funnelsRepo   FunnelsRepository         // optional — when nil, /funnels returns 503
-	retentionRepo RetentionRepository       // optional — when nil, /retention returns 503
-	userPurger    UserPurger                // optional — when nil, /users/{id}/purge returns 503
-	hitlProxy     *HitlProxy                // optional — when nil, /hitl-queue + /items/{id}/* return 503
-	trainingTrials TrainingTrialsRepository // optional — when nil, /training/submissions/* return 503
+	logger            *log.Logger
+	repo              Repository
+	usersRepo         UsersRepository
+	overviewRepo      OverviewRepository
+	tracesRepo        TracesRepository
+	detectionRuns     DetectionRunRepository      // optional — when nil, /detection-runs returns 503
+	budgets           UserBudgetsRepository       // optional — when nil, /users/{id}/budget returns defaults read-only
+	budgetState       BudgetStateReader           // optional — when nil, /users/{id}/budget GET omits live spend
+	evalsRepo         EvalsRepository             // optional — when nil, /evals/* returns 503
+	evalsLoader       EvalSetLoader               // optional — pairs with evalsRepo
+	evalsRunner       *EvalRunner                 // optional — pairs with evalsRepo
+	routingRepo       RoutingRepository           // optional — when nil, /model-routing returns 503
+	routingCache      *CachedRoutingReader        // optional — cleared on PUT to invalidate
+	routingProviders  []string                    // boot-time provider names; populated alongside routingRepo
+	reportsRepo       ReportsRepository           // optional — when nil, /reports/weekly returns 503
+	smtpCfg           *SMTPConfig                 // optional — when nil, /reports/weekly/send returns 503
+	sessionsRepo      SessionsRepository          // optional — when nil, /sessions returns 503
+	templatesRepo     PromptTemplatesRepository   // optional — when nil, /prompts returns 503
+	templatesCache    *CachedPromptTemplates      // optional — invalidated on Promote
+	abTestsRepo       ABTestRepository            // optional — when nil, /prompts/{name}/ab-tests returns 503
+	abTestsCache      *CachedABTests              // optional — invalidated on Start/End
+	funnelsRepo       FunnelsRepository           // optional — when nil, /funnels returns 503
+	retentionRepo     RetentionRepository         // optional — when nil, /retention returns 503
+	userPurger        UserPurger                  // optional — when nil, /users/{id}/purge returns 503
+	hitlProxy         *HitlProxy                  // optional — when nil, /hitl-queue + /items/{id}/* return 503
+	trainingTrials    TrainingTrialsRepository    // optional — when nil, /training/submissions/* return 503
 	archetypeDefaults ArchetypeDefaultsRepository // optional — when nil, /archetype-defaults returns 503
 	wardrobeSeeder    WardrobeSeeder              // optional — wired alongside archetypeDefaults so admin can preview seeding
 	imageStore        ImageStore                  // optional — pairs with itemDetector for upload+autodetect
 	itemDetector      ItemDetector                // optional — pairs with imageStore; when either nil, /archetype-defaults/detect → 503
 	bgRemover         BackgroundRemover           // optional — when nil, detect skips bg removal and pngImageUrl is omitted
-	secret        string
+	secret            string
 }
 
 // BudgetStateReader exposes today's per-user spend + suspension

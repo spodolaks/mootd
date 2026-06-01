@@ -180,9 +180,9 @@ func (e ErrFatal) Unwrap() error { return e.Inner }
 
 // HealthTracker keeps per-provider rolling health stats. Goroutine-safe.
 type HealthTracker struct {
-	mu       sync.Mutex
-	stats    map[string]*ProviderHealth
-	cooldown time.Duration
+	mu              sync.Mutex
+	stats           map[string]*ProviderHealth
+	cooldown        time.Duration
 	failsToCooldown int
 }
 

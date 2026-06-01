@@ -180,8 +180,8 @@ type Usage struct {
 	Model            string // exact model id, e.g. "claude-sonnet-4-20250514"
 	InputTokens      int
 	OutputTokens     int
-	CacheReadTokens  int // Anthropic only — 0 for OpenAI/Ollama
-	CacheWriteTokens int // Anthropic only — 0 for OpenAI/Ollama
+	CacheReadTokens  int    // Anthropic only — 0 for OpenAI/Ollama
+	CacheWriteTokens int    // Anthropic only — 0 for OpenAI/Ollama
 	PromptVersion    string // PromptVersion at call time, stamped for filtering
 	// RawResponse is the textual content the model produced, captured
 	// before our parser ran. Anthropic: tool-use input JSON.
