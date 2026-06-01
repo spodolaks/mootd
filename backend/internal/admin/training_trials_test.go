@@ -57,7 +57,14 @@ func (m *memTrainingTrials) ListTrainingTrials(ctx context.Context, q TrainingTr
 		if t.Source == TrainingSourceHITL {
 			continue // HITL-ingested records are export-only (#126)
 		}
-		if q.Status != "" && t.Status != q.Status {
+		if q.NeedsRereview {
+			if t.Status != TrainingStatusSubmitted || t.Agreement != nil {
+				continue
+			}
+			if q.ExcludeReviewer != "" && t.SubmittedBy == q.ExcludeReviewer {
+				continue
+			}
+		} else if q.Status != "" && t.Status != q.Status {
 			continue
 		}
 		if q.Cursor != "" && t.ID >= q.Cursor {
