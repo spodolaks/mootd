@@ -38,7 +38,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "connect: %v\n", err)
 		os.Exit(1)
 	}
-	defer client.Disconnect(ctx)
+	defer func() { _ = client.Disconnect(ctx) }()
 
 	overview := admin.NewOverviewMongoRepository(client, dbName)
 	builder := admin.NewDailySummaryBuilder(overview, client, dbName)

@@ -189,9 +189,7 @@ func Run(opts RunOptions) Result {
 	r.Outfits = outfits
 
 	// Outcome checks.
-	for _, ch := range checkOutfits(outfits, opts.Tuple.Expectations) {
-		r.Checks = append(r.Checks, ch)
-	}
+	r.Checks = append(r.Checks, checkOutfits(outfits, opts.Tuple.Expectations)...)
 
 	return r
 }

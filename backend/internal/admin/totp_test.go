@@ -54,9 +54,9 @@ func TestVerifyTOTP_RejectsTooOld(t *testing.T) {
 
 func TestVerifyTOTP_RejectsBadCode(t *testing.T) {
 	secret, _ := GenerateTOTPSecret()
-	if VerifyTOTP(secret, "000000", time.Now()) {
-		// 1-in-a-million chance this flakes, accept it.
-	}
+	// Not asserting on "000000": it's a valid code ~1-in-a-million of the
+	// time and would flake — the non-numeric/length checks below carry
+	// the rejection coverage.
 	if VerifyTOTP(secret, "abc", time.Now()) {
 		t.Error("verify should reject a non-numeric code")
 	}

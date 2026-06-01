@@ -350,10 +350,6 @@ func (r *TracesMongoRepository) FindDetail(ctx context.Context, id string) (*LLM
 	return &doc, nil
 }
 
-// errInvalidTracesQuery is returned by the handler's parser when a
-// query parameter is malformed (e.g. minCost not a float).
-var errInvalidTracesQuery = errors.New("admin: invalid traces query")
-
 // parseFloat0 is a tolerant float parser — empty + invalid both
 // return 0 (the "no filter" sentinel). Used for minCost where 0
 // already means "no minimum."

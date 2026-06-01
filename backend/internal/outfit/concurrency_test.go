@@ -7,8 +7,11 @@ import "testing"
 func TestGenSlot_CapsAndReleases(t *testing.T) {
 	h := (&Handler{}).WithMaxConcurrent(2)
 
-	if !h.acquireGenSlot() || !h.acquireGenSlot() {
-		t.Fatal("first two acquires should succeed")
+	if !h.acquireGenSlot() {
+		t.Fatal("first acquire should succeed")
+	}
+	if !h.acquireGenSlot() {
+		t.Fatal("second acquire should succeed")
 	}
 	if h.acquireGenSlot() {
 		t.Fatal("third acquire should be refused when cap=2 is full")

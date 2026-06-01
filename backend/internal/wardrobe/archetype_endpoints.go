@@ -2,7 +2,6 @@ package wardrobe
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -206,7 +205,3 @@ func (h *Handler) ArchetypeRejection(w http.ResponseWriter, r *http.Request) {
 		"rejected":  true,
 	})
 }
-
-// errArchetypeBadRequest is a sentinel that callers can recognise
-// when validating a payload outside the standard handler flow.
-var errArchetypeBadRequest = errors.New("wardrobe: bad archetype-default request")

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -333,7 +334,9 @@ func (h *Handler) ListSessions(w http.ResponseWriter, r *http.Request) {
 	cursor := r.URL.Query().Get("cursor")
 	limit := 30
 	if v := r.URL.Query().Get("limit"); v != "" {
-		fmt.Sscanf(v, "%d", &limit)
+		if n, err := strconv.Atoi(v); err == nil {
+			limit = n
+		}
 	}
 
 	rows, next, err := h.sessionsRepo.ListSummaries(ctx, cursor, limit)

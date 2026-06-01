@@ -1063,26 +1063,6 @@ func attachItemSnapshots(outfits []Outfit, allItems []wardrobe.ClothingItem, pre
 	return outfits
 }
 
-// itemsToGenItems trims wardrobe items down to the generator-facing
-// GenItem shape. Every item is marked Preferred (the "wardrobe is the
-// only source" path); kept for tests + callers that don't fold in
-// archetype-default fillers. The runtime pipeline goes through
-// itemsToGenItemsWithPreference instead.
-func itemsToGenItems(items []wardrobe.ClothingItem) []GenItem {
-	out := make([]GenItem, len(items))
-	for i, item := range items {
-		out[i] = GenItem{
-			ID:        item.ID,
-			Category:  item.Category,
-			Label:     item.Label,
-			Traits:    item.Traits,
-			Preferred: true,
-			Weight:    1.0,
-		}
-	}
-	return out
-}
-
 // itemsToGenItemsWithPreference is itemsToGenItems with explicit
 // preference control. preferredIDs is the set of IDs that should be
 // flagged Preferred=true (typically the user's own wardrobe). Items

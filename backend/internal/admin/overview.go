@@ -2,7 +2,6 @@ package admin
 
 import (
 	"context"
-	"errors"
 	"sort"
 	"time"
 
@@ -662,7 +661,3 @@ func (r *OverviewMongoRepository) CacheMetricsFor(ctx context.Context, start, en
 		SavingsUSD:  savings,
 	}, nil
 }
-
-// errInvalidOverview is returned by the handler's parser when a query
-// parameter is malformed. Public so handler tests can expect it.
-var errInvalidOverview = errors.New("admin: invalid overview query")
