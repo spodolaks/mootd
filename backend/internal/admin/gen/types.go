@@ -2362,8 +2362,18 @@ type AdminTrainingProcessParamsXDescriber string
 // AdminListTrainingTrialsParams defines parameters for AdminListTrainingTrials.
 type AdminListTrainingTrialsParams struct {
 	Status *AdminListTrainingTrialsParamsStatus `form:"status,omitempty" json:"status,omitempty"`
-	Cursor *string                              `form:"cursor,omitempty" json:"cursor,omitempty"`
-	Limit  *int                                 `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// NeedsRereview When true, return only the re-review queue: submitted trials
+	// that still carry a single reviewer's opinion (no `agreement`
+	// score yet) and that the calling admin did NOT submit — you
+	// can't be the second opinion on your own review. Forces
+	// status=submitted; the `status` param is ignored when set.
+	// Powers label-quality sampling (mootd-admin#127): re-reviewing
+	// ~10–20% of trials yields the agreement the export thresholds
+	// on via `minAgreement`.
+	NeedsRereview *bool   `form:"needsRereview,omitempty" json:"needsRereview,omitempty"`
+	Cursor        *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+	Limit         *int    `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
 // AdminListTrainingTrialsParamsStatus defines parameters for AdminListTrainingTrials.

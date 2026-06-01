@@ -130,6 +130,47 @@ func TestTrainingExport_MinAgreementThreshold(t *testing.T) {
 	}
 }
 
+// The needsRereview queue returns only single-opinion submitted trials
+// the caller did not submit (mootd-admin#127).
+func TestListTrainingTrials_NeedsRereviewQueue(t *testing.T) {
+	store := newMemTrainingTrials()
+	h := trainingTestHandler(store)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	submit := func(id, by string) {
+		if _, err := store.SubmitTrainingTrial(ctx, id, by,
+			TrainingSubmitInput{Picks: map[string]string{"fit": "claude"}, AttrCount: 1}, now); err != nil {
+			t.Fatalf("seed submit %s: %v", id, err)
+		}
+	}
+	submit("trial-a", "admin-2") // someone else's single opinion → in queue
+	submit("trial-b", "admin-1") // caller's own review → excluded
+	submit("trial-c", "admin-2") // re-reviewed below → excluded
+	if _, err := store.RecordReReview(ctx, "trial-c", "admin-1", 0.9, now); err != nil {
+		t.Fatalf("seed re-review: %v", err)
+	}
+	// Still in_review → excluded (only submitted trials are re-reviewable).
+	if err := store.CreateTrainingTrial(ctx, TrainingTrial{
+		ID: "trial-d", Status: TrainingStatusInReview, CreatedBy: "admin-2", CreatedAt: now,
+	}); err != nil {
+		t.Fatalf("seed in_review: %v", err)
+	}
+
+	rr := httptest.NewRecorder()
+	h.TrainingRouter(rr, trainingReqAs("admin-1", http.MethodGet,
+		"/admin/v1/training/submissions?needsRereview=true", "", RoleEngineer))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d (%s)", rr.Code, rr.Body.String())
+	}
+	var page TrainingTrialPage
+	if err := json.Unmarshal(rr.Body.Bytes(), &page); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(page.Trials) != 1 || page.Trials[0].ID != "trial-a" {
+		t.Fatalf("re-review queue: want only [trial-a], got %+v", page.Trials)
+	}
+}
+
 // agreement should round-trip through the JSON response on GET.
 func TestTrainingTrial_AgreementSerialises(t *testing.T) {
 	store := newMemTrainingTrials()

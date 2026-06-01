@@ -118,6 +118,11 @@ type TrainingTrialQuery struct {
 	Status string
 	Cursor string
 	Limit  int
+	// NeedsRereview restricts to the re-review queue: submitted trials
+	// with no agreement score yet that ExcludeReviewer did not submit
+	// (mootd-admin#127). Forces status=submitted, overriding Status.
+	NeedsRereview   bool
+	ExcludeReviewer string
 }
 
 // TrainingTrialPage is the wire shape for GET /admin/v1/training/submissions.
@@ -225,7 +230,17 @@ func (r *MongoRepository) ListTrainingTrials(ctx context.Context, q TrainingTria
 	// trials an admin actually started. $ne also matches docs with no
 	// source field (the manual trials). Exports read every source.
 	filter["source"] = bson.M{"$ne": TrainingSourceHITL}
-	if q.Status != "" {
+	if q.NeedsRereview {
+		// Re-review queue: submitted, not yet re-reviewed (agreement is
+		// absent until a second reviewer records one), and not the
+		// caller's own review — you can't be the second opinion on a
+		// trial you submitted (mootd-admin#127). Overrides Status.
+		filter["status"] = TrainingStatusSubmitted
+		filter["agreement"] = bson.M{"$exists": false}
+		if q.ExcludeReviewer != "" {
+			filter["submittedBy"] = bson.M{"$ne": q.ExcludeReviewer}
+		}
+	} else if q.Status != "" {
 		filter["status"] = q.Status
 	}
 	if q.Cursor != "" {
@@ -437,6 +452,13 @@ func (h *Handler) listTrainingTrials(w http.ResponseWriter, r *http.Request) {
 	q := TrainingTrialQuery{
 		Status: r.URL.Query().Get("status"),
 		Cursor: r.URL.Query().Get("cursor"),
+	}
+	if r.URL.Query().Get("needsRereview") == "true" {
+		q.NeedsRereview = true
+		// Exclude the caller's own reviews — you can't re-review your own.
+		if adminID, ok := AdminIDFromContext(r.Context()); ok {
+			q.ExcludeReviewer = adminID
+		}
 	}
 	if l := r.URL.Query().Get("limit"); l != "" {
 		if n, err := strconv.Atoi(l); err == nil {
