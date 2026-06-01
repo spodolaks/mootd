@@ -397,12 +397,9 @@ func (d *Detector) Detect(ctx context.Context, userID, runID string, imageData [
 	// `cost_usd` on stats.openai_images, which already sums the
 	// per-item costs.
 	var totalCost float64
-	if aResult.resp != nil && aResult.resp.Stats != nil && aResult.resp.Stats.Claude != nil {
-		// Claude cost computed downstream via model_prices — we just
-		// sum what the service self-reported when present (today only
-		// gpt-image-1 reports cost_usd; Claude's cost is computed at
-		// the recorder).
-	}
+	// Claude cost is computed downstream via model_prices (at the
+	// recorder), not summed here — today only gpt-image-1 self-reports
+	// cost_usd.
 	if gResult.resp != nil && gResult.resp.Stats != nil {
 		if gResult.resp.Stats.OpenAIImages != nil {
 			totalCost += gResult.resp.Stats.OpenAIImages.CostUSD

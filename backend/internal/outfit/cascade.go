@@ -164,10 +164,7 @@ func shouldNotFallback(err error) bool {
 		return true
 	}
 	var fatal ErrFatal
-	if errors.As(err, &fatal) {
-		return true
-	}
-	return false
+	return errors.As(err, &fatal)
 }
 
 // ErrFatal marks an error as cascade-fatal — re-trying on another

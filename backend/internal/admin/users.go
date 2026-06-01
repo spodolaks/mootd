@@ -1046,7 +1046,3 @@ func (r *UsersMongoRepository) ListOutfitBatches(ctx context.Context, userID, cu
 	}
 	return batches, nextCursor, nil
 }
-
-// errUnsupportedSort returned when the caller passes a sort key we
-// haven't mapped. Public so handlers can format the response uniformly.
-var errUnsupportedSort = errors.New("admin: unsupported sort key")
