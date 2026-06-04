@@ -1,12 +1,5 @@
 import { useCallback, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useColorScheme } from '@/src/hooks';
@@ -17,7 +10,7 @@ import { typography } from '@/src/theme/typography';
 
 type Gender = 'female' | 'male' | 'unisex';
 
-const GENDER_OPTIONS: ReadonlyArray<{ label: string; value: Gender }> = [
+const GENDER_OPTIONS: readonly { label: string; value: Gender }[] = [
   { label: 'Female', value: 'female' },
   { label: 'Male', value: 'male' },
   { label: "As long as it's stylish", value: 'unisex' },
@@ -51,10 +44,7 @@ export default function OnboardingGender() {
     try {
       await apiClient.put('/v1/user/profile', { gender });
     } catch (e) {
-      Alert.alert(
-        'Could not save',
-        e instanceof Error ? e.message : 'Please try again.',
-      );
+      Alert.alert('Could not save', e instanceof Error ? e.message : 'Please try again.');
       setIsSaving(false);
       return;
     }
@@ -70,15 +60,12 @@ export default function OnboardingGender() {
   return (
     <SafeAreaView style={[styles.container, { backgroundColor }]}>
       <View style={styles.content}>
-        <Text style={[styles.title, { color: textColor }]}>
-          Who are we styling?
-        </Text>
+        <Text style={[styles.title, { color: textColor }]}>Who are we styling?</Text>
         <Text style={[styles.subtitle, { color: secondaryText }]}>
-          This tailors your outfit suggestions. You can change it
-          anytime in Preferences.
+          This tailors your outfit suggestions. You can change it anytime in Preferences.
         </Text>
         <View style={styles.options}>
-          {GENDER_OPTIONS.map((opt) => {
+          {GENDER_OPTIONS.map(opt => {
             const selected = gender === opt.value;
             return (
               <Pressable
@@ -87,21 +74,13 @@ export default function OnboardingGender() {
                 disabled={isSaving}
                 style={[
                   styles.option,
-                  selected
-                    ? { backgroundColor: buttonBg }
-                    : { borderWidth: 1.5, borderColor },
+                  selected ? { backgroundColor: buttonBg } : { borderWidth: 1.5, borderColor },
                 ]}
                 testID={`onboarding-gender-${opt.value}`}
                 accessibilityLabel={opt.label}
                 accessibilityRole="radio"
-                accessibilityState={{ selected }}
-              >
-                <Text
-                  style={[
-                    styles.optionLabel,
-                    { color: selected ? buttonFg : textColor },
-                  ]}
-                >
+                accessibilityState={{ selected }}>
+                <Text style={[styles.optionLabel, { color: selected ? buttonFg : textColor }]}>
                   {opt.label}
                 </Text>
               </Pressable>
@@ -110,18 +89,13 @@ export default function OnboardingGender() {
         </View>
       </View>
       <Pressable
-        style={[
-          styles.button,
-          { backgroundColor: buttonBg },
-          isSaving && styles.buttonDisabled,
-        ]}
+        style={[styles.button, { backgroundColor: buttonBg }, isSaving && styles.buttonDisabled]}
         onPress={() => {
           void handleContinue();
         }}
         disabled={isSaving}
         testID="onboarding-gender-continue"
-        accessibilityLabel="Save gender and continue"
-      >
+        accessibilityLabel="Save gender and continue">
         {isSaving ? (
           <ActivityIndicator color={buttonFg} />
         ) : (

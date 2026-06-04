@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { Alert, Platform } from 'react-native';
+import { Alert } from 'react-native';
 import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { BuildWardrobeScreen } from '@/src/screens';
@@ -14,7 +14,7 @@ import type { ClothingDetectionResult } from '@/src/domain';
  * "similar item" option (the detected item itself).
  */
 const toDetectionSteps = (result: ClothingDetectionResult): DetectionStep[] =>
-  result.items.map((item) => ({
+  result.items.map(item => ({
     category: item.category,
     similarItems: [
       {
@@ -54,24 +54,20 @@ export default function BuildWardrobe() {
         initializeFlow(steps);
         router.push('/detected-item');
       } catch (e) {
-        const message =
-          e instanceof Error ? e.message : 'Something went wrong during detection.';
+        const message = e instanceof Error ? e.message : 'Something went wrong during detection.';
         setError(message);
       } finally {
         setIsLoading(false);
       }
     },
-    [initializeFlow, router],
+    [initializeFlow, router]
   );
 
   const handleTakePhoto = useCallback(async () => {
     // Request camera permission
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert(
-        'Permission required',
-        'Camera access is needed to take a photo of your outfit.',
-      );
+      Alert.alert('Permission required', 'Camera access is needed to take a photo of your outfit.');
       return;
     }
 
@@ -90,10 +86,7 @@ export default function BuildWardrobe() {
     // Request media library permission
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert(
-        'Permission required',
-        'Photo library access is needed to choose a photo.',
-      );
+      Alert.alert('Permission required', 'Photo library access is needed to choose a photo.');
       return;
     }
 

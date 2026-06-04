@@ -1,17 +1,11 @@
 import React from 'react';
-import {
-  ActivityIndicator,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Icon, Text } from '@/src/components';
 import { useColorScheme } from '@/src/hooks';
 import { useDetectionJobStore, type DetectionJob } from '@/src/store';
-import { accents, backgrounds, fills, grays, labels, separators } from '@/src/theme/colors';
+import { accents, backgrounds, fills, grays, labels } from '@/src/theme/colors';
 import { typography } from '@/src/theme/typography';
 import { spacing } from '@/src/theme/spacing';
 import { radius } from '@/src/theme/radius';
@@ -100,8 +94,8 @@ const JobCard: React.FC<{
 export const DetectionActivityScreen: React.FC = () => {
   const colorScheme = useColorScheme() ?? 'light';
   const router = useRouter();
-  const jobs = useDetectionJobStore((s) => s.jobs);
-  const dismissJob = useDetectionJobStore((s) => s.dismissJob);
+  const jobs = useDetectionJobStore(s => s.jobs);
+  const dismissJob = useDetectionJobStore(s => s.dismissJob);
 
   const backgroundColor = backgrounds.primary[colorScheme];
   const textColor = labels.primary[colorScheme];
@@ -120,8 +114,7 @@ export const DetectionActivityScreen: React.FC = () => {
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
+        showsVerticalScrollIndicator={false}>
         {jobs.length === 0 ? (
           <View style={styles.emptyState}>
             <Icon name="camera" size={48} color={secondaryText} />
@@ -130,13 +123,8 @@ export const DetectionActivityScreen: React.FC = () => {
             </Text>
           </View>
         ) : (
-          jobs.map((job) => (
-            <JobCard
-              key={job.id}
-              job={job}
-              colorScheme={colorScheme}
-              onDismiss={dismissJob}
-            />
+          jobs.map(job => (
+            <JobCard key={job.id} job={job} colorScheme={colorScheme} onDismiss={dismissJob} />
           ))
         )}
       </ScrollView>

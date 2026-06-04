@@ -1,13 +1,13 @@
-import {
-  GradientButton,
-  Icon,
-  Modal,
-} from '@/src/components';
+import { GradientButton, Icon, Modal } from '@/src/components';
 import { useColorScheme, useWeather } from '@/src/hooks';
 import { backgrounds, button, fills, labels } from '@/src/theme/colors';
 import { typography } from '@/src/theme/typography';
 import { radius } from '@/src/theme/radius';
-import { wardrobeRepository, moodBoardRepository, feedbackRepository } from '@/src/data/repositories';
+import {
+  wardrobeRepository,
+  moodBoardRepository,
+  feedbackRepository,
+} from '@/src/data/repositories';
 import type { Outfit, OutfitItem, SavedMoodBoard, WardrobeItem } from '@/src/domain';
 import { outfitToSnapshot, topArchetypeOf, weatherContextString } from '@/src/domain';
 import React, { useState, useCallback, useRef, useMemo } from 'react';
@@ -29,7 +29,7 @@ import { classifyZone } from '@/src/components/moodboard/Collage';
 import { OutfitCard } from '@/src/components/moodboard/OutfitCard';
 import type { CollageCaptureHandle } from '@/src/components/moodboard/OutfitCard';
 import { SavedBoardView } from '@/src/components/moodboard/SavedBoardView';
-import { SCREEN_WIDTH, CONTAINER_PADDING } from '@/src/components/moodboard/constants';
+import { CONTAINER_PADDING } from '@/src/components/moodboard/constants';
 import { useTabContentBottomPadding } from '@/app/(main)/_layout';
 
 type ScreenState = 'loading' | 'empty' | 'generating' | 'choosing' | 'saved';
@@ -43,8 +43,7 @@ const buildItemMap = (items: WardrobeItem[]): Map<string, WardrobeItem> => {
 // Stable FlatList keyExtractor. Prefer the client-assigned outfit.id
 // (unique per batch, stable across re-renders); fall back to a
 // name+items fingerprint for any legacy path without an id.
-const outfitKey = (o: Outfit): string =>
-  o.id ?? `${o.name}|${o.items.join(',')}`;
+const outfitKey = (o: Outfit): string => o.id ?? `${o.name}|${o.items.join(',')}`;
 
 export const MoodBoardScreen: React.FC = () => {
   const colorScheme = useColorScheme() ?? 'light';
@@ -61,7 +60,9 @@ export const MoodBoardScreen: React.FC = () => {
   const [progressMessage, setProgressMessage] = useState<string | null>(null);
 
   // Swap item modal state
-  const [swapTarget, setSwapTarget] = useState<{ outfitIndex: number; itemId: string } | null>(null);
+  const [swapTarget, setSwapTarget] = useState<{ outfitIndex: number; itemId: string } | null>(
+    null
+  );
   // Filler tap-resolve sheet state. Backend returns ad_<hex> ids on
   // archetype-default suggestions; the user picks "in wardrobe"
   // (claim → seed) or "not in wardrobe" (reject → never offer
@@ -96,10 +97,12 @@ export const MoodBoardScreen: React.FC = () => {
   const today = new Date().toISOString().split('T')[0];
 
   const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 50 }).current;
-  const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: { index: number | null }[] }) => {
-    const idx = viewableItems[0]?.index;
-    if (idx != null) setActiveIndex(idx);
-  }).current;
+  const onViewableItemsChanged = useRef(
+    ({ viewableItems }: { viewableItems: { index: number | null }[] }) => {
+      const idx = viewableItems[0]?.index;
+      if (idx != null) setActiveIndex(idx);
+    }
+  ).current;
 
   const loadData = useCallback(async () => {
     try {
@@ -123,7 +126,7 @@ export const MoodBoardScreen: React.FC = () => {
   useFocusEffect(
     useCallback(() => {
       void loadData();
-    }, [loadData]),
+    }, [loadData])
   );
 
   const handleGeneratePress = async () => {
@@ -154,13 +157,13 @@ export const MoodBoardScreen: React.FC = () => {
         // implementations without streaming.
         if (wardrobeRepository.streamOutfitGeneration) {
           outfits = await wardrobeRepository.streamOutfitGeneration(
-            (progress) => {
+            progress => {
               if (progress.description) {
                 setProgressMessage(progress.description);
               }
             },
             weatherParams,
-            idempotencyKey,
+            idempotencyKey
           );
         } else {
           jobId = await wardrobeRepository.submitOutfitGeneration(weatherParams, idempotencyKey);
@@ -174,7 +177,7 @@ export const MoodBoardScreen: React.FC = () => {
           }
           outfits = result.outfits ?? [];
         }
-      } catch (submitError) {
+      } catch {
         // Async not available -- fall back to sync
         console.log('[MoodBoard] Async generation unavailable, falling back to sync');
         outfits = await wardrobeRepository.getOutfits(weatherParams);
@@ -195,7 +198,7 @@ export const MoodBoardScreen: React.FC = () => {
       // feedback events can identify which member of the batch they refer
       // to. Scope is this generation only; IDs aren't persisted beyond the
       // save call. Collisions within a batch are effectively impossible.
-      const stamped = outfits.map((o) => ({
+      const stamped = outfits.map(o => ({
         ...o,
         id: o.id ?? `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
       }));
@@ -213,53 +216,66 @@ export const MoodBoardScreen: React.FC = () => {
         'Generation Failed',
         e instanceof Error ? e.message : 'Failed to generate outfits.',
         [
-          { text: 'Cancel', style: 'cancel', onPress: () => setScreenState(todayBoard ? 'saved' : 'empty') },
-          { text: 'Retry', onPress: () => { void handleGeneratePress(); } },
-        ],
+          {
+            text: 'Cancel',
+            style: 'cancel',
+            onPress: () => setScreenState(todayBoard ? 'saved' : 'empty'),
+          },
+          {
+            text: 'Retry',
+            onPress: () => {
+              void handleGeneratePress();
+            },
+          },
+        ]
       );
     }
   };
 
-  const handleSelectOutfit = useCallback(async (outfit: Outfit) => {
-    setIsSaving(true);
-    try {
-      // Capture a PNG of the collage exactly as the user sees it — this is
-      // what the calendar will render as the "hero" image for the saved
-      // moodboard. The handle abstracts the native/web split. Best-effort:
-      // null on failure means we just send the save without boardImage and
-      // the calendar falls back to rendering from snapshots.
-      let boardImage: string | undefined;
-      const handle = outfit.id ? collageCaptureRefs.current[outfit.id] : null;
-      if (handle) {
-        const captured = await handle.capture();
-        boardImage = captured ?? undefined;
-      }
+  const handleSelectOutfit = useCallback(
+    async (outfit: Outfit) => {
+      setIsSaving(true);
+      try {
+        // Capture a PNG of the collage exactly as the user sees it — this is
+        // what the calendar will render as the "hero" image for the saved
+        // moodboard. The handle abstracts the native/web split. Best-effort:
+        // null on failure means we just send the save without boardImage and
+        // the calendar falls back to rendering from snapshots.
+        let boardImage: string | undefined;
+        const handle = outfit.id ? collageCaptureRefs.current[outfit.id] : null;
+        if (handle) {
+          const captured = await handle.capture();
+          boardImage = captured ?? undefined;
+        }
 
-      // Forward the full generatedBatch plus jobId so the server-side
-      // feedback emit captures the rejected members of this generation.
-      // Without the batch, a saved event records only the pick — training
-      // can't reconstruct preference pairs from that alone.
-      const saved = await moodBoardRepository.save(outfit, {
-        date: today,
-        generatedBatch: outfitOptions,
-        jobId: currentJobId,
-        boardImage,
-      });
-      setTodayBoard(saved);
-      setScreenState('saved');
-    } catch {
-      Alert.alert(
-        'Save Failed',
-        'Failed to save moodboard.',
-        [
+        // Forward the full generatedBatch plus jobId so the server-side
+        // feedback emit captures the rejected members of this generation.
+        // Without the batch, a saved event records only the pick — training
+        // can't reconstruct preference pairs from that alone.
+        const saved = await moodBoardRepository.save(outfit, {
+          date: today,
+          generatedBatch: outfitOptions,
+          jobId: currentJobId,
+          boardImage,
+        });
+        setTodayBoard(saved);
+        setScreenState('saved');
+      } catch {
+        Alert.alert('Save Failed', 'Failed to save moodboard.', [
           { text: 'OK' },
-          { text: 'Retry', onPress: () => { void handleSelectOutfit(outfit); } },
-        ],
-      );
-    } finally {
-      setIsSaving(false);
-    }
-  }, [outfitOptions, today, currentJobId]);
+          {
+            text: 'Retry',
+            onPress: () => {
+              void handleSelectOutfit(outfit);
+            },
+          },
+        ]);
+      } finally {
+        setIsSaving(false);
+      }
+    },
+    [outfitOptions, today, currentJobId]
+  );
 
   // Items available to swap into the current outfit (same category, not already in outfit).
   const swapCandidates = useMemo(() => {
@@ -271,7 +287,7 @@ export const MoodBoardScreen: React.FC = () => {
     const targetZone = classifyZone(targetItem.category);
     const usedIds = new Set(outfit.items);
     return Array.from(itemMap.values()).filter(
-      item => !usedIds.has(item.id) && classifyZone(item.category) === targetZone,
+      item => !usedIds.has(item.id) && classifyZone(item.category) === targetZone
     );
   }, [swapTarget, outfitOptions, itemMap]);
 
@@ -280,16 +296,19 @@ export const MoodBoardScreen: React.FC = () => {
   // suggestions the user hasn't claimed yet). Decision is purely
   // by the snapshot's source tag — every item the LLM picks now
   // arrives with an entry in itemSnapshots, so the lookup is O(1).
-  const handleItemPress = useCallback((outfitIndex: number, itemId: string) => {
-    const outfit = outfitOptions[outfitIndex];
-    if (!outfit) return;
-    const snapshot = (outfit.itemSnapshots ?? outfit.snapshots ?? []).find((s) => s.id === itemId);
-    if (snapshot && snapshot.source === 'filler') {
-      setFillerTarget({ outfitIndex, snapshot });
-      return;
-    }
-    setSwapTarget({ outfitIndex, itemId });
-  }, [outfitOptions]);
+  const handleItemPress = useCallback(
+    (outfitIndex: number, itemId: string) => {
+      const outfit = outfitOptions[outfitIndex];
+      if (!outfit) return;
+      const snapshot = (outfit.itemSnapshots ?? outfit.snapshots ?? []).find(s => s.id === itemId);
+      if (snapshot && snapshot.source === 'filler') {
+        setFillerTarget({ outfitIndex, snapshot });
+        return;
+      }
+      setSwapTarget({ outfitIndex, itemId });
+    },
+    [outfitOptions]
+  );
 
   // "I have this in my wardrobe" → seed the default into the user's
   // wardrobe and rewrite this outfit's reference to the new wi_<hex>
@@ -301,15 +320,22 @@ export const MoodBoardScreen: React.FC = () => {
     setFillerActionPending(true);
     try {
       const newItem = await wardrobeRepository.claimArchetypeDefault(snapshot.id);
-      setOutfitOptions((prev) => {
+      setOutfitOptions(prev => {
         const next = [...prev];
         const o = { ...next[outfitIndex] };
-        o.items = o.items.map((id) => (id === snapshot.id ? newItem.id : id));
+        o.items = o.items.map(id => (id === snapshot.id ? newItem.id : id));
         if (o.itemSnapshots) {
-          o.itemSnapshots = o.itemSnapshots.map((s) =>
+          o.itemSnapshots = o.itemSnapshots.map(s =>
             s.id === snapshot.id
-              ? { id: newItem.id, category: newItem.category, label: newItem.label, imageUrl: newItem.imageUrl, pngImageUrl: newItem.pngImageUrl, source: 'owned' }
-              : s,
+              ? {
+                  id: newItem.id,
+                  category: newItem.category,
+                  label: newItem.label,
+                  imageUrl: newItem.imageUrl,
+                  pngImageUrl: newItem.pngImageUrl,
+                  source: 'owned',
+                }
+              : s
           );
         }
         if (o.layoutRoles && o.layoutRoles[snapshot.id]) {
@@ -345,12 +371,12 @@ export const MoodBoardScreen: React.FC = () => {
     setFillerActionPending(true);
     try {
       await wardrobeRepository.rejectArchetypeDefault(snapshot.id);
-      setOutfitOptions((prev) => {
+      setOutfitOptions(prev => {
         const next = [...prev];
         const o = { ...next[outfitIndex] };
-        o.items = o.items.filter((id) => id !== snapshot.id);
+        o.items = o.items.filter(id => id !== snapshot.id);
         if (o.itemSnapshots) {
-          o.itemSnapshots = o.itemSnapshots.filter((s) => s.id !== snapshot.id);
+          o.itemSnapshots = o.itemSnapshots.filter(s => s.id !== snapshot.id);
         }
         if (o.layoutRoles) {
           const { [snapshot.id]: _drop, ...rest } = o.layoutRoles;
@@ -399,32 +425,35 @@ export const MoodBoardScreen: React.FC = () => {
           archetype: topArchetypeOf(outfit),
         },
       })
-      .catch((err) => {
+      .catch(err => {
         console.warn('[MoodBoard] feedback: item_swapped failed', err);
       });
   };
 
-  const handleRateOutfit = useCallback((outfit: Outfit, direction: 'up' | 'down') => {
-    if (!outfit.id) return;
-    if (ratings[outfit.id]) return; // already rated — immutable per card
-    setRatings((prev) => ({ ...prev, [outfit.id!]: direction }));
+  const handleRateOutfit = useCallback(
+    (outfit: Outfit, direction: 'up' | 'down') => {
+      if (!outfit.id) return;
+      if (ratings[outfit.id]) return; // already rated — immutable per card
+      setRatings(prev => ({ ...prev, [outfit.id!]: direction }));
 
-    void feedbackRepository
-      .submit({
-        action: 'rated',
-        jobId: currentJobId,
-        chosenOutfitId: outfit.id,
-        rating: direction === 'up' ? 5 : 1,
-        generatedBatch: outfitOptions.map(outfitToSnapshot),
-        context: {
-          weather: weatherContextString(outfit),
-          archetype: topArchetypeOf(outfit),
-        },
-      })
-      .catch((err) => {
-        console.warn('[MoodBoard] feedback: rated failed', err);
-      });
-  }, [ratings, currentJobId, outfitOptions]);
+      void feedbackRepository
+        .submit({
+          action: 'rated',
+          jobId: currentJobId,
+          chosenOutfitId: outfit.id,
+          rating: direction === 'up' ? 5 : 1,
+          generatedBatch: outfitOptions.map(outfitToSnapshot),
+          context: {
+            weather: weatherContextString(outfit),
+            archetype: topArchetypeOf(outfit),
+          },
+        })
+        .catch(err => {
+          console.warn('[MoodBoard] feedback: rated failed', err);
+        });
+    },
+    [ratings, currentJobId, outfitOptions]
+  );
 
   // F2: stabilise renderItem so FlatList doesn't tear down + recreate
   // the card tree on every parent render. Combined with OutfitCard's
@@ -433,42 +462,61 @@ export const MoodBoardScreen: React.FC = () => {
   // cards to re-render their Collage subtree. The setSwapTarget,
   // collageCaptureRefs.current = {...}, and weather props are all
   // stable via useRef / useCallback / constant references.
-  const weatherDetail = useMemo(() =>
-    weather
-      ? {
-          location: weather.location,
-          highTemperature: weather.highTemperature,
-          lowTemperature: weather.lowTemperature,
-          unit: weather.unit,
-        }
-      : undefined,
-    [weather],
+  const weatherDetail = useMemo(
+    () =>
+      weather
+        ? {
+            location: weather.location,
+            highTemperature: weather.highTemperature,
+            lowTemperature: weather.lowTemperature,
+            unit: weather.unit,
+          }
+        : undefined,
+    [weather]
   );
 
-  const renderOutfitCard = useCallback(({ item, index }: { item: Outfit; index: number }) => (
-    <OutfitCard
-      outfit={item}
-      index={index}
-      total={outfitOptions.length}
-      itemMap={itemMap}
-      onSelect={() => { void handleSelectOutfit(item); }}
-      onItemPress={(itemId) => handleItemPress(index, itemId)}
-      isSaving={isSaving}
-      colorScheme={colorScheme}
-      cardHeight={cardHeight}
-      weatherDetail={weatherDetail}
-      onThumbsUp={() => handleRateOutfit(item, 'up')}
-      onThumbsDown={() => handleRateOutfit(item, 'down')}
-      rating={item.id ? (ratings[item.id] ?? null) : null}
-      collageCaptureRef={item.id
-        ? (handle) => {
-            if (item.id) {
-              collageCaptureRefs.current[item.id] = handle;
-            }
-          }
-        : undefined}
-    />
-  ), [outfitOptions.length, itemMap, handleSelectOutfit, isSaving, colorScheme, cardHeight, weatherDetail, handleRateOutfit, ratings, handleItemPress]);
+  const renderOutfitCard = useCallback(
+    ({ item, index }: { item: Outfit; index: number }) => (
+      <OutfitCard
+        outfit={item}
+        index={index}
+        total={outfitOptions.length}
+        itemMap={itemMap}
+        onSelect={() => {
+          void handleSelectOutfit(item);
+        }}
+        onItemPress={itemId => handleItemPress(index, itemId)}
+        isSaving={isSaving}
+        colorScheme={colorScheme}
+        cardHeight={cardHeight}
+        weatherDetail={weatherDetail}
+        onThumbsUp={() => handleRateOutfit(item, 'up')}
+        onThumbsDown={() => handleRateOutfit(item, 'down')}
+        rating={item.id ? (ratings[item.id] ?? null) : null}
+        collageCaptureRef={
+          item.id
+            ? handle => {
+                if (item.id) {
+                  collageCaptureRefs.current[item.id] = handle;
+                }
+              }
+            : undefined
+        }
+      />
+    ),
+    [
+      outfitOptions.length,
+      itemMap,
+      handleSelectOutfit,
+      isSaving,
+      colorScheme,
+      cardHeight,
+      weatherDetail,
+      handleRateOutfit,
+      ratings,
+      handleItemPress,
+    ]
+  );
 
   const renderContent = () => {
     switch (screenState) {
@@ -488,7 +536,9 @@ export const MoodBoardScreen: React.FC = () => {
             <GradientButton
               label="Generate"
               icon="sunrise"
-              onPress={() => { void handleGeneratePress(); }}
+              onPress={() => {
+                void handleGeneratePress();
+              }}
               testID="moodboard-generate"
               accessibilityLabel="Generate outfits"
             />
@@ -513,8 +563,7 @@ export const MoodBoardScreen: React.FC = () => {
           <View style={styles.choosingContainer}>
             <View
               style={styles.flatListContainer}
-              onLayout={e => setCardHeight(e.nativeEvent.layout.height)}
-            >
+              onLayout={e => setCardHeight(e.nativeEvent.layout.height)}>
               <FlatList
                 data={outfitOptions}
                 horizontal
@@ -541,7 +590,9 @@ export const MoodBoardScreen: React.FC = () => {
                   key={i}
                   style={[
                     styles.dot,
-                    { backgroundColor: i === activeIndex ? textColor : fills.tertiary[colorScheme] },
+                    {
+                      backgroundColor: i === activeIndex ? textColor : fills.tertiary[colorScheme],
+                    },
                   ]}
                 />
               ))}
@@ -556,7 +607,9 @@ export const MoodBoardScreen: React.FC = () => {
             board={todayBoard}
             itemMap={itemMap}
             colorScheme={colorScheme}
-            onRegenerate={() => { void handleGeneratePress(); }}
+            onRegenerate={() => {
+              void handleGeneratePress();
+            }}
           />
         );
 
@@ -568,23 +621,16 @@ export const MoodBoardScreen: React.FC = () => {
   return (
     <SafeAreaView style={[styles.container, { backgroundColor }]} edges={['top']}>
       <View style={[styles.content, { paddingBottom: tabBottomPadding }]}>
-        <View style={styles.mainContent}>
-          {renderContent()}
-        </View>
+        <View style={styles.mainContent}>{renderContent()}</View>
       </View>
 
       {/* Swap item modal */}
-      <Modal
-        visible={swapTarget !== null}
-        title="Swap item"
-        onDismiss={() => setSwapTarget(null)}
-      >
+      <Modal visible={swapTarget !== null} title="Swap item" onDismiss={() => setSwapTarget(null)}>
         {swapTarget && (
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.swapList}
-          >
+            contentContainerStyle={styles.swapList}>
             {swapCandidates.length === 0 ? (
               <Text style={[styles.swapEmpty, { color: labels.tertiary[colorScheme] }]}>
                 No alternatives in this category
@@ -604,8 +650,7 @@ export const MoodBoardScreen: React.FC = () => {
                     onPress={() => handleSwapItem(candidate.id)}
                     accessibilityRole="button"
                     accessibilityLabel={`Swap with ${candidate.label}`}
-                    accessibilityHint="Replaces the selected garment in this outfit"
-                  >
+                    accessibilityHint="Replaces the selected garment in this outfit">
                     {imgUrl ? (
                       <Image
                         source={{ uri: imgUrl }}
@@ -616,10 +661,7 @@ export const MoodBoardScreen: React.FC = () => {
                     ) : (
                       <Icon name="closet" size={28} color={labels.tertiary[colorScheme]} />
                     )}
-                    <Text
-                      style={[styles.swapLabel, { color: textColor }]}
-                      numberOfLines={2}
-                    >
+                    <Text style={[styles.swapLabel, { color: textColor }]} numberOfLines={2}>
                       {candidate.label}
                     </Text>
                   </Pressable>
@@ -636,14 +678,17 @@ export const MoodBoardScreen: React.FC = () => {
       <Modal
         visible={fillerTarget !== null}
         title="Stylist suggestion"
-        onDismiss={() => { if (!fillerActionPending) setFillerTarget(null); }}
-      >
+        onDismiss={() => {
+          if (!fillerActionPending) setFillerTarget(null);
+        }}>
         {fillerTarget && (
           <View style={styles.fillerSheet}>
             <View style={[styles.fillerPreview, { backgroundColor: fills.tertiary[colorScheme] }]}>
               {fillerTarget.snapshot.imageUrl ? (
                 <Image
-                  source={{ uri: fillerTarget.snapshot.pngImageUrl || fillerTarget.snapshot.imageUrl }}
+                  source={{
+                    uri: fillerTarget.snapshot.pngImageUrl || fillerTarget.snapshot.imageUrl,
+                  }}
                   style={styles.fillerImage}
                   contentFit="contain"
                   cachePolicy="memory-disk"
@@ -651,44 +696,53 @@ export const MoodBoardScreen: React.FC = () => {
               ) : (
                 <Icon name="closet" size={32} color={labels.tertiary[colorScheme]} />
               )}
-              <Text
-                style={[styles.fillerLabel, { color: textColor }]}
-                numberOfLines={2}
-              >
+              <Text style={[styles.fillerLabel, { color: textColor }]} numberOfLines={2}>
                 {fillerTarget.snapshot.label}
               </Text>
-              <Text
-                style={[styles.fillerCategory, { color: labels.tertiary[colorScheme] }]}
-              >
+              <Text style={[styles.fillerCategory, { color: labels.tertiary[colorScheme] }]}>
                 {fillerTarget.snapshot.category}
               </Text>
             </View>
             <Text style={[styles.fillerExplain, { color: labels.secondary[colorScheme] }]}>
-              This is a stylist suggestion, not yet in your wardrobe.
-              Tell us if you actually own it.
+              This is a stylist suggestion, not yet in your wardrobe. Tell us if you actually own
+              it.
             </Text>
             <Pressable
-              style={[styles.fillerAction, styles.fillerActionPrimary, { backgroundColor: button.primary.background[colorScheme] }]}
-              onPress={() => { void handleClaimFiller(); }}
+              style={[
+                styles.fillerAction,
+                styles.fillerActionPrimary,
+                { backgroundColor: button.primary.background[colorScheme] },
+              ]}
+              onPress={() => {
+                void handleClaimFiller();
+              }}
               disabled={fillerActionPending}
               accessibilityRole="button"
               accessibilityLabel="I have this in my wardrobe"
               accessibilityHint="Adds the item to your closet so it stays in future outfits"
-              testID="filler-claim"
-            >
-              <Text style={[styles.fillerActionLabel, { color: button.primary.foreground[colorScheme] }]}>
-                {fillerActionPending ? 'Adding…' : "I have this — add to wardrobe"}
+              testID="filler-claim">
+              <Text
+                style={[
+                  styles.fillerActionLabel,
+                  { color: button.primary.foreground[colorScheme] },
+                ]}>
+                {fillerActionPending ? 'Adding…' : 'I have this — add to wardrobe'}
               </Text>
             </Pressable>
             <Pressable
-              style={[styles.fillerAction, styles.fillerActionSecondary, { borderColor: labels.tertiary[colorScheme] }]}
-              onPress={() => { void handleRejectFiller(); }}
+              style={[
+                styles.fillerAction,
+                styles.fillerActionSecondary,
+                { borderColor: labels.tertiary[colorScheme] },
+              ]}
+              onPress={() => {
+                void handleRejectFiller();
+              }}
               disabled={fillerActionPending}
               accessibilityRole="button"
               accessibilityLabel="Not in my wardrobe"
               accessibilityHint="Hides this item from future outfit suggestions"
-              testID="filler-reject"
-            >
+              testID="filler-reject">
               <Text style={[styles.fillerActionLabel, { color: textColor }]}>
                 {fillerActionPending ? '…' : 'Not in my wardrobe'}
               </Text>

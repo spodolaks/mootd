@@ -1,0 +1,5 @@
+# Generated API types — output of @hey-api/openapi-ts (`npm run gen`).
+# Owned by the generator; reformatting them by hand gets clobbered on
+# regen and would break `npm run gen:check`. Mirrors the lint exemption
+# in eslint.config.js (same posture as backend/internal/usergen).
+src/data/api/generated/

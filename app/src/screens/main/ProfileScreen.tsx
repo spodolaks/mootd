@@ -1,26 +1,12 @@
 import React from 'react';
-import {
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Image } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { Icon, Button } from '@/src/components';
+import { Icon } from '@/src/components';
 import { useColorScheme } from '@/src/hooks';
 import { useAuthStore, usePreferencesStore, useDetectionJobStore } from '@/src/store';
-import {
-  accents,
-  backgrounds,
-  button,
-  fills,
-  grays,
-  labels,
-  separators,
-} from '@/src/theme/colors';
+import { accents, backgrounds, grays, labels, separators } from '@/src/theme/colors';
 import { typography } from '@/src/theme/typography';
 import { useTabContentBottomPadding } from '@/app/(main)/_layout';
 
@@ -28,17 +14,15 @@ export const ProfileScreen: React.FC = () => {
   const colorScheme = useColorScheme() ?? 'light';
   const tabBottomPadding = useTabContentBottomPadding();
   const router = useRouter();
-  const user = useAuthStore((s) => s.user);
-  const session = useAuthStore((s) => s.session);
-  const signOut = useAuthStore((s) => s.signOut);
-  const hasActiveJob = useDetectionJobStore((s) => s.hasActiveJob);
-  const jobCount = useDetectionJobStore((s) => s.jobs.length);
-  const customDisplayName = usePreferencesStore((s) => s.displayName);
-  const persistedEmail = usePreferencesStore((s) => s.email);
+  const user = useAuthStore(s => s.user);
+  const session = useAuthStore(s => s.session);
+  const signOut = useAuthStore(s => s.signOut);
+  const hasActiveJob = useDetectionJobStore(s => s.hasActiveJob);
+  const jobCount = useDetectionJobStore(s => s.jobs.length);
+  const customDisplayName = usePreferencesStore(s => s.displayName);
 
   // Prefer the user-edited display name, fall back to Google profile name
   const displayName = customDisplayName || user?.name || 'Unknown User';
-  const email = user?.email || persistedEmail || '';
 
   const backgroundColor = backgrounds.primary[colorScheme];
   const textColor = labels.primary[colorScheme];
@@ -56,14 +40,15 @@ export const ProfileScreen: React.FC = () => {
   };
 
   // First letter(s) of display name for fallback avatar
-  const initials = displayName !== 'Unknown User'
-    ? displayName
-        .split(' ')
-        .map((n) => n[0])
-        .join('')
-        .toUpperCase()
-        .slice(0, 2)
-    : '?';
+  const initials =
+    displayName !== 'Unknown User'
+      ? displayName
+          .split(' ')
+          .map(n => n[0])
+          .join('')
+          .toUpperCase()
+          .slice(0, 2)
+      : '?';
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor }]} edges={['top']}>
@@ -75,25 +60,22 @@ export const ProfileScreen: React.FC = () => {
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={[styles.scrollContent, { paddingBottom: tabBottomPadding }]}
-        showsVerticalScrollIndicator={false}
-      >
+        showsVerticalScrollIndicator={false}>
         {/* Avatar + Name Section */}
         <View style={styles.profileSection}>
           {user?.avatarUrl ? (
-            <Image source={{ uri: user.avatarUrl }} style={styles.avatar} cachePolicy="memory-disk" />
+            <Image
+              source={{ uri: user.avatarUrl }}
+              style={styles.avatar}
+              cachePolicy="memory-disk"
+            />
           ) : (
             <View style={[styles.avatarFallback, { backgroundColor: cardBg }]}>
-              <Text style={[styles.avatarInitials, { color: textColor }]}>
-                {initials}
-              </Text>
+              <Text style={[styles.avatarInitials, { color: textColor }]}>{initials}</Text>
             </View>
           )}
-          <Text style={[styles.userName, { color: textColor }]}>
-            {displayName}
-          </Text>
-          <Text style={[styles.userEmail, { color: secondaryText }]}>
-            {user?.email ?? ''}
-          </Text>
+          <Text style={[styles.userName, { color: textColor }]}>{displayName}</Text>
+          <Text style={[styles.userEmail, { color: secondaryText }]}>{user?.email ?? ''}</Text>
           {session?.mode && (
             <View style={[styles.modeBadge, { backgroundColor: cardBg }]}>
               <Text style={[styles.modeBadgeText, { color: tertiaryText }]}>
@@ -162,12 +144,8 @@ export const ProfileScreen: React.FC = () => {
         <View style={styles.signOutSection}>
           <Pressable
             style={[styles.signOutButton, { backgroundColor: cardBg }]}
-            onPress={handleSignOut}
-        
-          >
-            <Text style={[styles.signOutText, { color: dangerColor }]}>
-              Sign Out
-            </Text>
+            onPress={handleSignOut}>
+            <Text style={[styles.signOutText, { color: dangerColor }]}>Sign Out</Text>
           </Pressable>
         </View>
       </ScrollView>
@@ -197,10 +175,7 @@ const MenuItem: React.FC<MenuItemProps> = ({
   onPress,
 }) => (
   <>
-    <Pressable
-      style={styles.menuItem}
-      onPress={onPress}
-    >
+    <Pressable style={styles.menuItem} onPress={onPress}>
       <Icon name={icon} size={20} color={textColor} />
       <Text style={[styles.menuItemText, { color: textColor }]}>{label}</Text>
       {badge && (
@@ -210,9 +185,7 @@ const MenuItem: React.FC<MenuItemProps> = ({
       )}
       <Icon name="chevron-right" size={16} color={textColor} />
     </Pressable>
-    {showDivider && (
-      <View style={[styles.divider, { backgroundColor: dividerColor }]} />
-    )}
+    {showDivider && <View style={[styles.divider, { backgroundColor: dividerColor }]} />}
   </>
 );
 
