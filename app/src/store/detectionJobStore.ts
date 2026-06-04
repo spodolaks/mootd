@@ -46,7 +46,7 @@ export const useDetectionJobStore = create<DetectionJobState>((set, get) => ({
       completedAt: null,
     };
 
-    set((state) => ({ jobs: [job, ...state.jobs] }));
+    set(state => ({ jobs: [job, ...state.jobs] }));
 
     // Run detection in background. Two-phase: submit once (cheap, <1 s),
     // then poll every 3 s until the server reports completed/failed. Falls
@@ -55,15 +55,13 @@ export const useDetectionJobStore = create<DetectionJobState>((set, get) => ({
     // implemented submit yet).
     void (async () => {
       const updateStatus = (text: string) =>
-        set((state) => ({
-          jobs: state.jobs.map((j) =>
-            j.id === jobId ? { ...j, statusText: text } : j
-          ),
+        set(state => ({
+          jobs: state.jobs.map(j => (j.id === jobId ? { ...j, statusText: text } : j)),
         }));
 
       const markCompleted = (result: ClothingDetectionResult) =>
-        set((state) => ({
-          jobs: state.jobs.map((j) =>
+        set(state => ({
+          jobs: state.jobs.map(j =>
             j.id === jobId
               ? {
                   ...j,
@@ -77,8 +75,8 @@ export const useDetectionJobStore = create<DetectionJobState>((set, get) => ({
         }));
 
       const markFailed = (msg: string) =>
-        set((state) => ({
-          jobs: state.jobs.map((j) =>
+        set(state => ({
+          jobs: state.jobs.map(j =>
             j.id === jobId
               ? {
                   ...j,
@@ -117,7 +115,7 @@ export const useDetectionJobStore = create<DetectionJobState>((set, get) => ({
         const pollDeadline = Date.now() + 5 * 60 * 1000;
 
         while (Date.now() < pollDeadline) {
-          await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+          await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
           const poll = await wardrobeRepository.pollDetectionJob(serverJobId);
 
           if (poll.status === 'completed') {
@@ -147,17 +145,17 @@ export const useDetectionJobStore = create<DetectionJobState>((set, get) => ({
 
   consumeCompleted: () => {
     const state = get();
-    const completed = state.jobs.find((j) => j.status === 'completed');
+    const completed = state.jobs.find(j => j.status === 'completed');
     return completed ?? null;
   },
 
   dismissJob: (jobId: string) => {
-    set((state) => ({
-      jobs: state.jobs.filter((j) => j.id !== jobId),
+    set(state => ({
+      jobs: state.jobs.filter(j => j.id !== jobId),
     }));
   },
 
   hasActiveJob: () => {
-    return get().jobs.some((j) => j.status === 'detecting');
+    return get().jobs.some(j => j.status === 'detecting');
   },
 }));

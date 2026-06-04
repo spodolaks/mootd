@@ -31,7 +31,7 @@ export const Skeleton: React.FC<{ style?: ViewStyle }> = ({ style }) => {
     opacity.value = withRepeat(
       withTiming(0.25, { duration: 600 }),
       -1, // infinite
-      true, // reverse → 0.6 ↔ 0.25 ping-pong
+      true // reverse → 0.6 ↔ 0.25 ping-pong
     );
     return () => {
       cancelAnimation(opacity);

@@ -53,7 +53,12 @@ export class MockWardrobeRepository implements IWardrobeRepository {
     return { status: 'completed', items: this.mockItems };
   }
 
-  async updateItem(_id: string, _traits: Record<string, string>, _label?: string, _imageUrl?: string): Promise<void> {
+  async updateItem(
+    _id: string,
+    _traits: Record<string, string>,
+    _label?: string,
+    _imageUrl?: string
+  ): Promise<void> {
     await this.delay(300);
   }
 
@@ -61,7 +66,10 @@ export class MockWardrobeRepository implements IWardrobeRepository {
     await this.delay(300);
   }
 
-  async getItems(_params?: { limit?: number; cursor?: string }): Promise<{ items: WardrobeItem[]; nextCursor: string | null }> {
+  async getItems(_params?: {
+    limit?: number;
+    cursor?: string;
+  }): Promise<{ items: WardrobeItem[]; nextCursor: string | null }> {
     await this.delay(500);
     return {
       items: [
@@ -106,13 +114,17 @@ export class MockWardrobeRepository implements IWardrobeRepository {
 
   async submitOutfitGeneration(
     _weather?: { temperature: number; condition: string; unit: string },
-    _idempotencyKey?: string,
+    _idempotencyKey?: string
   ): Promise<string> {
     await this.delay(500);
     return 'mock_job_' + Date.now();
   }
 
-  async pollOutfitJob(_jobId: string): Promise<{ status: 'pending' | 'processing' | 'completed' | 'failed'; outfits?: Outfit[]; error?: string }> {
+  async pollOutfitJob(_jobId: string): Promise<{
+    status: 'pending' | 'processing' | 'completed' | 'failed';
+    outfits?: Outfit[];
+    error?: string;
+  }> {
     await this.delay(2000);
     return { status: 'completed', outfits: [] };
   }
@@ -124,7 +136,7 @@ export class MockWardrobeRepository implements IWardrobeRepository {
   async streamOutfitGeneration(
     onProgress: (p: import('@/src/domain/interfaces/IWardrobeRepository').OutfitProgress) => void,
     _weather?: { temperature: number; condition: string; unit: string },
-    _idempotencyKey?: string,
+    _idempotencyKey?: string
   ): Promise<Outfit[]> {
     onProgress({ stage: 'connecting' });
     await this.delay(800);
@@ -140,7 +152,11 @@ export class MockWardrobeRepository implements IWardrobeRepository {
     return [];
   }
 
-  async getOutfits(_weather?: { temperature: number; condition: string; unit: string }): Promise<Outfit[]> {
+  async getOutfits(_weather?: {
+    temperature: number;
+    condition: string;
+    unit: string;
+  }): Promise<Outfit[]> {
     await this.delay(300);
     return [];
   }

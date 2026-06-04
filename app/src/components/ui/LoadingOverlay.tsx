@@ -7,9 +7,7 @@ export interface LoadingOverlayProps {
   message?: string;
 }
 
-export const LoadingOverlay: React.FC<LoadingOverlayProps> = ({
-  message = 'Loading…',
-}) => (
+export const LoadingOverlay: React.FC<LoadingOverlayProps> = ({ message = 'Loading…' }) => (
   <View style={styles.overlay}>
     <View style={styles.box}>
       <ActivityIndicator size="large" color="#007AFF" />

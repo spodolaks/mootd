@@ -1,6 +1,6 @@
-export type { IAuthRepository, GoogleOAuthParams } from "./IAuthRepository";
-export type { IWardrobeRepository } from "./IWardrobeRepository";
-export type { IBrandsRepository } from "./IBrandsRepository";
+export type { IAuthRepository, GoogleOAuthParams } from './IAuthRepository';
+export type { IWardrobeRepository } from './IWardrobeRepository';
+export type { IBrandsRepository } from './IBrandsRepository';
 export type { IMoodBoardRepository, SaveOptions } from './IMoodBoardRepository';
 export type {
   IFeedbackRepository,
@@ -9,8 +9,4 @@ export type {
   FeedbackOutfitSnapshot,
   FeedbackSubmitRequest,
 } from './IFeedbackRepository';
-export {
-  outfitToSnapshot,
-  topArchetypeOf,
-  weatherContextString,
-} from './IFeedbackRepository';
+export { outfitToSnapshot, topArchetypeOf, weatherContextString } from './IFeedbackRepository';

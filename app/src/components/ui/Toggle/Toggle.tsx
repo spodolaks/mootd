@@ -60,10 +60,7 @@ export const Toggle: React.FC<ToggleProps> = ({
   };
 
   return (
-    <Pressable
-      onPress={handlePress}
-      disabled={disabled}
-      style={[styles.container, style]}>
+    <Pressable onPress={handlePress} disabled={disabled} style={[styles.container, style]}>
       <View
         style={[
           styles.track,

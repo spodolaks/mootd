@@ -21,7 +21,7 @@ export function useConnectivity(): {
 
   useEffect(() => {
     let sub: NetInfoSubscription | undefined;
-    sub = NetInfo.addEventListener((state) => {
+    sub = NetInfo.addEventListener(state => {
       // null → assume connected (dev simulators sometimes report
       // null on first tick); only flip to offline on an explicit
       // false. NetInfo's docs hedge on this — being conservative

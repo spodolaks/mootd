@@ -74,10 +74,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
               accessibilityLabel="Sign in with Google"
             />
             {errorMessage ? (
-              <Text
-                variant="footnote"
-                style={[styles.errorText, { color: errorColor }]}
-              >
+              <Text variant="footnote" style={[styles.errorText, { color: errorColor }]}>
                 {errorMessage}
               </Text>
             ) : null}

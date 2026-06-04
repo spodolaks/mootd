@@ -1,13 +1,27 @@
 import type { OutfitWeather } from '@/src/domain';
 
 export const CONDITION_ICON: Record<string, string> = {
-  clear: '☀', sunny: '☀', sun: '☀',
-  cloud: '☁', cloudy: '☁', overcast: '☁',
-  rain: '☂', rainy: '☂', drizzle: '☂', shower: '☂',
-  snow: '❄', snowy: '❄', sleet: '❄',
-  storm: '⚡', thunder: '⚡',
-  fog: '☷', foggy: '☷', mist: '☷', haze: '☷',
-  wind: '≈', windy: '≈',
+  clear: '☀',
+  sunny: '☀',
+  sun: '☀',
+  cloud: '☁',
+  cloudy: '☁',
+  overcast: '☁',
+  rain: '☂',
+  rainy: '☂',
+  drizzle: '☂',
+  shower: '☂',
+  snow: '❄',
+  snowy: '❄',
+  sleet: '❄',
+  storm: '⚡',
+  thunder: '⚡',
+  fog: '☷',
+  foggy: '☷',
+  mist: '☷',
+  haze: '☷',
+  wind: '≈',
+  windy: '≈',
 };
 
 export const conditionIcon = (condition?: string): string => {

@@ -1030,14 +1030,7 @@ export function Icon({ name, size = 24, color = '#000000', style }: IconProps) {
               strokeLinejoin={strokeLinejoin}
               fill="none"
             />
-            <Circle
-              cx={12}
-              cy={12}
-              r={4}
-              stroke={color}
-              strokeWidth={strokeWidth}
-              fill="none"
-            />
+            <Circle cx={12} cy={12} r={4} stroke={color} strokeWidth={strokeWidth} fill="none" />
             <Circle cx={17.5} cy={6.5} r={1} fill={color} />
           </>
         );
@@ -1069,8 +1062,7 @@ export function Icon({ name, size = 24, color = '#000000', style }: IconProps) {
       viewBox="0 0 24 24"
       fill="none"
       style={style}
-      pointerEvents="none"
-    >
+      pointerEvents="none">
       {renderIcon()}
     </Svg>
   );

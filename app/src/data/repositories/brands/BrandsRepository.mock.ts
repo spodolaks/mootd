@@ -1,6 +1,6 @@
 import type { IBrandsRepository } from '@/src/domain';
 
-const MOCK_BRANDS = ['Nike', 'Adidas', 'Zara', 'H&M', 'Gucci', 'Prada', 'Levi\'s', 'Uniqlo'];
+const MOCK_BRANDS = ['Nike', 'Adidas', 'Zara', 'H&M', 'Gucci', 'Prada', "Levi's", 'Uniqlo'];
 
 export class MockBrandsRepository implements IBrandsRepository {
   private saved = new Set<string>();

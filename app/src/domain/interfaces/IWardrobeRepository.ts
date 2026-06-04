@@ -1,4 +1,9 @@
-import type { ClothingDetectionResult, ClothingSearchProduct, Outfit, WardrobeItem } from '../models';
+import type {
+  ClothingDetectionResult,
+  ClothingSearchProduct,
+  Outfit,
+  WardrobeItem,
+} from '../models';
 
 /**
  * One snapshot of an in-flight outfit generation (mootd#62).
@@ -52,7 +57,10 @@ export interface IWardrobeRepository {
    * @param params.cursor - Cursor for the next page (from a previous response)
    * @returns Items for the current page and a cursor for the next page (null if no more)
    */
-  getItems(params?: { limit?: number; cursor?: string }): Promise<{ items: WardrobeItem[]; nextCursor: string | null }>;
+  getItems(params?: {
+    limit?: number;
+    cursor?: string;
+  }): Promise<{ items: WardrobeItem[]; nextCursor: string | null }>;
 
   /**
    * Fetch the caller's complete wardrobe by walking every page of
@@ -72,7 +80,12 @@ export interface IWardrobeRepository {
    * Update a wardrobe item's traits and optionally its label and image URL.
    * label and imageUrl are only sent when the user selected a search product.
    */
-  updateItem(id: string, traits: Record<string, string>, label?: string, imageUrl?: string): Promise<void>;
+  updateItem(
+    id: string,
+    traits: Record<string, string>,
+    label?: string,
+    imageUrl?: string
+  ): Promise<void>;
 
   /**
    * Permanently remove a wardrobe item by ID.
@@ -96,13 +109,17 @@ export interface IWardrobeRepository {
    */
   submitOutfitGeneration(
     weather?: { temperature: number; condition: string; unit: string },
-    idempotencyKey?: string,
+    idempotencyKey?: string
   ): Promise<string>;
 
   /**
    * Poll an outfit generation job. Returns status + outfits when complete.
    */
-  pollOutfitJob(jobId: string): Promise<{ status: 'pending' | 'processing' | 'completed' | 'failed'; outfits?: Outfit[]; error?: string }>;
+  pollOutfitJob(jobId: string): Promise<{
+    status: 'pending' | 'processing' | 'completed' | 'failed';
+    outfits?: Outfit[];
+    error?: string;
+  }>;
 
   /**
    * Stream outfit generation via SSE (mootd#62). Calls
@@ -120,7 +137,7 @@ export interface IWardrobeRepository {
   streamOutfitGeneration?(
     onProgress: (p: OutfitProgress) => void,
     weather?: { temperature: number; condition: string; unit: string },
-    idempotencyKey?: string,
+    idempotencyKey?: string
   ): Promise<Outfit[]>;
 
   /**

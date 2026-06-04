@@ -6,14 +6,7 @@ import { useWardrobeStore } from '@/src/store';
 import { backgrounds, fills, labels } from '@/src/theme/colors';
 import { radius } from '@/src/theme/radius';
 import React, { useEffect, useMemo, useState } from 'react';
-import {
-  Image,
-  Keyboard,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  View,
-} from 'react-native';
+import { Image, Keyboard, Platform, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 interface TraitSelectionScreenProps {
@@ -29,14 +22,8 @@ export const TraitSelectionScreen: React.FC<TraitSelectionScreenProps> = ({
 }) => {
   const colorScheme = useColorScheme() ?? 'light';
 
-  const {
-    items,
-    currentStepIndex,
-    getTotalSteps,
-    setTraitValue,
-    nextStep,
-    isLastStep,
-  } = useWardrobeStore();
+  const { items, currentStepIndex, getTotalSteps, setTraitValue, nextStep, isLastStep } =
+    useWardrobeStore();
 
   const currentItem = items[currentStepIndex] ?? null;
 
@@ -51,7 +38,7 @@ export const TraitSelectionScreen: React.FC<TraitSelectionScreenProps> = ({
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
     const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
 
-    const showSub = Keyboard.addListener(showEvent, (e) => {
+    const showSub = Keyboard.addListener(showEvent, e => {
       setKeyboardHeight(e.endCoordinates.height);
     });
     const hideSub = Keyboard.addListener(hideEvent, () => {
@@ -84,7 +71,7 @@ export const TraitSelectionScreen: React.FC<TraitSelectionScreenProps> = ({
   const hasAnyTraitFilled = useMemo(() => {
     if (!currentItem) return false;
     return currentItem.traits.some(
-      (trait) => trait.selectedValue !== null && trait.selectedValue.trim() !== ''
+      trait => trait.selectedValue !== null && trait.selectedValue.trim() !== ''
     );
   }, [currentItem]);
 
@@ -141,14 +128,13 @@ export const TraitSelectionScreen: React.FC<TraitSelectionScreenProps> = ({
 
         <ScrollView
           style={styles.scrollView}
-          contentContainerStyle={[styles.scrollContent, { paddingBottom: keyboardHeight > 0 ? keyboardHeight - 60 : 16 }]}
+          contentContainerStyle={[
+            styles.scrollContent,
+            { paddingBottom: keyboardHeight > 0 ? keyboardHeight - 60 : 16 },
+          ]}
           showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-        >
-          <Text
-            variant="body"
-            style={[styles.itemCounter, { color: secondaryTextColor }]}
-          >
+          keyboardShouldPersistTaps="handled">
+          <Text variant="body" style={[styles.itemCounter, { color: secondaryTextColor }]}>
             Item {currentStepIndex + 1} of {totalSteps}
           </Text>
 
@@ -178,19 +164,18 @@ export const TraitSelectionScreen: React.FC<TraitSelectionScreenProps> = ({
             </Text>
             <Text
               variant="subheadline"
-              style={[styles.traitsDescription, { color: secondaryTextColor }]}
-            >
+              style={[styles.traitsDescription, { color: secondaryTextColor }]}>
               Check the traits and.....
             </Text>
           </View>
 
-          {currentItem.traits.map((trait) => (
+          {currentItem.traits.map(trait => (
             <Input
               key={trait.id}
               title={trait.name}
               placeholder={`Enter ${trait.name.toLowerCase()}`}
               value={trait.selectedValue ?? ''}
-              onChangeText={(value) => handleTraitChange(trait.id, value)}
+              onChangeText={value => handleTraitChange(trait.id, value)}
             />
           ))}
         </ScrollView>

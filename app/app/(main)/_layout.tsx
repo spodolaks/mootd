@@ -62,8 +62,7 @@ function FloatingPillTabBar({ state, descriptors: _descriptors, navigation }: Bo
       // The absolute pill spans the full width via side margins, but only the
       // pill itself should receive taps — `box-none` lets taps pass through
       // the surrounding gap to the content underneath.
-      pointerEvents="box-none"
-    >
+      pointerEvents="box-none">
       <View style={styles.pillInner} pointerEvents="auto">
         {state.routes.map((route, index) => {
           const isFocused = state.index === index;
@@ -89,8 +88,7 @@ function FloatingPillTabBar({ state, descriptors: _descriptors, navigation }: Bo
               accessibilityRole="button"
               accessibilityState={isFocused ? { selected: true } : {}}
               accessibilityLabel={config.label}
-              testID={`tab-${route.name}`}
-            >
+              testID={`tab-${route.name}`}>
               <AddTab icon={config.icon} label={config.label} selected={isFocused} />
             </Pressable>
           );
@@ -104,7 +102,7 @@ export default function MainTabLayout() {
   return (
     <Tabs
       initialRouteName="moodboard"
-      tabBar={(props) => <FloatingPillTabBar {...props} />}
+      tabBar={props => <FloatingPillTabBar {...props} />}
       screenOptions={{
         headerShown: false,
         // `position: absolute` tells react-navigation not to reserve height
@@ -112,8 +110,7 @@ export default function MainTabLayout() {
         // Screens with a fixed-bottom CTA should add PILL_GUTTER to their
         // own bottom padding so the button isn't hidden.
         tabBarStyle: { position: 'absolute' },
-      }}
-    >
+      }}>
       <Tabs.Screen name="moodboard" />
       <Tabs.Screen name="wardrobe" />
       <Tabs.Screen name="calendar" />
@@ -145,7 +142,7 @@ const styles = StyleSheet.create({
       web: {
         // RN Web maps shadow* to box-shadow; set it explicitly so the ambient
         // drop reads on web without needing platform-native shadow support.
-         
+
         boxShadow: '0 8px 20px rgba(0,0,0,0.25)' as any,
       },
       default: {},

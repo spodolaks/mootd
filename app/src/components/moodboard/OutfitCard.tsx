@@ -7,7 +7,11 @@ import ViewShot from 'react-native-view-shot';
 import { Collage } from '@/src/components/moodboard/Collage';
 import { ArchetypeBadges } from '@/src/components/moodboard/ArchetypeBadges';
 import { Icon } from '@/src/components';
-import { SCREEN_WIDTH, CONTAINER_PADDING, MAX_CARD_WIDTH } from '@/src/components/moodboard/constants';
+import {
+  SCREEN_WIDTH,
+  CONTAINER_PADDING,
+  MAX_CARD_WIDTH,
+} from '@/src/components/moodboard/constants';
 import { conditionIcon } from '@/src/components/moodboard/weatherChip';
 import { toPng } from '@/src/lib/htmlToImage';
 
@@ -41,7 +45,7 @@ const buildEyebrow = (
   index: number,
   total: number,
   detail?: WeatherDetail,
-  weather?: OutfitWeather,
+  weather?: OutfitWeather
 ): string => {
   const parts: string[] = [`LOOK ${index + 1} / ${total}`];
   if (detail?.location) parts.push(detail.location.toUpperCase());
@@ -54,7 +58,7 @@ const buildEyebrow = (
   if (detail) {
     const u = detail.unit.toUpperCase();
     parts.push(
-      `H${Math.round(detail.highTemperature)}°${u} / L${Math.round(detail.lowTemperature)}°${u}`,
+      `H${Math.round(detail.highTemperature)}°${u} / L${Math.round(detail.lowTemperature)}°${u}`
     );
   }
   return parts.join('   ·   ');
@@ -99,8 +103,20 @@ export interface OutfitCardProps {
 // setSwapTarget, handleRateOutfit, etc. always do the same thing for
 // the same outfit/index pair, so fresh references are safe to ignore.
 const OutfitCardBase: React.FC<OutfitCardProps> = ({
-  outfit, index, total, itemMap, onSelect, onItemPress, isSaving, colorScheme, cardHeight, weatherDetail,
-  onThumbsUp, onThumbsDown, rating, collageCaptureRef,
+  outfit,
+  index,
+  total,
+  itemMap,
+  onSelect,
+  onItemPress,
+  isSaving,
+  colorScheme,
+  cardHeight,
+  weatherDetail,
+  onThumbsUp,
+  onThumbsDown,
+  rating,
+  collageCaptureRef,
 }) => {
   const viewShotRef = useRef<ViewShot | null>(null);
   const webNodeRef = useRef<View | null>(null);
@@ -132,7 +148,7 @@ const OutfitCardBase: React.FC<OutfitCardProps> = ({
         }
       },
     }),
-    [],
+    []
   );
   const cardBg = backgrounds.secondary[colorScheme];
   const textColor = labels.primary[colorScheme];
@@ -175,7 +191,10 @@ const OutfitCardBase: React.FC<OutfitCardProps> = ({
                 {outfit.palette.slice(0, 4).map((hex, i) => (
                   <View
                     key={`${hex}-${i}`}
-                    style={[styles.paletteDot, { backgroundColor: hex, borderColor: fills.tertiary[colorScheme] }]}
+                    style={[
+                      styles.paletteDot,
+                      { backgroundColor: hex, borderColor: fills.tertiary[colorScheme] },
+                    ]}
                   />
                 ))}
               </View>
@@ -189,11 +208,7 @@ const OutfitCardBase: React.FC<OutfitCardProps> = ({
             Collage identical on both paths means the captured image
             matches what the user actually sees. */}
         {Platform.OS === 'web' ? (
-          <View
-            ref={webNodeRef}
-            collapsable={false}
-            style={styles.collageWrapper}
-          >
+          <View ref={webNodeRef} collapsable={false} style={styles.collageWrapper}>
             <Collage
               itemIds={outfit.items}
               itemMap={itemMap}
@@ -213,8 +228,7 @@ const OutfitCardBase: React.FC<OutfitCardProps> = ({
           <ViewShot
             ref={viewShotRef}
             options={{ format: 'png', result: 'base64', quality: 0.92 }}
-            style={styles.collageWrapper}
-          >
+            style={styles.collageWrapper}>
             <Collage
               itemIds={outfit.items}
               itemMap={itemMap}
@@ -260,8 +274,7 @@ const OutfitCardBase: React.FC<OutfitCardProps> = ({
                 accessibilityRole="button"
                 accessibilityLabel="Rate outfit thumbs up"
                 accessibilityState={{ selected: rating === 'up', disabled: isRated || isSaving }}
-                testID="outfit-card-thumbs-up"
-              >
+                testID="outfit-card-thumbs-up">
                 <Icon
                   name="thumbs-up"
                   size={20}
@@ -279,8 +292,7 @@ const OutfitCardBase: React.FC<OutfitCardProps> = ({
                 accessibilityRole="button"
                 accessibilityLabel="Rate outfit thumbs down"
                 accessibilityState={{ selected: rating === 'down', disabled: isRated || isSaving }}
-                testID="outfit-card-thumbs-down"
-              >
+                testID="outfit-card-thumbs-down">
                 <Icon
                   name="thumbs-down"
                   size={20}
@@ -295,8 +307,7 @@ const OutfitCardBase: React.FC<OutfitCardProps> = ({
             disabled={isSaving}
             accessibilityRole="button"
             accessibilityLabel="Choose this outfit"
-            testID="outfit-card-choose"
-          >
+            testID="outfit-card-choose">
             {isSaving ? (
               <ActivityIndicator size="small" color={btnText} />
             ) : (

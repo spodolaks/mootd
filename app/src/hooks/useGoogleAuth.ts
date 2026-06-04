@@ -5,8 +5,7 @@ import * as Google from 'expo-auth-session/providers/google';
 // Complete the auth session when the redirect comes back on web
 WebBrowser.maybeCompleteAuthSession();
 
-const WEB_CLIENT_ID =
-  '991290253393-eompo9m0q8up56n7iabg30tn62lkd5h2.apps.googleusercontent.com';
+const WEB_CLIENT_ID = '991290253393-eompo9m0q8up56n7iabg30tn62lkd5h2.apps.googleusercontent.com';
 
 // iOS OAuth client ID. Google validates this at mount on iOS and throws
 // if missing; when the env var isn't populated we fall back to the web
@@ -14,8 +13,7 @@ const WEB_CLIENT_ID =
 // remains reachable. Real iOS sign-in needs EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID
 // set + the matching iOS client configured in Google Cloud Console with
 // the bundle ID that matches app.json's ios.bundleIdentifier.
-const IOS_CLIENT_ID =
-  process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID || WEB_CLIENT_ID;
+const IOS_CLIENT_ID = process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID || WEB_CLIENT_ID;
 
 export interface GoogleUserInfo {
   sub: string; // Google user ID
@@ -48,8 +46,7 @@ export function useGoogleAuth() {
   //        invalid_request because the redirect doesn't match the client
   //        type. Leaving redirectUri undefined lets the provider pick
   //        the correct one.
-  const redirectUri =
-    Platform.OS === 'web' ? window.location.origin : undefined;
+  const redirectUri = Platform.OS === 'web' ? window.location.origin : undefined;
 
   const [request, response, promptAsync] = Google.useAuthRequest({
     webClientId: WEB_CLIENT_ID,
@@ -73,9 +70,7 @@ export function useGoogleAuth() {
 /**
  * Fetch Google user profile using the access token from the OAuth response.
  */
-export async function fetchGoogleUserInfo(
-  accessToken: string,
-): Promise<GoogleUserInfo> {
+export async function fetchGoogleUserInfo(accessToken: string): Promise<GoogleUserInfo> {
   const res = await fetch('https://openidconnect.googleapis.com/v1/userinfo', {
     headers: { Authorization: `Bearer ${accessToken}` },
   });

@@ -1,8 +1,4 @@
-import type {
-  AuthSession,
-  GoogleOAuthParams,
-  IAuthRepository,
-} from '@/src/domain';
+import type { AuthSession, GoogleOAuthParams, IAuthRepository } from '@/src/domain';
 import { apiClient, setAuthToken } from '@/src/data/api/client';
 
 interface AuthAPIResponse {
@@ -20,10 +16,9 @@ interface AuthAPIResponse {
 
 export class ApiAuthRepository implements IAuthRepository {
   async signInWithGoogleMock(): Promise<AuthSession> {
-    const response = await apiClient.post<AuthAPIResponse>(
-      '/v1/auth/mock-login',
-      { provider: 'google' },
-    );
+    const response = await apiClient.post<AuthAPIResponse>('/v1/auth/mock-login', {
+      provider: 'google',
+    });
 
     setAuthToken(response.accessToken);
 
@@ -46,10 +41,9 @@ export class ApiAuthRepository implements IAuthRepository {
    * Response: { accessToken (mootd JWT), expiresAt, user, mode }
    */
   async signInWithGoogle(params: GoogleOAuthParams): Promise<AuthSession> {
-    const response = await apiClient.post<AuthAPIResponse>(
-      '/v1/auth/google',
-      { accessToken: params.accessToken },
-    );
+    const response = await apiClient.post<AuthAPIResponse>('/v1/auth/google', {
+      accessToken: params.accessToken,
+    });
 
     setAuthToken(response.accessToken);
 

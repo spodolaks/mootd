@@ -10,11 +10,7 @@ interface ProfilePlaceholderProps {
   style?: ViewStyle;
 }
 
-export function ProfilePlaceholder({
-  width = 162,
-  height = 206,
-  style,
-}: ProfilePlaceholderProps) {
+export function ProfilePlaceholder({ width = 162, height = 206, style }: ProfilePlaceholderProps) {
   const colorScheme = useColorScheme() ?? 'light';
 
   const strokeColor = labels.primary[colorScheme];
@@ -29,15 +25,7 @@ export function ProfilePlaceholder({
   return (
     <Svg width={scaledWidth} height={scaledHeight} viewBox="0 0 162 206" fill="none" style={style}>
       {/* Outer border */}
-      <Rect
-        x="1"
-        y="1"
-        width="160"
-        height="204"
-        rx="22"
-        stroke={strokeColor}
-        strokeWidth="2"
-      />
+      <Rect x="1" y="1" width="160" height="204" rx="22" stroke={strokeColor} strokeWidth="2" />
       {/* Inner border */}
       <Rect
         x="10.5"
@@ -49,13 +37,7 @@ export function ProfilePlaceholder({
         strokeWidth="1"
       />
       {/* Head ellipse */}
-      <Ellipse
-        cx="81"
-        cy="57"
-        rx="21.5"
-        ry="21"
-        fill={fillColor}
-      />
+      <Ellipse cx="81" cy="57" rx="21.5" ry="21" fill={fillColor} />
       {/* Body shape */}
       <Path
         d="M52.538 97.426C59.373 86.497 101.627 85.89 108.462 97.426C115.297 108.962 108.462 163 108.462 163H52.538C52.538 163 45.703 108.355 52.538 97.426Z"

@@ -30,11 +30,7 @@ export const ClothingItemCard: React.FC<ClothingItemCardProps> = ({
 
   return (
     <View style={[styles.container, style]}>
-      <Pressable
-        style={styles.touchable}
-        onPress={onPress}
-        disabled={disabled}
-      >
+      <Pressable style={styles.touchable} onPress={onPress} disabled={disabled}>
         <View
           style={[
             styles.imageContainer,
@@ -43,10 +39,13 @@ export const ClothingItemCard: React.FC<ClothingItemCardProps> = ({
               borderWidth: selected ? 2 : 0,
               borderColor,
             },
-          ]}
-        >
+          ]}>
           {imageSource ? (
-            <Image source={imageSource} style={styles.image} resizeMode={darkBackground ? 'contain' : 'cover'} />
+            <Image
+              source={imageSource}
+              style={styles.image}
+              resizeMode={darkBackground ? 'contain' : 'cover'}
+            />
           ) : (
             <View style={[styles.placeholder, { backgroundColor: placeholderColor }]} />
           )}
@@ -58,11 +57,7 @@ export const ClothingItemCard: React.FC<ClothingItemCardProps> = ({
           )}
         </View>
 
-        <Text
-          variant="subheadline"
-          style={[styles.label, { color: textColor }]}
-          numberOfLines={1}
-        >
+        <Text variant="subheadline" style={[styles.label, { color: textColor }]} numberOfLines={1}>
           {label}
         </Text>
       </Pressable>

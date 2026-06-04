@@ -1,12 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import {
-  View,
-  Text,
-  Modal as RNModal,
-  Pressable,
-  Animated,
-  Dimensions,
-} from 'react-native';
+import { View, Text, Modal as RNModal, Pressable, Animated, Dimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useColorScheme } from '@/src/hooks';
 import { getStyles } from './styles';

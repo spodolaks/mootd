@@ -10,11 +10,7 @@ interface NotificationBellProps {
   style?: ViewStyle;
 }
 
-export function NotificationBell({
-  width = 162,
-  height = 206,
-  style,
-}: NotificationBellProps) {
+export function NotificationBell({ width = 162, height = 206, style }: NotificationBellProps) {
   const colorScheme = useColorScheme() ?? 'light';
 
   const strokeColor = labels.primary[colorScheme];
@@ -29,15 +25,7 @@ export function NotificationBell({
   return (
     <Svg width={scaledWidth} height={scaledHeight} viewBox="0 0 162 206" fill="none" style={style}>
       {/* Outer border */}
-      <Rect
-        x="1"
-        y="1"
-        width="160"
-        height="204"
-        rx="22"
-        stroke={strokeColor}
-        strokeWidth="2"
-      />
+      <Rect x="1" y="1" width="160" height="204" rx="22" stroke={strokeColor} strokeWidth="2" />
       {/* Inner border */}
       <Rect
         x="10.5"

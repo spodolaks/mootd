@@ -18,12 +18,11 @@ export const AddTab: React.FC<AddTabProps> = ({
   const iconColor = labels.primary[colorScheme];
 
   return (
-    <View
-      style={[styles.container, disabled && { opacity: 0.4 }, style]}
-      pointerEvents="none"
-    >
+    <View style={[styles.container, disabled && { opacity: 0.4 }, style]} pointerEvents="none">
       <Icon name={icon} size={24} color={iconColor} />
-      <Text style={styles.label} numberOfLines={1}>{label}</Text>
+      <Text style={styles.label} numberOfLines={1}>
+        {label}
+      </Text>
     </View>
   );
 };

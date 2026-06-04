@@ -6,7 +6,15 @@ import { StatusBar } from 'expo-status-bar';
 import { Component, useEffect, useRef } from 'react';
 import type { ReactNode, ErrorInfo } from 'react';
 import Constants from 'expo-constants';
-import { AppState, AppStateStatus, Platform, View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import {
+  AppState,
+  AppStateStatus,
+  Platform,
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
+} from 'react-native';
 import 'react-native-reanimated';
 
 import { ColorSchemeProvider, useColorScheme } from '@/src/hooks';
@@ -47,8 +55,7 @@ class AppErrorBoundary extends Component<{ children: ReactNode }, ErrorBoundaryS
           </Text>
           <TouchableOpacity
             style={errorStyles.button}
-            onPress={() => this.setState({ hasError: false, error: null })}
-          >
+            onPress={() => this.setState({ hasError: false, error: null })}>
             <Text style={errorStyles.buttonText}>Try again</Text>
           </TouchableOpacity>
         </View>
@@ -140,8 +147,7 @@ function useEventsLifecycle(authToken: string | null): void {
   // signed_up + session_start + session_heartbeat).
   useEffect(() => {
     const platform = Platform.OS as 'ios' | 'android' | 'web';
-    const appVersion =
-      (Constants?.expoConfig?.version as string | undefined) ?? '0.0.0';
+    const appVersion = (Constants?.expoConfig?.version as string | undefined) ?? '0.0.0';
     events.emit('app_opened', {
       platform,
       appVersion,
@@ -157,9 +163,7 @@ function useEventsLifecycle(authToken: string | null): void {
   useEffect(() => {
     const heartbeat = setInterval(() => {
       if (lastAppState.current !== 'active') return;
-      const elapsedSec = Math.floor(
-        (Date.now() - sessionStartAt.current) / 1000,
-      );
+      const elapsedSec = Math.floor((Date.now() - sessionStartAt.current) / 1000);
       events.emit('session_heartbeat', { elapsedSec });
     }, 60_000);
     return () => clearInterval(heartbeat);
@@ -168,7 +172,7 @@ function useEventsLifecycle(authToken: string | null): void {
   // AppState transitions: track background → foreground for
   // session lifecycle, foreground → background for stashing.
   useEffect(() => {
-    const sub = AppState.addEventListener('change', (next) => {
+    const sub = AppState.addEventListener('change', next => {
       const prev = lastAppState.current;
       lastAppState.current = next;
 
@@ -201,8 +205,7 @@ function useEventsLifecycle(authToken: string | null): void {
           const platform = Platform.OS as 'ios' | 'android' | 'web';
           events.emit('app_opened', {
             platform,
-            appVersion:
-              (Constants?.expoConfig?.version as string | undefined) ?? '0.0.0',
+            appVersion: (Constants?.expoConfig?.version as string | undefined) ?? '0.0.0',
             sessionType: 'warm',
           });
           events.emit('session_start', { platform });
@@ -218,7 +221,7 @@ function useEventsLifecycle(authToken: string | null): void {
 
 function RootLayoutContent() {
   const colorScheme = useColorScheme();
-  const session = useAuthStore((s) => s.session);
+  const session = useAuthStore(s => s.session);
   useEventsLifecycle(session?.accessToken ?? null);
 
   return (
@@ -246,8 +249,8 @@ function RootLayoutContent() {
 }
 
 export default function RootLayout() {
-  const restoreSession = useAuthStore((state) => state.restoreSession);
-  const sessionRestored = useAuthStore((state) => state.sessionRestored);
+  const restoreSession = useAuthStore(state => state.restoreSession);
+  const sessionRestored = useAuthStore(state => state.sessionRestored);
 
   // On web the TTF files are mobile-specific binaries that Chrome's OTS font
   // sanitizer rejects. Skip loading them on web and fall back to the system

@@ -37,14 +37,12 @@ interface PermissionsScreenProps {
  *     so this only flips the in-app preference (the user can still
  *     receive pushes per the OS, the app just won't trigger them).
  */
-export const PermissionsScreen: React.FC<PermissionsScreenProps> = ({
-  onGetStarted,
-}) => {
+export const PermissionsScreen: React.FC<PermissionsScreenProps> = ({ onGetStarted }) => {
   const colorScheme = useColorScheme() ?? 'light';
 
   const [locationEnabled, setLocationEnabled] = useState(false);
   const [notificationEnabled, setNotificationEnabled] = useState(false);
-  const setPushNotifications = usePreferencesStore((s) => s.setPushNotifications);
+  const setPushNotifications = usePreferencesStore(s => s.setPushNotifications);
 
   const backgroundColor = backgrounds.primary[colorScheme];
   const secondaryTextColor = labels.tertiary[colorScheme];
@@ -72,7 +70,7 @@ export const PermissionsScreen: React.FC<PermissionsScreenProps> = ({
 
   useEffect(() => {
     void syncFromOS();
-    const sub = AppState.addEventListener('change', (state) => {
+    const sub = AppState.addEventListener('change', state => {
       if (state === 'active') {
         void syncFromOS();
       }
@@ -101,7 +99,7 @@ export const PermissionsScreen: React.FC<PermissionsScreenProps> = ({
             void Linking.openSettings();
           },
         },
-      ],
+      ]
     );
   }, []);
 
@@ -129,10 +127,13 @@ export const PermissionsScreen: React.FC<PermissionsScreenProps> = ({
         }
       } catch (err) {
         setLocationEnabled(false);
-        Alert.alert('Location permission unavailable', err instanceof Error ? err.message : 'Try again later.');
+        Alert.alert(
+          'Location permission unavailable',
+          err instanceof Error ? err.message : 'Try again later.'
+        );
       }
     },
-    [promptOpenSettings],
+    [promptOpenSettings]
   );
 
   const handleNotificationToggle = useCallback(
@@ -158,10 +159,13 @@ export const PermissionsScreen: React.FC<PermissionsScreenProps> = ({
         }
       } catch (err) {
         setNotificationEnabled(false);
-        Alert.alert('Notification permission unavailable', err instanceof Error ? err.message : 'Try again later.');
+        Alert.alert(
+          'Notification permission unavailable',
+          err instanceof Error ? err.message : 'Try again later.'
+        );
       }
     },
-    [promptOpenSettings, setPushNotifications],
+    [promptOpenSettings, setPushNotifications]
   );
 
   const handleGetStarted = () => {
@@ -191,7 +195,7 @@ export const PermissionsScreen: React.FC<PermissionsScreenProps> = ({
               <Text variant="body">Location</Text>
               <Toggle
                 value={locationEnabled}
-                onValueChange={(v) => {
+                onValueChange={v => {
                   void handleLocationToggle(v);
                 }}
               />
@@ -201,7 +205,7 @@ export const PermissionsScreen: React.FC<PermissionsScreenProps> = ({
               <Text variant="body">Notification</Text>
               <Toggle
                 value={notificationEnabled}
-                onValueChange={(v) => {
+                onValueChange={v => {
                   void handleNotificationToggle(v);
                 }}
               />

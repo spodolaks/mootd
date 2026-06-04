@@ -5,11 +5,7 @@ import { useColorScheme } from '@/src/hooks';
 import { labels } from '@/src/theme/colors';
 import type { LoadingSpinnerProps } from './types';
 
-export const LoadingSpinner: React.FC<LoadingSpinnerProps> = ({
-  size = 28,
-  style,
-  color,
-}) => {
+export const LoadingSpinner: React.FC<LoadingSpinnerProps> = ({ size = 28, style, color }) => {
   const colorScheme = useColorScheme() ?? 'light';
   const spinValue = useRef(new Animated.Value(0)).current;
 

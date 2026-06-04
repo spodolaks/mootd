@@ -3,12 +3,7 @@ import type { Outfit } from '../models/Outfit';
 /** Verb describing how the user reacted to a generated outfit batch.
  *  Mirrored server-side; keep values lowercase-with-underscores and in sync
  *  with backend/internal/feedback/domain.go's Action enum. */
-export type FeedbackAction =
-  | 'saved'
-  | 'skipped'
-  | 'regenerated'
-  | 'rated'
-  | 'item_swapped';
+export type FeedbackAction = 'saved' | 'skipped' | 'regenerated' | 'rated' | 'item_swapped';
 
 /** Coarse, non-PII context shipped with every event so the training pipeline
  *  can segment by taste conditions later. All fields optional — emit what

@@ -1,8 +1,4 @@
-import type {
-  AuthSession,
-  GoogleOAuthParams,
-  IAuthRepository,
-} from '@/src/domain';
+import type { AuthSession, GoogleOAuthParams, IAuthRepository } from '@/src/domain';
 
 export class MockAuthRepository implements IAuthRepository {
   private delay(ms = 800): Promise<void> {

@@ -13,11 +13,5 @@ export default function Loading() {
     router.replace('/(main)/moodboard');
   };
 
-  return (
-    <LoadingScreen
-      text="Generating"
-      duration={3000}
-      onComplete={handleComplete}
-    />
-  );
+  return <LoadingScreen text="Generating" duration={3000} onComplete={handleComplete} />;
 }

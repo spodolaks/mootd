@@ -5,9 +5,18 @@ import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 const ARCHETYPE_LABELS: Record<string, string> = {
-  ruler: 'Ruler', rebel: 'Rebel', creator: 'Creator', lover: 'Lover',
-  hero: 'Hero', explorer: 'Explorer', sage: 'Sage', magician: 'Magician',
-  innocent: 'Innocent', caregiver: 'Caregiver', jester: 'Jester', orphan: 'Everyman',
+  ruler: 'Ruler',
+  rebel: 'Rebel',
+  creator: 'Creator',
+  lover: 'Lover',
+  hero: 'Hero',
+  explorer: 'Explorer',
+  sage: 'Sage',
+  magician: 'Magician',
+  innocent: 'Innocent',
+  caregiver: 'Caregiver',
+  jester: 'Jester',
+  orphan: 'Everyman',
 };
 
 interface ArchetypeBadgesProps {
@@ -20,7 +29,7 @@ interface ArchetypeBadgesProps {
 // tie that happens when two raw scores are close and both round to the same integer.
 const computeDisplayPercents = (
   rawScores: Record<string, number>,
-  topN = 2,
+  topN = 2
 ): { name: string; percent: number }[] => {
   const filtered = Object.entries(rawScores)
     .filter(([, s]) => s > 0.05)
@@ -59,7 +68,9 @@ export const ArchetypeBadges: React.FC<ArchetypeBadgesProps> = ({ scores, colorS
   return (
     <View style={styles.archetypeRow}>
       {entries.map(({ name, percent }) => (
-        <View key={name} style={[styles.archetypeBadge, { backgroundColor: fills.tertiary[colorScheme] }]}>
+        <View
+          key={name}
+          style={[styles.archetypeBadge, { backgroundColor: fills.tertiary[colorScheme] }]}>
           <Text style={[styles.archetypeBadgeText, { color: labels.secondary[colorScheme] }]}>
             {ARCHETYPE_LABELS[name] ?? name} {percent}%
           </Text>

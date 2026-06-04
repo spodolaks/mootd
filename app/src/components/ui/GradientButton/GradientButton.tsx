@@ -196,10 +196,7 @@ export const GradientButton: React.FC<GradientButtonProps> = ({
   return (
     <View style={[styles.wrapper, disabled && styles.disabled, style]}>
       <ShadowGlow />
-      <Pressable
-        disabled={disabled}
-        style={styles.touchable}
-        {...touchableProps}>
+      <Pressable disabled={disabled} style={styles.touchable} {...touchableProps}>
         <ButtonSvg />
         <View style={styles.content}>{renderContent()}</View>
       </Pressable>

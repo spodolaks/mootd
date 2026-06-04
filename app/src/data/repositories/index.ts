@@ -30,26 +30,16 @@ const resolveDataSource = (): DataSource => {
 export const activeDataSource: DataSource = resolveDataSource();
 
 export const authRepository: IAuthRepository =
-  activeDataSource === 'api'
-    ? new ApiAuthRepository()
-    : new MockAuthRepository();
+  activeDataSource === 'api' ? new ApiAuthRepository() : new MockAuthRepository();
 
 export const wardrobeRepository: IWardrobeRepository =
-  activeDataSource === 'api'
-    ? new ApiWardrobeRepository()
-    : new MockWardrobeRepository();
+  activeDataSource === 'api' ? new ApiWardrobeRepository() : new MockWardrobeRepository();
 
 export const brandsRepository: IBrandsRepository =
-  activeDataSource === 'api'
-    ? new ApiBrandsRepository()
-    : new MockBrandsRepository();
+  activeDataSource === 'api' ? new ApiBrandsRepository() : new MockBrandsRepository();
 
 export const moodBoardRepository: IMoodBoardRepository =
-  activeDataSource === 'api'
-    ? new ApiMoodBoardRepository()
-    : new MockMoodBoardRepository();
+  activeDataSource === 'api' ? new ApiMoodBoardRepository() : new MockMoodBoardRepository();
 
 export const feedbackRepository: IFeedbackRepository =
-  activeDataSource === 'api'
-    ? new ApiFeedbackRepository()
-    : new MockFeedbackRepository();
+  activeDataSource === 'api' ? new ApiFeedbackRepository() : new MockFeedbackRepository();
