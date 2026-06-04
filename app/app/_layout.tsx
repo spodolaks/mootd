@@ -22,7 +22,7 @@ import { ColorSchemeProvider, useColorScheme } from '@/src/hooks';
 import { useAuthStore } from '@/src/store';
 import * as events from '@/src/lib/events';
 import { getApiBaseURL } from '@/src/data/api/client';
-import { OfflineBanner } from '@/src/components/ui';
+import { OfflineBanner, ToastHost } from '@/src/components/ui';
 import { backgrounds, labels, button } from '@/src/theme/colors';
 
 // ─── Error Boundary ──────────────────────────────────────────────────────────
@@ -257,6 +257,9 @@ function RootLayoutContent() {
         <Stack.Screen name="item-details" options={{ headerShown: false }} />
         <Stack.Screen name="preferences" options={{ headerShown: false }} />
       </Stack>
+      {/* Global toast host — renders the uiStore queue above the
+          navigator so showToast() produces visible feedback. */}
+      <ToastHost />
       <StatusBar style={colorScheme === 'dark' ? 'light' : 'dark'} />
     </ThemeProvider>
   );

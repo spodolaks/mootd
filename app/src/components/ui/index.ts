@@ -43,3 +43,4 @@ export { SegmentedProgressBar } from './SegmentedProgressBar';
 export type { SegmentedProgressBarProps } from './SegmentedProgressBar';
 export { OfflineBanner } from './OfflineBanner';
 export { Skeleton } from './Skeleton';
+export { ToastHost } from './ToastHost';
