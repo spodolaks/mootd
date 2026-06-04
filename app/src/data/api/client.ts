@@ -295,6 +295,94 @@ const request = async <T>(
   return body as T;
 };
 
+/**
+ * Auth-aware fetch that returns the raw `Response` with its body
+ * unconsumed, so callers that need streaming (SSE outfit generation) or
+ * custom parsing (the `/v1/outfits` endpoint) get the same 401
+ * silent-refresh and rate-limit handling as `apiClient` instead of
+ * hand-rolling a bare `fetch` that bypasses both.
+ *
+ * On a non-2xx it throws `ApiError` (with the friendly 429 message and
+ * the stable error `code`); on success it returns the live `Response`.
+ * `timeoutMs` bounds the time-to-headers only — once the response
+ * headers arrive the timer is cleared, so a long-lived SSE body stream
+ * is not cut off.
+ */
+export const authFetch = async (
+  endpoint: string,
+  init: RequestInit = {},
+  opts: { timeoutMs?: number } = {}
+): Promise<Response> => {
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+
+  const run = async (): Promise<Response> => {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      return await fetch(buildURL(endpoint), {
+        ...init,
+        signal: init.signal ?? controller.signal,
+        headers: buildHeaders(init.headers),
+      });
+    } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') {
+        throw new ApiError(`Request timed out after ${timeoutMs}ms`, 408);
+      }
+      throw err;
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  };
+
+  let response = await run();
+
+  // 401 → silent refresh + one retry, sharing apiClient's dedup'd refresh.
+  if (response.status === 401 && _authToken) {
+    const refreshed = await attemptRefresh();
+    if (refreshed) {
+      response = await run();
+    } else {
+      const { useAuthStore } = await import('@/src/store/authStore');
+      void useAuthStore.getState().signOut();
+    }
+  }
+
+  if (!response.ok) {
+    const requestId = response.headers.get('X-Request-ID') ?? '';
+    const body = await parseResponseBody(response);
+    const code =
+      body &&
+      typeof body === 'object' &&
+      'code' in body &&
+      typeof (body as Record<string, unknown>).code === 'string'
+        ? ((body as Record<string, unknown>).code as ApiErrorCode)
+        : '';
+
+    if (response.status === 429) {
+      throw new ApiError(
+        "You're making too many requests. Please wait a moment and try again.",
+        429,
+        body,
+        requestId,
+        code || 'RATE_LIMITED'
+      );
+    }
+
+    const fallbackMessage = `Request failed with status ${response.status}`;
+    const apiMessage =
+      body &&
+      typeof body === 'object' &&
+      'error' in body &&
+      typeof (body as Record<string, unknown>).error === 'string'
+        ? ((body as Record<string, unknown>).error as string)
+        : fallbackMessage;
+
+    throw new ApiError(apiMessage, response.status, body, requestId, code);
+  }
+
+  return response;
+};
+
 export const apiClient = {
   get: async <T>(endpoint: string, init: RequestInit = {}) =>
     request<T>(endpoint, {
