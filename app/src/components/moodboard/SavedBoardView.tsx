@@ -15,7 +15,12 @@ export interface SavedBoardViewProps {
   onRegenerate: () => void;
 }
 
-export const SavedBoardView: React.FC<SavedBoardViewProps> = ({ board, itemMap, colorScheme, onRegenerate }) => {
+export const SavedBoardView: React.FC<SavedBoardViewProps> = ({
+  board,
+  itemMap,
+  colorScheme,
+  onRegenerate,
+}) => {
   const textColor = labels.primary[colorScheme];
   const secondaryColor = labels.secondary[colorScheme];
   const tertiaryColor = labels.tertiary[colorScheme];
@@ -41,7 +46,10 @@ export const SavedBoardView: React.FC<SavedBoardViewProps> = ({ board, itemMap, 
               {palette.slice(0, 4).map((hex, i) => (
                 <View
                   key={`${hex}-${i}`}
-                  style={[styles.paletteDot, { backgroundColor: hex, borderColor: fills.tertiary[colorScheme] }]}
+                  style={[
+                    styles.paletteDot,
+                    { backgroundColor: hex, borderColor: fills.tertiary[colorScheme] },
+                  ]}
                 />
               ))}
             </View>
@@ -81,7 +89,9 @@ export const SavedBoardView: React.FC<SavedBoardViewProps> = ({ board, itemMap, 
           </Text>
         )}
         <Pressable onPress={onRegenerate} style={styles.regenerateBtn}>
-          <Text style={[styles.regenerateText, { color: secondaryColor }]}>Generate new outfit</Text>
+          <Text style={[styles.regenerateText, { color: secondaryColor }]}>
+            Generate new outfit
+          </Text>
         </Pressable>
       </View>
     </View>

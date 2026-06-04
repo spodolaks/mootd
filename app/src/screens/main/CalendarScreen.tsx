@@ -5,7 +5,14 @@ import { typography } from '@/src/theme/typography';
 import { spacing } from '@/src/theme/spacing';
 import { radius } from '@/src/theme/radius';
 import React, { useState, useCallback, useMemo } from 'react';
-import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  View,
+} from 'react-native';
 import { Skeleton } from '@/src/components/ui';
 import { Image } from 'expo-image';
 import { Calendar, DateData } from 'react-native-calendars';
@@ -26,9 +33,7 @@ const toAbsoluteUrl = (url: string): string => {
 export const CalendarScreen: React.FC = () => {
   const colorScheme = useColorScheme() ?? 'light';
   const tabBottomPadding = useTabContentBottomPadding();
-  const [selectedDate, setSelectedDate] = useState<string>(
-    new Date().toISOString().split('T')[0],
-  );
+  const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [boards, setBoards] = useState<SavedMoodBoard[]>([]);
   const [itemMap, setItemMap] = useState<Map<string, WardrobeItem>>(new Map());
   const [isLoading, setIsLoading] = useState(true);
@@ -74,8 +79,10 @@ export const CalendarScreen: React.FC = () => {
         }
       };
       void load();
-      return () => { cancelled = true; };
-    }, []),
+      return () => {
+        cancelled = true;
+      };
+    }, [])
   );
 
   // mootd#50 — pull-to-refresh handler. Same load steps as the
@@ -135,7 +142,7 @@ export const CalendarScreen: React.FC = () => {
             if (result.message) showToast(result.message, 'info');
             break;
           case 'error':
-            showToast('Couldn\'t open share sheet — try again.', 'error');
+            showToast("Couldn't open share sheet — try again.", 'error');
             break;
           // 'dismissed' leaves no feedback — the user cancelled intentionally.
         }
@@ -143,7 +150,7 @@ export const CalendarScreen: React.FC = () => {
         setSharingTo(null);
       }
     },
-    [selectedBoard, showToast, sharingTo],
+    [selectedBoard, showToast, sharingTo]
   );
 
   // Build marked dates: dots for dates with outfits, highlight for selected
@@ -182,11 +189,12 @@ export const CalendarScreen: React.FC = () => {
         refreshControl={
           <RefreshControl
             refreshing={isRefreshing}
-            onRefresh={() => { void onRefresh(); }}
+            onRefresh={() => {
+              void onRefresh();
+            }}
             tintColor={textColor}
           />
-        }
-      >
+        }>
         {/* Calendar */}
         <View style={[styles.calendarContainer, { backgroundColor: cardBg }]}>
           <Calendar
@@ -229,7 +237,9 @@ export const CalendarScreen: React.FC = () => {
             <Text variant="headline" weight="semiBold" style={{ color: textColor }}>
               {selectedBoard.outfit.name}
             </Text>
-            <Text variant="subheadline" style={[styles.outfitDescription, { color: secondaryText }]}>
+            <Text
+              variant="subheadline"
+              style={[styles.outfitDescription, { color: secondaryText }]}>
               {selectedBoard.outfit.description}
             </Text>
 
@@ -258,7 +268,9 @@ export const CalendarScreen: React.FC = () => {
                       shows a spinner in place of the icon so the user
                       has unambiguous feedback. */}
                   <Pressable
-                    onPress={() => { void handleShare('instagram'); }}
+                    onPress={() => {
+                      void handleShare('instagram');
+                    }}
                     disabled={sharingTo !== null}
                     style={[
                       styles.shareBtn,
@@ -268,14 +280,20 @@ export const CalendarScreen: React.FC = () => {
                     hitSlop={8}
                     accessibilityRole="button"
                     accessibilityLabel="Share to Instagram"
-                    accessibilityState={{ disabled: sharingTo !== null, busy: sharingTo === 'instagram' }}
-                  >
-                    {sharingTo === 'instagram'
-                      ? <ActivityIndicator size="small" color={textColor} />
-                      : <Icon name="instagram" size={20} color={textColor} />}
+                    accessibilityState={{
+                      disabled: sharingTo !== null,
+                      busy: sharingTo === 'instagram',
+                    }}>
+                    {sharingTo === 'instagram' ? (
+                      <ActivityIndicator size="small" color={textColor} />
+                    ) : (
+                      <Icon name="instagram" size={20} color={textColor} />
+                    )}
                   </Pressable>
                   <Pressable
-                    onPress={() => { void handleShare('facebook'); }}
+                    onPress={() => {
+                      void handleShare('facebook');
+                    }}
                     disabled={sharingTo !== null}
                     style={[
                       styles.shareBtn,
@@ -285,11 +303,15 @@ export const CalendarScreen: React.FC = () => {
                     hitSlop={8}
                     accessibilityRole="button"
                     accessibilityLabel="Share to Facebook"
-                    accessibilityState={{ disabled: sharingTo !== null, busy: sharingTo === 'facebook' }}
-                  >
-                    {sharingTo === 'facebook'
-                      ? <ActivityIndicator size="small" color={textColor} />
-                      : <Icon name="facebook" size={20} color={textColor} />}
+                    accessibilityState={{
+                      disabled: sharingTo !== null,
+                      busy: sharingTo === 'facebook',
+                    }}>
+                    {sharingTo === 'facebook' ? (
+                      <ActivityIndicator size="small" color={textColor} />
+                    ) : (
+                      <Icon name="facebook" size={20} color={textColor} />
+                    )}
                   </Pressable>
                 </View>
               </>
@@ -299,21 +321,22 @@ export const CalendarScreen: React.FC = () => {
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.itemsRow}
-            >
-              {selectedBoard.outfit.items.map((itemId) => {
+              contentContainerStyle={styles.itemsRow}>
+              {selectedBoard.outfit.items.map(itemId => {
                 const item = itemMap.get(itemId);
                 const snapshot = (selectedBoard.outfit.snapshots ?? []).find(
-                  (s: OutfitItem) => s.id === itemId,
+                  (s: OutfitItem) => s.id === itemId
                 );
-                const imgUrl = item?.pngImageUrl || item?.imageUrl
-                  || snapshot?.pngImageUrl || snapshot?.imageUrl;
+                const imgUrl =
+                  item?.pngImageUrl ||
+                  item?.imageUrl ||
+                  snapshot?.pngImageUrl ||
+                  snapshot?.imageUrl;
                 const label = item?.label ?? snapshot?.label;
                 return (
                   <View
                     key={itemId}
-                    style={[styles.itemThumb, { backgroundColor: fills.tertiary[colorScheme] }]}
-                  >
+                    style={[styles.itemThumb, { backgroundColor: fills.tertiary[colorScheme] }]}>
                     {imgUrl ? (
                       <Image
                         source={{ uri: toAbsoluteUrl(imgUrl) }}
@@ -328,8 +351,7 @@ export const CalendarScreen: React.FC = () => {
                       <Text
                         variant="caption2"
                         numberOfLines={1}
-                        style={[styles.itemLabel, { color: secondaryText }]}
-                      >
+                        style={[styles.itemLabel, { color: secondaryText }]}>
                         {label}
                       </Text>
                     )}

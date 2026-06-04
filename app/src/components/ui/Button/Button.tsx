@@ -81,10 +81,7 @@ export const Button: React.FC<ButtonProps> = ({
   };
 
   return (
-    <Pressable
-      style={[...getButtonStyle(), style]}
-      disabled={disabled}
-      {...props}>
+    <Pressable style={[...getButtonStyle(), style]} disabled={disabled} {...props}>
       {renderContent()}
     </Pressable>
   );

@@ -2,11 +2,7 @@ import { useRouter } from 'expo-router';
 import { wardrobeRepository } from '@/src/data/repositories';
 import { DetectedItemScreen } from '@/src/screens';
 import type { ClothingSearchProduct } from '@/src/domain';
-import {
-  useWardrobeStore,
-  getDefaultTraitsForCategory,
-  type WardrobeItem,
-} from '@/src/store';
+import { useWardrobeStore, getDefaultTraitsForCategory, type WardrobeItem } from '@/src/store';
 
 export default function DetectedItem() {
   const router = useRouter();
@@ -39,9 +35,7 @@ export default function DetectedItem() {
   const handleItemSelected = (selectedItemId: string, brand: string) => {
     if (!currentStep) return;
 
-    const selectedItem = currentStep.similarItems.find(
-      (item) => item.id === selectedItemId
-    );
+    const selectedItem = currentStep.similarItems.find(item => item.id === selectedItemId);
 
     if (!selectedItem) return;
 
@@ -69,28 +63,23 @@ export default function DetectedItem() {
       .map(([key, value]) => {
         seenIds.add(key);
         // Find matching default for display name and options, if any
-        const defaultMatch = defaultTraits.find((t) => t.id === key);
+        const defaultMatch = defaultTraits.find(t => t.id === key);
         return {
           id: key,
-          name: defaultMatch?.name ?? key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
+          name: defaultMatch?.name ?? key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
           selectedValue: value,
           options: defaultMatch?.options ?? [],
         };
       });
 
     // Then: add any defaults that weren't in the detected traits
-    const missingDefaults = defaultTraits
-      .filter((t) => !seenIds.has(t.id))
-      .map((t) => ({ ...t }));
+    const missingDefaults = defaultTraits.filter(t => !seenIds.has(t.id)).map(t => ({ ...t }));
 
     const allTraits = [...traitsFromDetection, ...missingDefaults];
 
     const brandTrimmed = (detectedTraits['brand'] || brand).trim();
     const traitsWithBrand = brandTrimmed
-      ? [
-          ...allTraits,
-          { id: 'brand', name: 'Brand', selectedValue: brandTrimmed, options: [] },
-        ]
+      ? [...allTraits, { id: 'brand', name: 'Brand', selectedValue: brandTrimmed, options: [] }]
       : allTraits;
 
     const wardrobeItem: WardrobeItem = {
@@ -125,26 +114,25 @@ export default function DetectedItem() {
   const getInitialSelection = (): Record<number, string> => {
     if (!existingItem) return {};
     // Find the item in similarItems that matches the existing selection
-    const matchingItem = currentStep.similarItems.find(
-      (item) => item.label === existingItem.label
-    );
+    const matchingItem = currentStep.similarItems.find(item => item.label === existingItem.label);
     if (matchingItem) {
       return { 0: matchingItem.id };
     }
     return {};
   };
 
-  const handleProductSelected = (product: ClothingSearchProduct, detectedItemId: string, brand: string) => {
+  const handleProductSelected = (
+    product: ClothingSearchProduct,
+    detectedItemId: string,
+    brand: string
+  ) => {
     if (!currentStep) return;
 
     // For product selections, start with defaults (no detected traits available)
-    const defaultTraits = getDefaultTraitsForCategory(currentStep.category).map((t) => ({ ...t }));
+    const defaultTraits = getDefaultTraitsForCategory(currentStep.category).map(t => ({ ...t }));
     const brandTrimmed = brand.trim();
     const traitsWithBrand = brandTrimmed
-      ? [
-          ...defaultTraits,
-          { id: 'brand', name: 'Brand', selectedValue: brandTrimmed, options: [] },
-        ]
+      ? [...defaultTraits, { id: 'brand', name: 'Brand', selectedValue: brandTrimmed, options: [] }]
       : defaultTraits;
 
     const wardrobeItem: WardrobeItem = {

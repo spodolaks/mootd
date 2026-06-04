@@ -53,7 +53,7 @@ export class ApiError extends Error {
     status: number,
     details: unknown = null,
     requestId = '',
-    code: ApiErrorCode = '',
+    code: ApiErrorCode = ''
   ) {
     super(message);
     this.name = 'ApiError';
@@ -66,9 +66,7 @@ export class ApiError extends Error {
 
 const normalizeBaseURL = (url: string): string => url.replace(/\/+$/, '');
 
-const API_BASE_URL = normalizeBaseURL(
-  process.env.EXPO_PUBLIC_API_URL || DEFAULT_API_BASE_URL
-);
+const API_BASE_URL = normalizeBaseURL(process.env.EXPO_PUBLIC_API_URL || DEFAULT_API_BASE_URL);
 
 const buildURL = (endpoint: string): string => {
   if (endpoint.startsWith('http://') || endpoint.startsWith('https://')) {
@@ -171,7 +169,7 @@ const attemptRefresh = async (): Promise<boolean> => {
 const fetchOnce = async (
   endpoint: string,
   init: RequestInit,
-  timeoutMs: number,
+  timeoutMs: number
 ): Promise<{ response: Response; body: unknown }> => {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
@@ -188,7 +186,11 @@ const fetchOnce = async (
   }
 };
 
-const request = async <T>(endpoint: string, init: RequestInit = {}, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<T> => {
+const request = async <T>(
+  endpoint: string,
+  init: RequestInit = {},
+  timeoutMs = DEFAULT_TIMEOUT_MS
+): Promise<T> => {
   let response: Response;
   let body: unknown;
   try {
@@ -252,7 +254,13 @@ const request = async <T>(endpoint: string, init: RequestInit = {}, timeoutMs = 
 
     // User-friendly message for rate limiting
     if (response.status === 429) {
-      throw new ApiError('You\'re making too many requests. Please wait a moment and try again.', 429, body, requestId, code || 'RATE_LIMITED');
+      throw new ApiError(
+        "You're making too many requests. Please wait a moment and try again.",
+        429,
+        body,
+        requestId,
+        code || 'RATE_LIMITED'
+      );
     }
 
     // Attempt token refresh on 401 before throwing

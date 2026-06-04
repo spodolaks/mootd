@@ -232,7 +232,4 @@ export type AnyEvent =
 export type EventName = AnyEvent['name'];
 
 /** Get the properties type for a given event name. */
-export type PropertiesFor<N extends EventName> = Extract<
-  AnyEvent,
-  { name: N }
->['properties'];
+export type PropertiesFor<N extends EventName> = Extract<AnyEvent, { name: N }>['properties'];

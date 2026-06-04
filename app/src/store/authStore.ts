@@ -20,7 +20,9 @@ async function saveTokenSecurely(token: string, session: AuthSession): Promise<v
       if (session.refreshToken) {
         localStorage.setItem(SECURE_REFRESH_KEY, session.refreshToken);
       }
-    } catch { /* ignore quota errors */ }
+    } catch {
+      /* ignore quota errors */
+    }
     return;
   }
   await SecureStore.setItemAsync(SECURE_TOKEN_KEY, token);
@@ -37,7 +39,9 @@ async function clearTokenSecurely(): Promise<void> {
       localStorage.removeItem(SECURE_TOKEN_KEY);
       localStorage.removeItem(SECURE_REFRESH_KEY);
       localStorage.removeItem(SECURE_SESSION_KEY);
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
     return;
   }
   await SecureStore.deleteItemAsync(SECURE_TOKEN_KEY);
@@ -72,7 +76,7 @@ function syncToPreferences(user: AuthUser) {
   if (!prefs.displayName && user.name) prefs.setDisplayName(user.name);
 }
 
-export const useAuthStore = create<AuthState>((set) => ({
+export const useAuthStore = create<AuthState>(set => ({
   user: null,
   session: null,
   isLoading: false,
@@ -98,8 +102,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       events.emit('signed_in', { method: 'google' });
       return true;
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'Sign-in failed';
+      const message = error instanceof Error ? error.message : 'Sign-in failed';
       set({
         user: null,
         session: null,
@@ -126,8 +129,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       events.emit('signed_in', { method: 'google' });
       return true;
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'Google sign-in failed';
+      const message = error instanceof Error ? error.message : 'Google sign-in failed';
       set({
         user: null,
         session: null,
@@ -219,11 +221,13 @@ export const useAuthStore = create<AuthState>((set) => ({
     // must not block local sign-out, and the user expects an instant UI.
     const refreshToken = useAuthStore.getState().session?.refreshToken;
     if (refreshToken) {
-      void authRepository.logout(refreshToken).catch(() => { /* already swallowed in repo */ });
+      void authRepository.logout(refreshToken).catch(() => {
+        /* already swallowed in repo */
+      });
     }
 
     setAuthToken(null);
-    await clearTokenSecurely().catch((err) => {
+    await clearTokenSecurely().catch(err => {
       console.warn('[Auth] Failed to clear secure token:', err);
     });
     set({

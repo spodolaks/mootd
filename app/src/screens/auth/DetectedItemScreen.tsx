@@ -7,12 +7,7 @@ import { MOCK_DETECTION_STEPS } from '@/src/data/mock';
 import { brandsRepository } from '@/src/data/repositories';
 import type { ClothingSearchProduct } from '@/src/domain';
 import React, { useState } from 'react';
-import {
-  ActivityIndicator,
-  ScrollView,
-  StyleSheet,
-  View,
-} from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, View } from 'react-native';
 import type { ImageSourcePropType } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -181,17 +176,14 @@ export const DetectedItemScreen: React.FC<DetectedItemScreenProps> = ({
         />
 
         {/* Item Counter */}
-        <Text
-          variant="body"
-          style={[styles.itemCounter, { color: secondaryTextColor }]}
-        >
+        <Text variant="body" style={[styles.itemCounter, { color: secondaryTextColor }]}>
           Item {displayCurrentStep + 1} of {displayTotalSteps}
         </Text>
 
         {/* Title Section */}
         <View style={styles.titleSection}>
           <Text variant="title1" weight="semiBold" style={styles.title}>
-            We detected a black {detectedCategory}
+            We detected your {detectedCategory}
           </Text>
         </View>
 
@@ -202,8 +194,12 @@ export const DetectedItemScreen: React.FC<DetectedItemScreenProps> = ({
             setBrand(text);
             if (!text.trim()) setSearchProducts(null);
           }}
-          onBlur={() => { void handleBrandSearch(); }}
-          onSubmitEditing={() => { void handleBrandSearch(); }}
+          onBlur={() => {
+            void handleBrandSearch();
+          }}
+          onSubmitEditing={() => {
+            void handleBrandSearch();
+          }}
           placeholder="Search brand…"
           style={styles.brandInput}
         />
@@ -211,17 +207,13 @@ export const DetectedItemScreen: React.FC<DetectedItemScreenProps> = ({
         <ScrollView
           style={styles.scrollView}
           contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}
-        >
+          showsVerticalScrollIndicator={false}>
           {/* Section header */}
           <View style={styles.subtitleSection}>
             <Text variant="body" weight="semiBold" style={styles.subtitle}>
               Which one matches best?
             </Text>
-            <Text
-              variant="subheadline"
-              style={[styles.description, { color: secondaryTextColor }]}
-            >
+            <Text variant="subheadline" style={[styles.description, { color: secondaryTextColor }]}>
               Select the closest match to your item
             </Text>
           </View>
@@ -231,15 +223,16 @@ export const DetectedItemScreen: React.FC<DetectedItemScreenProps> = ({
             <Text
               variant="subheadline"
               weight="semiBold"
-              style={[styles.searchResultsLabel, { color: secondaryTextColor }]}
-            >
-              {isSearching ? 'Searching…' : `${searchProducts!.length} result${searchProducts!.length !== 1 ? 's' : ''} for "${brand.trim()}"`}
+              style={[styles.searchResultsLabel, { color: secondaryTextColor }]}>
+              {isSearching
+                ? 'Searching…'
+                : `${searchProducts!.length} result${searchProducts!.length !== 1 ? 's' : ''} for "${brand.trim()}"`}
             </Text>
           )}
 
           {/* Unified grid: detected items + search products */}
           <View style={styles.grid}>
-            {similarItems.map((item) => (
+            {similarItems.map(item => (
               <View key={item.id} style={styles.gridItem}>
                 <ClothingItemCard
                   label={item.label}
@@ -259,38 +252,37 @@ export const DetectedItemScreen: React.FC<DetectedItemScreenProps> = ({
               </View>
             )}
 
-            {!isSearching && searchProducts?.map(product => (
-              <View key={product.id} style={styles.gridItem}>
-                <ClothingItemCard
-                  label={product.title}
-                  selected={selectedProductId === product.id}
-                  imageSource={product.imageUrl ? { uri: product.imageUrl } : undefined}
-                  darkBackground={false}
-                  onPress={() => handleProductSelect(product.id)}
-                />
-                {(product.source || product.price) ? (
-                  <View style={styles.productMeta}>
-                    {product.source ? (
-                      <Text
-                        variant="caption2"
-                        numberOfLines={1}
-                        style={[styles.productMetaText, { color: secondaryTextColor }]}
-                      >
-                        {product.source}
-                      </Text>
-                    ) : null}
-                    {product.price ? (
-                      <Text
-                        variant="caption2"
-                        style={[styles.productMetaText, { color: secondaryTextColor }]}
-                      >
-                        {product.price}
-                      </Text>
-                    ) : null}
-                  </View>
-                ) : null}
-              </View>
-            ))}
+            {!isSearching &&
+              searchProducts?.map(product => (
+                <View key={product.id} style={styles.gridItem}>
+                  <ClothingItemCard
+                    label={product.title}
+                    selected={selectedProductId === product.id}
+                    imageSource={product.imageUrl ? { uri: product.imageUrl } : undefined}
+                    darkBackground={false}
+                    onPress={() => handleProductSelect(product.id)}
+                  />
+                  {product.source || product.price ? (
+                    <View style={styles.productMeta}>
+                      {product.source ? (
+                        <Text
+                          variant="caption2"
+                          numberOfLines={1}
+                          style={[styles.productMetaText, { color: secondaryTextColor }]}>
+                          {product.source}
+                        </Text>
+                      ) : null}
+                      {product.price ? (
+                        <Text
+                          variant="caption2"
+                          style={[styles.productMetaText, { color: secondaryTextColor }]}>
+                          {product.price}
+                        </Text>
+                      ) : null}
+                    </View>
+                  ) : null}
+                </View>
+              ))}
           </View>
         </ScrollView>
 

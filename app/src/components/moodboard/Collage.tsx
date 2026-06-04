@@ -1,5 +1,5 @@
 import { Icon } from '@/src/components';
-import { labels , grays } from '@/src/theme/colors';
+import { labels, grays } from '@/src/theme/colors';
 import type { OutfitItem, WardrobeItem } from '@/src/domain';
 import React, { useMemo } from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
@@ -27,28 +27,104 @@ type ArchetypeAffinity = Readonly<Record<string, number>>;
 type LocalSurface = { source: number; affinity: ArchetypeAffinity; avgSaturation: number };
 
 const LOCAL_PANELS: readonly LocalSurface[] = [
-  { source: require('../../../assets/images/panels/L2-Surface-Concrete.png'),          affinity: { explorer: 0.8, outlaw: 0.7, creator: 0.4 }, avgSaturation: 0.08 },
-  { source: require('../../../assets/images/panels/L2-Surface-Dark-Asphalt.png'),      affinity: { outlaw: 0.9, explorer: 0.6 },               avgSaturation: 0.06 },
-  { source: require('../../../assets/images/panels/L2-Surface-Light-Stone-Table.png'), affinity: { ruler: 0.7, sage: 0.6, lover: 0.4 },        avgSaturation: 0.12 },
-  { source: require('../../../assets/images/panels/L2-Surface-Linen.png'),             affinity: { lover: 0.8, innocent: 0.7, caregiver: 0.5 }, avgSaturation: 0.14 },
-  { source: require('../../../assets/images/panels/L2-Surface-Marble.png'),            affinity: { ruler: 0.9, lover: 0.6, sage: 0.4 },        avgSaturation: 0.10 },
-  { source: require('../../../assets/images/panels/L2-Surface-Off-white-Rainbow.png'), affinity: { creator: 0.8, jester: 0.6, innocent: 0.5 }, avgSaturation: 0.32 },
-  { source: require('../../../assets/images/panels/L2-Surface-Studio-floor.png'),      affinity: { creator: 0.7, sage: 0.6, magician: 0.4 },   avgSaturation: 0.08 },
-  { source: require('../../../assets/images/panels/L2-Surface-Urban-Pavement.png'),    affinity: { explorer: 0.8, everyman: 0.6, outlaw: 0.4 }, avgSaturation: 0.10 },
-  { source: require('../../../assets/images/panels/L2-Surface-Wet-asphalt.png'),       affinity: { outlaw: 0.8, explorer: 0.6, rebel: 0.5 },   avgSaturation: 0.09 },
-  { source: require('../../../assets/images/panels/L2-Surface-Wooden-floor.png'),      affinity: { everyman: 0.7, caregiver: 0.6, sage: 0.4 }, avgSaturation: 0.24 },
+  {
+    source: require('../../../assets/images/panels/L2-Surface-Concrete.png'),
+    affinity: { explorer: 0.8, outlaw: 0.7, creator: 0.4 },
+    avgSaturation: 0.08,
+  },
+  {
+    source: require('../../../assets/images/panels/L2-Surface-Dark-Asphalt.png'),
+    affinity: { outlaw: 0.9, explorer: 0.6 },
+    avgSaturation: 0.06,
+  },
+  {
+    source: require('../../../assets/images/panels/L2-Surface-Light-Stone-Table.png'),
+    affinity: { ruler: 0.7, sage: 0.6, lover: 0.4 },
+    avgSaturation: 0.12,
+  },
+  {
+    source: require('../../../assets/images/panels/L2-Surface-Linen.png'),
+    affinity: { lover: 0.8, innocent: 0.7, caregiver: 0.5 },
+    avgSaturation: 0.14,
+  },
+  {
+    source: require('../../../assets/images/panels/L2-Surface-Marble.png'),
+    affinity: { ruler: 0.9, lover: 0.6, sage: 0.4 },
+    avgSaturation: 0.1,
+  },
+  {
+    source: require('../../../assets/images/panels/L2-Surface-Off-white-Rainbow.png'),
+    affinity: { creator: 0.8, jester: 0.6, innocent: 0.5 },
+    avgSaturation: 0.32,
+  },
+  {
+    source: require('../../../assets/images/panels/L2-Surface-Studio-floor.png'),
+    affinity: { creator: 0.7, sage: 0.6, magician: 0.4 },
+    avgSaturation: 0.08,
+  },
+  {
+    source: require('../../../assets/images/panels/L2-Surface-Urban-Pavement.png'),
+    affinity: { explorer: 0.8, everyman: 0.6, outlaw: 0.4 },
+    avgSaturation: 0.1,
+  },
+  {
+    source: require('../../../assets/images/panels/L2-Surface-Wet-asphalt.png'),
+    affinity: { outlaw: 0.8, explorer: 0.6, rebel: 0.5 },
+    avgSaturation: 0.09,
+  },
+  {
+    source: require('../../../assets/images/panels/L2-Surface-Wooden-floor.png'),
+    affinity: { everyman: 0.7, caregiver: 0.6, sage: 0.4 },
+    avgSaturation: 0.24,
+  },
 ];
 
 const LOCAL_BACKGROUNDS: readonly LocalSurface[] = [
-  { source: require('../../../assets/images/backgrounds/L3-Place-Cafe.png'),          affinity: { everyman: 0.7, lover: 0.5, jester: 0.4 },    avgSaturation: 0.34 },
-  { source: require('../../../assets/images/backgrounds/L3-Place-City-Street.png'),   affinity: { explorer: 0.8, rebel: 0.6, outlaw: 0.4 },    avgSaturation: 0.22 },
-  { source: require('../../../assets/images/backgrounds/L3-Place-Green-Park.png'),    affinity: { innocent: 0.7, caregiver: 0.6, sage: 0.4 },  avgSaturation: 0.46 },
-  { source: require('../../../assets/images/backgrounds/L3-Place-Hotel-Lobby.png'),   affinity: { ruler: 0.8, lover: 0.5 },                    avgSaturation: 0.30 },
-  { source: require('../../../assets/images/backgrounds/L3-Place-Morning-Room.png'),  affinity: { lover: 0.7, innocent: 0.6, caregiver: 0.4 }, avgSaturation: 0.28 },
-  { source: require('../../../assets/images/backgrounds/L3-Place-Night-City.png'),    affinity: { outlaw: 0.8, explorer: 0.6, magician: 0.5 }, avgSaturation: 0.18 },
-  { source: require('../../../assets/images/backgrounds/L3-Place-Office-Window.png'), affinity: { ruler: 0.7, sage: 0.6, creator: 0.5 },       avgSaturation: 0.24 },
-  { source: require('../../../assets/images/backgrounds/L3-Place-Office.png'),        affinity: { ruler: 0.7, sage: 0.6, creator: 0.5 },       avgSaturation: 0.18 },
-  { source: require('../../../assets/images/backgrounds/L3-Place-Wet-City.png'),      affinity: { outlaw: 0.7, explorer: 0.6, rebel: 0.4 },    avgSaturation: 0.22 },
+  {
+    source: require('../../../assets/images/backgrounds/L3-Place-Cafe.png'),
+    affinity: { everyman: 0.7, lover: 0.5, jester: 0.4 },
+    avgSaturation: 0.34,
+  },
+  {
+    source: require('../../../assets/images/backgrounds/L3-Place-City-Street.png'),
+    affinity: { explorer: 0.8, rebel: 0.6, outlaw: 0.4 },
+    avgSaturation: 0.22,
+  },
+  {
+    source: require('../../../assets/images/backgrounds/L3-Place-Green-Park.png'),
+    affinity: { innocent: 0.7, caregiver: 0.6, sage: 0.4 },
+    avgSaturation: 0.46,
+  },
+  {
+    source: require('../../../assets/images/backgrounds/L3-Place-Hotel-Lobby.png'),
+    affinity: { ruler: 0.8, lover: 0.5 },
+    avgSaturation: 0.3,
+  },
+  {
+    source: require('../../../assets/images/backgrounds/L3-Place-Morning-Room.png'),
+    affinity: { lover: 0.7, innocent: 0.6, caregiver: 0.4 },
+    avgSaturation: 0.28,
+  },
+  {
+    source: require('../../../assets/images/backgrounds/L3-Place-Night-City.png'),
+    affinity: { outlaw: 0.8, explorer: 0.6, magician: 0.5 },
+    avgSaturation: 0.18,
+  },
+  {
+    source: require('../../../assets/images/backgrounds/L3-Place-Office-Window.png'),
+    affinity: { ruler: 0.7, sage: 0.6, creator: 0.5 },
+    avgSaturation: 0.24,
+  },
+  {
+    source: require('../../../assets/images/backgrounds/L3-Place-Office.png'),
+    affinity: { ruler: 0.7, sage: 0.6, creator: 0.5 },
+    avgSaturation: 0.18,
+  },
+  {
+    source: require('../../../assets/images/backgrounds/L3-Place-Wet-City.png'),
+    affinity: { outlaw: 0.7, explorer: 0.6, rebel: 0.4 },
+    avgSaturation: 0.22,
+  },
 ];
 
 // Deterministic hash — used both for stable tiebreaks in affinity scoring
@@ -71,7 +147,13 @@ const hashSeed = (seed: string): number => {
 // caller's own palette availability check).
 export const hexToSaturation = (hex: string): number => {
   const h = hex.replace(/^#/, '');
-  const full = h.length === 3 ? h.split('').map(c => c + c).join('') : h;
+  const full =
+    h.length === 3
+      ? h
+          .split('')
+          .map(c => c + c)
+          .join('')
+      : h;
   if (!/^[0-9a-fA-F]{6}$/.test(full)) return 0;
   const r = parseInt(full.slice(0, 2), 16) / 255;
   const g = parseInt(full.slice(2, 4), 16) / 255;
@@ -107,7 +189,7 @@ const pickSurface = (
   surfaces: readonly LocalSurface[],
   scores: Readonly<Record<string, number>> | undefined,
   seed: string,
-  palette: readonly string[] | undefined,
+  palette: readonly string[] | undefined
 ): number => {
   if (surfaces.length === 0) {
     throw new Error('pickSurface: empty surface list');
@@ -168,8 +250,7 @@ const pickSurface = (
 //   wrong on cutouts, so we skip it and leave garments unshadowed there.
 const ITEM_SHADOW_STYLE = Platform.select({
   web: {
-    filter:
-      'drop-shadow(0 2px 3px rgba(0,0,0,0.55)) drop-shadow(0 14px 28px rgba(0,0,0,0.4))',
+    filter: 'drop-shadow(0 2px 3px rgba(0,0,0,0.55)) drop-shadow(0 14px 28px rgba(0,0,0,0.4))',
   },
   ios: {
     shadowColor: '#000',
@@ -185,8 +266,7 @@ const ITEM_SHADOW_STYLE = Platform.select({
 // of being a raised surface rather than a sticker pasted on the bokeh.
 const PANEL_SHADOW_STYLE = Platform.select({
   web: {
-    filter:
-      'drop-shadow(0 3px 6px rgba(0,0,0,0.45)) drop-shadow(0 22px 40px rgba(0,0,0,0.5))',
+    filter: 'drop-shadow(0 3px 6px rgba(0,0,0,0.45)) drop-shadow(0 22px 40px rgba(0,0,0,0.5))',
   },
   ios: {
     shadowColor: '#000',
@@ -205,10 +285,13 @@ export type ItemZone = 'outerwear' | 'tops' | 'bottoms' | 'shoes' | 'accessories
 // Actual DB category values: "outer", "top_long", "top_sleeveless", "bottom_long",
 // "footwear_pair", "accessory" — patterns must match these exact strings.
 export const ZONE_PATTERNS: [ItemZone, RegExp][] = [
-  ['outerwear',   /outer|jacket|blazer|coat|trench|parka|bomber/i],
-  ['shoes',       /footwear|shoes?|sneaker|boot|sandal|heel|loafer|slipper|mule|oxford/i],
-  ['bottoms',     /bottom|pant|jean|\bshorts?\b|skirt|legging|trouser/i],
-  ['accessories', /accessor|eyewear|bag|hat|cap|tie|belt|scarf|sunglass|watch|purse|backpack|jewelry/i],
+  ['outerwear', /outer|jacket|blazer|coat|trench|parka|bomber/i],
+  ['shoes', /footwear|shoes?|sneaker|boot|sandal|heel|loafer|slipper|mule|oxford/i],
+  ['bottoms', /bottom|pant|jean|\bshorts?\b|skirt|legging|trouser/i],
+  [
+    'accessories',
+    /accessor|eyewear|bag|hat|cap|tie|belt|scarf|sunglass|watch|purse|backpack|jewelry/i,
+  ],
 ];
 
 export const classifyZone = (category: string): ItemZone => {
@@ -243,14 +326,14 @@ export type ZonePos = { l: `${number}%`; t: `${number}%`; w: `${number}%`; h: `$
 // All items must stay within 0-100% to avoid overflowing the panel edges.
 export const FIVE_ZONE_POSITIONS: Record<ItemZone, [ZonePos, ZonePos, ZonePos]> = {
   outerwear: [
-    { l: '36%', t: '10%',  w: '55%', h: '42%' },
-    { l: '30%', t: '10%',  w: '52%', h: '40%' },
-    { l: '26%', t: '10%',  w: '48%', h: '38%' },
+    { l: '36%', t: '10%', w: '55%', h: '42%' },
+    { l: '30%', t: '10%', w: '52%', h: '40%' },
+    { l: '26%', t: '10%', w: '48%', h: '38%' },
   ],
   tops: [
-    { l: '14%', t: '10%',  w: '52%', h: '40%' },
-    { l: '10%', t: '10%',  w: '50%', h: '38%' },
-    { l: '10%',  t: '10%',  w: '46%', h: '36%' },
+    { l: '14%', t: '10%', w: '52%', h: '40%' },
+    { l: '10%', t: '10%', w: '50%', h: '38%' },
+    { l: '10%', t: '10%', w: '46%', h: '36%' },
   ],
   bottoms: [
     { l: '18%', t: '38%', w: '50%', h: '44%' },
@@ -258,14 +341,14 @@ export const FIVE_ZONE_POSITIONS: Record<ItemZone, [ZonePos, ZonePos, ZonePos]> 
     { l: '12%', t: '42%', w: '44%', h: '40%' },
   ],
   shoes: [
-    { l: '10%',  t: '72%', w: '28%', h: '22%' },
-    { l: '10%',  t: '76%', w: '26%', h: '18%' },
-    { l: '10%',  t: '78%', w: '24%', h: '16%' },
+    { l: '10%', t: '72%', w: '28%', h: '22%' },
+    { l: '10%', t: '76%', w: '26%', h: '18%' },
+    { l: '10%', t: '78%', w: '24%', h: '16%' },
   ],
   accessories: [
-    { l: '10%',  t: '10%',  w: '18%', h: '16%' },
-    { l: '10%',  t: '24%', w: '16%', h: '14%' },
-    { l: '10%',  t: '42%', w: '14%', h: '12%' },
+    { l: '10%', t: '10%', w: '18%', h: '16%' },
+    { l: '10%', t: '24%', w: '16%', h: '14%' },
+    { l: '10%', t: '42%', w: '14%', h: '12%' },
   ],
 };
 
@@ -280,14 +363,14 @@ export const FIVE_ZONE_POSITIONS: Record<ItemZone, [ZonePos, ZonePos, ZonePos]> 
 export const NO_OUTER_POSITIONS: Record<ItemZone, [ZonePos, ZonePos, ZonePos]> = {
   // unused in this layout but kept to satisfy the Record type
   outerwear: [
-    { l: '30%', t: '10%',  w: '50%', h: '40%' },
-    { l: '28%', t: '10%',  w: '48%', h: '38%' },
-    { l: '26%', t: '10%',  w: '46%', h: '36%' },
+    { l: '30%', t: '10%', w: '50%', h: '40%' },
+    { l: '28%', t: '10%', w: '48%', h: '38%' },
+    { l: '26%', t: '10%', w: '46%', h: '36%' },
   ],
   tops: [
-    { l: '22%', t: '10%',  w: '56%', h: '44%' },
-    { l: '20%', t: '10%',  w: '52%', h: '42%' },
-    { l: '18%', t: '10%',  w: '48%', h: '40%' },
+    { l: '22%', t: '10%', w: '56%', h: '44%' },
+    { l: '20%', t: '10%', w: '52%', h: '42%' },
+    { l: '18%', t: '10%', w: '48%', h: '40%' },
   ],
   bottoms: [
     { l: '26%', t: '40%', w: '48%', h: '46%' },
@@ -300,9 +383,9 @@ export const NO_OUTER_POSITIONS: Record<ItemZone, [ZonePos, ZonePos, ZonePos]> =
     { l: '68%', t: '78%', w: '26%', h: '16%' },
   ],
   accessories: [
-    { l: '10%',  t: '10%',  w: '20%', h: '18%' },
-    { l: '10%',  t: '26%', w: '18%', h: '16%' },
-    { l: '10%',  t: '44%', w: '16%', h: '14%' },
+    { l: '10%', t: '10%', w: '20%', h: '18%' },
+    { l: '10%', t: '26%', w: '18%', h: '16%' },
+    { l: '10%', t: '44%', w: '16%', h: '14%' },
   ],
 };
 
@@ -310,14 +393,14 @@ export const NO_OUTER_POSITIONS: Record<ItemZone, [ZonePos, ZonePos, ZonePos]> =
 // right, top+bottom centered, shoes widen slightly to fill the lower edge.
 export const NO_ACCESSORY_POSITIONS: Record<ItemZone, [ZonePos, ZonePos, ZonePos]> = {
   outerwear: [
-    { l: '40%', t: '10%',  w: '55%', h: '42%' },
-    { l: '34%', t: '10%',  w: '52%', h: '40%' },
-    { l: '30%', t: '10%',  w: '48%', h: '38%' },
+    { l: '40%', t: '10%', w: '55%', h: '42%' },
+    { l: '34%', t: '10%', w: '52%', h: '40%' },
+    { l: '30%', t: '10%', w: '48%', h: '38%' },
   ],
   tops: [
-    { l: '10%',  t: '10%',  w: '52%', h: '40%' },
-    { l: '10%',  t: '10%',  w: '50%', h: '38%' },
-    { l: '10%',  t: '10%',  w: '46%', h: '36%' },
+    { l: '10%', t: '10%', w: '52%', h: '40%' },
+    { l: '10%', t: '10%', w: '50%', h: '38%' },
+    { l: '10%', t: '10%', w: '46%', h: '36%' },
   ],
   bottoms: [
     { l: '18%', t: '38%', w: '50%', h: '44%' },
@@ -330,9 +413,9 @@ export const NO_ACCESSORY_POSITIONS: Record<ItemZone, [ZonePos, ZonePos, ZonePos
     { l: '10%', t: '78%', w: '28%', h: '16%' },
   ],
   accessories: [
-    { l: '10%',  t: '10%',  w: '18%', h: '16%' },
-    { l: '10%',  t: '24%', w: '16%', h: '14%' },
-    { l: '10%',  t: '42%', w: '14%', h: '12%' },
+    { l: '10%', t: '10%', w: '18%', h: '16%' },
+    { l: '10%', t: '24%', w: '16%', h: '14%' },
+    { l: '10%', t: '42%', w: '14%', h: '12%' },
   ],
 };
 
@@ -340,14 +423,14 @@ export const NO_ACCESSORY_POSITIONS: Record<ItemZone, [ZonePos, ZonePos, ZonePos
 // stacks centered with generous spacing so the panel doesn't look empty.
 export const MINIMAL_POSITIONS: Record<ItemZone, [ZonePos, ZonePos, ZonePos]> = {
   outerwear: [
-    { l: '30%', t: '10%',  w: '50%', h: '40%' },
-    { l: '28%', t: '10%',  w: '48%', h: '38%' },
-    { l: '26%', t: '10%',  w: '46%', h: '36%' },
+    { l: '30%', t: '10%', w: '50%', h: '40%' },
+    { l: '28%', t: '10%', w: '48%', h: '38%' },
+    { l: '26%', t: '10%', w: '46%', h: '36%' },
   ],
   tops: [
-    { l: '20%', t: '10%',  w: '60%', h: '46%' },
-    { l: '18%', t: '10%',  w: '56%', h: '44%' },
-    { l: '16%', t: '10%',  w: '52%', h: '42%' },
+    { l: '20%', t: '10%', w: '60%', h: '46%' },
+    { l: '18%', t: '10%', w: '56%', h: '44%' },
+    { l: '16%', t: '10%', w: '52%', h: '42%' },
   ],
   bottoms: [
     { l: '26%', t: '42%', w: '48%', h: '46%' },
@@ -360,9 +443,9 @@ export const MINIMAL_POSITIONS: Record<ItemZone, [ZonePos, ZonePos, ZonePos]> = 
     { l: '38%', t: '78%', w: '28%', h: '18%' },
   ],
   accessories: [
-    { l: '10%',  t: '10%',  w: '18%', h: '16%' },
-    { l: '10%',  t: '24%', w: '16%', h: '14%' },
-    { l: '10%',  t: '42%', w: '14%', h: '12%' },
+    { l: '10%', t: '10%', w: '18%', h: '16%' },
+    { l: '10%', t: '24%', w: '16%', h: '14%' },
+    { l: '10%', t: '42%', w: '14%', h: '12%' },
   ],
 };
 
@@ -386,9 +469,9 @@ export const TRIANGULAR_POSITIONS: Record<ItemZone, [ZonePos, ZonePos, ZonePos]>
     { l: '30%', t: '17%', w: '48%', h: '38%' },
   ],
   tops: [
-    { l: '10%',  t: '28%', w: '48%', h: '38%' },
-    { l: '10%',  t: '30%', w: '46%', h: '36%' },
-    { l: '10%',  t: '32%', w: '42%', h: '34%' },
+    { l: '10%', t: '28%', w: '48%', h: '38%' },
+    { l: '10%', t: '30%', w: '46%', h: '36%' },
+    { l: '10%', t: '32%', w: '42%', h: '34%' },
   ],
   bottoms: [
     { l: '28%', t: '54%', w: '50%', h: '40%' },
@@ -396,9 +479,9 @@ export const TRIANGULAR_POSITIONS: Record<ItemZone, [ZonePos, ZonePos, ZonePos]>
     { l: '24%', t: '58%', w: '42%', h: '36%' },
   ],
   shoes: [
-    { l: '10%',  t: '78%', w: '28%', h: '18%' },
-    { l: '10%',  t: '80%', w: '26%', h: '16%' },
-    { l: '10%',  t: '82%', w: '24%', h: '14%' },
+    { l: '10%', t: '78%', w: '28%', h: '18%' },
+    { l: '10%', t: '80%', w: '26%', h: '16%' },
+    { l: '10%', t: '82%', w: '24%', h: '14%' },
   ],
   // P1-G: accessories clustered adjacent to the typical outerwear anchor
   // (top-right third) rather than isolated in a corner. When the outfit's
@@ -424,8 +507,8 @@ export const TRIANGULAR_POSITIONS: Record<ItemZone, [ZonePos, ZonePos, ZonePos]>
 // identical — the single biggest "feels static" complaint we've heard.
 export const TRIANGULAR_MIRRORED_POSITIONS: Record<ItemZone, [ZonePos, ZonePos, ZonePos]> = {
   outerwear: [
-    { l: '10%',  t: '13%', w: '55%', h: '42%' },
-    { l: '10%',  t: '15%', w: '52%', h: '40%' },
+    { l: '10%', t: '13%', w: '55%', h: '42%' },
+    { l: '10%', t: '15%', w: '52%', h: '40%' },
     { l: '11%', t: '17%', w: '48%', h: '38%' },
   ],
   tops: [
@@ -444,9 +527,9 @@ export const TRIANGULAR_MIRRORED_POSITIONS: Record<ItemZone, [ZonePos, ZonePos, 
     { l: '70%', t: '82%', w: '24%', h: '14%' },
   ],
   accessories: [
-    { l: '10%',  t: '58%', w: '22%', h: '18%' },
-    { l: '10%',  t: '62%', w: '20%', h: '16%' },
-    { l: '10%',  t: '66%', w: '18%', h: '14%' },
+    { l: '10%', t: '58%', w: '22%', h: '18%' },
+    { l: '10%', t: '62%', w: '20%', h: '16%' },
+    { l: '10%', t: '66%', w: '18%', h: '14%' },
   ],
 };
 
@@ -465,7 +548,7 @@ export const ZONE_POSITIONS = TRIANGULAR_POSITIONS;
 // fallback.
 export const pickLayout = (
   activeZones: Set<ItemZone>,
-  seed?: string,
+  seed?: string
 ): Record<ItemZone, [ZonePos, ZonePos, ZonePos]> => {
   const hasOuter = activeZones.has('outerwear');
   const hasAccessory = activeZones.has('accessories');
@@ -474,9 +557,7 @@ export const pickLayout = (
     // back-to-back boards with the same zones look distinct. Missing
     // seed → default variant (stable behaviour for test/story fixtures).
     if (!seed) return TRIANGULAR_POSITIONS;
-    return (hashSeed(seed) & 1) === 0
-      ? TRIANGULAR_POSITIONS
-      : TRIANGULAR_MIRRORED_POSITIONS;
+    return (hashSeed(seed) & 1) === 0 ? TRIANGULAR_POSITIONS : TRIANGULAR_MIRRORED_POSITIONS;
   }
   if (hasAccessory) return NO_OUTER_POSITIONS;
   return MINIMAL_POSITIONS;
@@ -520,10 +601,10 @@ export const ITEM_GUTTER = 0.025;
 // Accessories are slightly tucked (the cluster should read as supporting,
 // not competing).
 export const ZONE_WEIGHT: Record<ItemZone, number> = {
-  outerwear:   1.05,
-  tops:        1.00,
-  bottoms:     0.88,
-  shoes:       0.85,
+  outerwear: 1.05,
+  tops: 1.0,
+  bottoms: 0.88,
+  shoes: 0.85,
   accessories: 0.92,
 };
 
@@ -570,10 +651,10 @@ export const VISUAL_WEIGHT_SCALE: Record<'statement' | 'supporting' | 'minor', n
 // sensible positions (they're rarely hero; when they are, the outfit
 // is built around them and the position feels intentional).
 export const HERO_THIRDS_CENTER: Record<ItemZone, { cx: number; cy: number }> = {
-  outerwear:   { cx: 65, cy: 34 },
-  tops:        { cx: 35, cy: 32 },
-  bottoms:     { cx: 50, cy: 65 },
-  shoes:       { cx: 33, cy: 82 },
+  outerwear: { cx: 65, cy: 34 },
+  tops: { cx: 35, cy: 32 },
+  bottoms: { cx: 50, cy: 65 },
+  shoes: { cx: 33, cy: 82 },
   accessories: { cx: 78, cy: 30 },
 };
 
@@ -586,7 +667,7 @@ export const scalePos = (
   zone: ItemZone,
   role: 'hero' | 'support' | 'accent' | undefined,
   visualWeight: 'statement' | 'supporting' | 'minor' | undefined,
-  activeZoneCount: number,
+  activeZoneCount: number
 ): ZonePos => {
   const parsePct = (v: `${number}%`) => parseFloat(v.slice(0, -1));
   const zoneW = ZONE_WEIGHT[zone];
@@ -666,7 +747,20 @@ export interface CollageProps {
   fill?: boolean;
 }
 
-export const Collage: React.FC<CollageProps> = ({ itemIds, itemMap, snapshots, layoutRoles, visualWeights, onItemPress, colorScheme, panelUrl, backgroundUrl, archetypeScores, palette, fill }) => {
+export const Collage: React.FC<CollageProps> = ({
+  itemIds,
+  itemMap,
+  snapshots,
+  layoutRoles,
+  visualWeights,
+  onItemPress,
+  colorScheme,
+  panelUrl,
+  backgroundUrl,
+  archetypeScores,
+  palette,
+  fill,
+}) => {
   // Build a snapshot lookup for fallback when items have been deleted.
   const snapshotMap = useMemo(() => {
     const map = new Map<string, OutfitItem>();
@@ -688,12 +782,12 @@ export const Collage: React.FC<CollageProps> = ({ itemIds, itemMap, snapshots, l
   const panelSource = useMemo(
     () => pickSurface(LOCAL_PANELS, archetypeScores, seed, palette),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- paletteKey is the stable dep for palette
-    [seed, archetypeScores, paletteKey],
+    [seed, archetypeScores, paletteKey]
   );
   const backgroundSource = useMemo(
     () => pickSurface(LOCAL_BACKGROUNDS, archetypeScores, seed, palette),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- paletteKey is the stable dep for palette
-    [seed, archetypeScores, paletteKey],
+    [seed, archetypeScores, paletteKey]
   );
 
   const sorted = useMemo(() => {
@@ -788,7 +882,7 @@ export const Collage: React.FC<CollageProps> = ({ itemIds, itemMap, snapshots, l
     }
 
     const ordered = [...placed].sort(
-      (a, b) => RENDER_ORDER.indexOf(a.zone) - RENDER_ORDER.indexOf(b.zone),
+      (a, b) => RENDER_ORDER.indexOf(a.zone) - RENDER_ORDER.indexOf(b.zone)
     );
 
     // P1-F: seeded rotation on 1–2 non-hero items.
@@ -821,7 +915,7 @@ export const Collage: React.FC<CollageProps> = ({ itemIds, itemMap, snapshots, l
         const targetIdx = rotatable[pickPos];
         if (rotationByIndex.has(targetIdx)) continue;
         const magnitude = 5 + ((hash + i * 7) % 11); // 5–15°
-        const sign = ((hash + i) % 2 === 0) ? 1 : -1;
+        const sign = (hash + i) % 2 === 0 ? 1 : -1;
         rotationByIndex.set(targetIdx, magnitude * sign);
       }
     }
@@ -861,8 +955,8 @@ export const Collage: React.FC<CollageProps> = ({ itemIds, itemMap, snapshots, l
         />
       </View>
       {sorted.map(({ itemId, item, snapshot, zone, pos, rotation }) => {
-        const imgUrl = item?.pngImageUrl || item?.imageUrl
-          || snapshot?.pngImageUrl || snapshot?.imageUrl;
+        const imgUrl =
+          item?.pngImageUrl || item?.imageUrl || snapshot?.pngImageUrl || snapshot?.imageUrl;
         const isMissing = !imgUrl;
         // #30 — when the outfit references an item whose wardrobe entry
         // has been deleted (no item, no snapshot with imageUrl), the old
@@ -875,7 +969,12 @@ export const Collage: React.FC<CollageProps> = ({ itemIds, itemMap, snapshots, l
         // contexts (read-only saved board previews) still get the quiet
         // closet icon.
         const content = imgUrl ? (
-          <Image source={{ uri: imgUrl }} style={styles.collageItem} contentFit="contain" cachePolicy="memory-disk" />
+          <Image
+            source={{ uri: imgUrl }}
+            style={styles.collageItem}
+            contentFit="contain"
+            cachePolicy="memory-disk"
+          />
         ) : onItemPress ? (
           <View style={styles.missingAffordance}>
             <Icon name="plus" size={24} color={iconFallbackColor} />
@@ -908,7 +1007,7 @@ export const Collage: React.FC<CollageProps> = ({ itemIds, itemMap, snapshots, l
         // as "Add {zone}" to match the visible label.
         const a11yLabel = isMissing
           ? `Add ${ZONE_LABEL[zone]}`
-          : item?.label ?? snapshot?.label ?? 'Swap this item';
+          : (item?.label ?? snapshot?.label ?? 'Swap this item');
         const a11yHint = isMissing
           ? 'Double tap to pick a replacement garment'
           : 'Double tap to swap this garment';
@@ -919,8 +1018,7 @@ export const Collage: React.FC<CollageProps> = ({ itemIds, itemMap, snapshots, l
             onPress={() => onItemPress(itemId)}
             accessibilityRole="button"
             accessibilityLabel={a11yLabel}
-            accessibilityHint={a11yHint}
-          >
+            accessibilityHint={a11yHint}>
             {content}
           </Pressable>
         ) : (

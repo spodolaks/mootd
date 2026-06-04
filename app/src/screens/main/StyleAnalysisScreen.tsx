@@ -1,11 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import {
-  ActivityIndicator,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { Icon } from '@/src/components';
@@ -37,11 +31,16 @@ const ARCHETYPE_PROFILES: Record<string, ArchetypeProfile> = {
     icon: 'star',
     title: 'The Ruler',
     description:
-      'Authority through refinement. You dress with intention — every piece signals control, quality, and status. Premium materials, structured silhouettes, and power colors define your wardrobe. You don\'t follow trends; you set the standard.',
+      "Authority through refinement. You dress with intention — every piece signals control, quality, and status. Premium materials, structured silhouettes, and power colors define your wardrobe. You don't follow trends; you set the standard.",
     colorSignals: ['black', 'navy', 'camel', 'charcoal', 'gold', 'royal blue', 'burgundy'],
     materialSignals: ['wool', 'leather', 'silk', 'cashmere'],
     formalityRange: ['business_casual', 'business', 'formal'],
-    keyTraits: ['Structured silhouettes', 'Investment pieces', 'Power palette', 'Status accessories'],
+    keyTraits: [
+      'Structured silhouettes',
+      'Investment pieces',
+      'Power palette',
+      'Status accessories',
+    ],
   },
   rebel: {
     name: 'rebel',
@@ -63,7 +62,12 @@ const ARCHETYPE_PROFILES: Record<string, ArchetypeProfile> = {
     colorSignals: ['red', 'purple', 'cobalt', 'multi', 'mustard', 'emerald'],
     materialSignals: ['silk', 'textured knit', 'linen', 'mixed fabrics'],
     formalityRange: ['casual', 'smart_casual', 'creative_formal'],
-    keyTraits: ['Pattern mixing', 'Distinctive silhouettes', 'Statement accessories', 'Curated color stories'],
+    keyTraits: [
+      'Pattern mixing',
+      'Distinctive silhouettes',
+      'Statement accessories',
+      'Curated color stories',
+    ],
   },
   lover: {
     name: 'lover',
@@ -107,7 +111,12 @@ const ARCHETYPE_PROFILES: Record<string, ArchetypeProfile> = {
     colorSignals: ['charcoal', 'grey', 'navy', 'forest', 'ivory', 'slate'],
     materialSignals: ['wool', 'cotton', 'tweed', 'fine knit'],
     formalityRange: ['smart_casual', 'business_casual', 'business'],
-    keyTraits: ['Timeless silhouettes', 'Muted palette', 'Quality over quantity', 'Intellectual restraint'],
+    keyTraits: [
+      'Timeless silhouettes',
+      'Muted palette',
+      'Quality over quantity',
+      'Intellectual restraint',
+    ],
   },
   magician: {
     name: 'magician',
@@ -147,7 +156,7 @@ const ARCHETYPE_PROFILES: Record<string, ArchetypeProfile> = {
     icon: 'idea',
     title: 'The Jester',
     description:
-      'Life\'s too short for boring clothes. Bold prints, playful colors, and unexpected combinations that make people smile. Your wardrobe is a conversation starter.',
+      "Life's too short for boring clothes. Bold prints, playful colors, and unexpected combinations that make people smile. Your wardrobe is a conversation starter.",
     colorSignals: ['bright', 'yellow', 'orange', 'electric blue', 'hot pink', 'multi'],
     materialSignals: ['printed', 'graphic tee', 'novelty', 'denim'],
     formalityRange: ['casual'],
@@ -194,7 +203,13 @@ function analyzeWardrobe(items: WardrobeItem[]): ScoredArchetype[] {
     if (t.overall_style) allStyles.push(t.overall_style.toLowerCase());
   }
 
-  const allSignals = [...allColors, ...allMaterials, ...allStyles, ...allOccasions, ...allDetails].join(' ');
+  const allSignals = [
+    ...allColors,
+    ...allMaterials,
+    ...allStyles,
+    ...allOccasions,
+    ...allDetails,
+  ].join(' ');
 
   const results: ScoredArchetype[] = [];
 
@@ -284,8 +299,10 @@ export const StyleAnalysisScreen: React.FC = () => {
         }
       };
       void load();
-      return () => { cancelled = true; };
-    }, []),
+      return () => {
+        cancelled = true;
+      };
+    }, [])
   );
 
   const scored = analyzeWardrobe(items);
@@ -335,19 +352,18 @@ export const StyleAnalysisScreen: React.FC = () => {
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
+        showsVerticalScrollIndicator={false}>
         {/* Primary archetype — hero card */}
         {primary && (
           <View style={[styles.heroCard, { backgroundColor: cardBg }]}>
             <View style={styles.heroHeader}>
               <Icon name={primary.profile.icon} size={28} color={textColor} />
-              <Text style={[styles.heroTitle, { color: textColor }]}>
-                {primary.profile.title}
-              </Text>
+              <Text style={[styles.heroTitle, { color: textColor }]}>{primary.profile.title}</Text>
             </View>
             <View style={styles.heroScoreBadge}>
-              <Text style={[styles.heroScoreLabel, { color: secondaryText }]}>Primary archetype</Text>
+              <Text style={[styles.heroScoreLabel, { color: secondaryText }]}>
+                Primary archetype
+              </Text>
               <Text style={[styles.heroScoreValue, { color: textColor }]}>
                 {Math.round(primary.score * 100)}% match
               </Text>
@@ -357,7 +373,9 @@ export const StyleAnalysisScreen: React.FC = () => {
             </Text>
             <View style={styles.traitRow}>
               {primary.profile.keyTraits.map(trait => (
-                <View key={trait} style={[styles.traitChip, { backgroundColor: backgrounds.primary[colorScheme] }]}>
+                <View
+                  key={trait}
+                  style={[styles.traitChip, { backgroundColor: backgrounds.primary[colorScheme] }]}>
                   <Text style={[styles.traitChipText, { color: textColor }]}>{trait}</Text>
                 </View>
               ))}
@@ -459,7 +477,11 @@ interface ArchetypeCardProps {
 }
 
 const ArchetypeCard: React.FC<ArchetypeCardProps> = ({
-  archetype, label, cardBg, textColor, secondaryText,
+  archetype,
+  label,
+  cardBg,
+  textColor,
+  secondaryText,
 }) => (
   <View style={[styles.miniCard, { backgroundColor: cardBg }]}>
     <Text style={[styles.miniLabel, { color: secondaryText }]}>{label}</Text>
@@ -479,7 +501,13 @@ interface SignalRowProps {
   chipBg: string;
 }
 
-const SignalRow: React.FC<SignalRowProps> = ({ label, values, textColor, secondaryText, chipBg }) => (
+const SignalRow: React.FC<SignalRowProps> = ({
+  label,
+  values,
+  textColor,
+  secondaryText,
+  chipBg,
+}) => (
   <View style={styles.signalRow}>
     <Text style={[styles.signalLabel, { color: secondaryText }]}>{label}</Text>
     <View style={styles.signalChips}>

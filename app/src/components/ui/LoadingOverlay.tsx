@@ -1,5 +1,9 @@
 import React from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { useColorScheme } from '@/src/hooks';
+import { backgrounds, labels, overlays } from '@/src/theme/colors';
+import { radius } from '@/src/theme/radius';
+import { spacing } from '@/src/theme/spacing';
 import { Text } from './Text';
 
 export interface LoadingOverlayProps {
@@ -7,33 +11,36 @@ export interface LoadingOverlayProps {
   message?: string;
 }
 
-export const LoadingOverlay: React.FC<LoadingOverlayProps> = ({
-  message = 'Loading…',
-}) => (
-  <View style={styles.overlay}>
-    <View style={styles.box}>
-      <ActivityIndicator size="large" color="#007AFF" />
-      <Text variant="subheadline" weight="semiBold" style={styles.label}>
-        {message}
-      </Text>
+export const LoadingOverlay: React.FC<LoadingOverlayProps> = ({ message = 'Loading…' }) => {
+  const colorScheme = useColorScheme() ?? 'light';
+
+  return (
+    <View
+      style={[styles.overlay, { backgroundColor: overlays.default[colorScheme] }]}
+      accessibilityRole="progressbar"
+      accessibilityLabel={message}>
+      <View style={[styles.box, { backgroundColor: backgrounds.secondary[colorScheme] }]}>
+        <ActivityIndicator size="large" color={labels.primary[colorScheme]} />
+        <Text variant="subheadline" weight="semiBold" style={styles.label}>
+          {message}
+        </Text>
+      </View>
     </View>
-  </View>
-);
+  );
+};
 
 const styles = StyleSheet.create({
   overlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0, 0, 0, 0.45)',
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 100,
   },
   box: {
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
-    borderRadius: 16,
-    padding: 32,
+    borderRadius: radius.xl,
+    padding: spacing.xl,
     alignItems: 'center',
-    gap: 16,
+    gap: spacing.md,
   },
   label: {
     textAlign: 'center',

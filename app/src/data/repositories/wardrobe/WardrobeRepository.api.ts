@@ -69,7 +69,9 @@ export class ApiWardrobeRepository implements IWardrobeRepository {
       } as unknown as Blob);
     }
 
-    console.log('[Wardrobe] → POST /v1/wardrobe/detect (backend will poll detection service every 3 s)');
+    console.log(
+      '[Wardrobe] → POST /v1/wardrobe/detect (backend will poll detection service every 3 s)'
+    );
 
     // Log a heartbeat every 3 s while the backend polls the detection service.
     const heartbeat = setInterval(() => {
@@ -99,7 +101,7 @@ export class ApiWardrobeRepository implements IWardrobeRepository {
       clearTimeout(timeoutId);
     }
 
-    const body = await rawResponse.json().catch(() => ({})) as Record<string, unknown>;
+    const body = (await rawResponse.json().catch(() => ({}))) as Record<string, unknown>;
 
     if (!rawResponse.ok) {
       const msg =
@@ -110,12 +112,14 @@ export class ApiWardrobeRepository implements IWardrobeRepository {
 
     const data = body as { items: DetectAPIResponse['items'] };
     console.log(
-      `[Wardrobe] ✓ Response received in ${elapsed()} — ${data.items?.length ?? 0} item(s) detected`,
+      `[Wardrobe] ✓ Response received in ${elapsed()} — ${data.items?.length ?? 0} item(s) detected`
     );
     (data.items ?? []).forEach((item, i) => {
       console.log(
         `[Wardrobe]   [${i + 1}] ${item.label} (${item.category})` +
-          (item.confidence !== undefined ? ` confidence=${(item.confidence * 100).toFixed(0)}%` : ''),
+          (item.confidence !== undefined
+            ? ` confidence=${(item.confidence * 100).toFixed(0)}%`
+            : '')
       );
     });
 
@@ -162,7 +166,9 @@ export class ApiWardrobeRepository implements IWardrobeRepository {
     const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
     if (!response.ok) {
       const msg =
-        typeof body.error === 'string' ? body.error : `Detection submit failed (${response.status})`;
+        typeof body.error === 'string'
+          ? body.error
+          : `Detection submit failed (${response.status})`;
       throw new ApiError(msg, response.status, body);
     }
 
@@ -202,7 +208,10 @@ export class ApiWardrobeRepository implements IWardrobeRepository {
     return { status: raw.status, items, error: raw.error };
   }
 
-  async getItems(params?: { limit?: number; cursor?: string }): Promise<{ items: WardrobeItem[]; nextCursor: string | null }> {
+  async getItems(params?: {
+    limit?: number;
+    cursor?: string;
+  }): Promise<{ items: WardrobeItem[]; nextCursor: string | null }> {
     const qs = new URLSearchParams();
     if (params?.limit) qs.set('limit', String(params.limit));
     if (params?.cursor) qs.set('cursor', params.cursor);
@@ -216,7 +225,9 @@ export class ApiWardrobeRepository implements IWardrobeRepository {
       imageUrl: toAbsoluteImageURL(item.imageUrl),
       pngImageUrl: toAbsoluteImageURL(item.pngImageUrl) || undefined,
     }));
-    console.log(`[Wardrobe] ✓ Wardrobe loaded — ${items.length} item(s), nextCursor=${response.nextCursor ? 'yes' : 'none'}`);
+    console.log(
+      `[Wardrobe] ✓ Wardrobe loaded — ${items.length} item(s), nextCursor=${response.nextCursor ? 'yes' : 'none'}`
+    );
     return { items, nextCursor: response.nextCursor ?? null };
   }
 
@@ -239,7 +250,12 @@ export class ApiWardrobeRepository implements IWardrobeRepository {
     return all;
   }
 
-  async updateItem(id: string, traits: Record<string, string>, label?: string, imageUrl?: string): Promise<void> {
+  async updateItem(
+    id: string,
+    traits: Record<string, string>,
+    label?: string,
+    imageUrl?: string
+  ): Promise<void> {
     console.log(`[Wardrobe] → PATCH /v1/wardrobe/items/${id}`);
     await apiClient.patch(`/v1/wardrobe/items/${id}`, {
       traits,
@@ -259,7 +275,7 @@ export class ApiWardrobeRepository implements IWardrobeRepository {
     console.log(`[Wardrobe] → POST /v1/wardrobe/items/${itemId}/search brand=${brand}`);
     const result = await apiClient.post<{ results: ClothingSearchProduct[] }>(
       `/v1/wardrobe/items/${itemId}/search`,
-      { brand },
+      { brand }
     );
     const results = result.results ?? [];
     console.log(`[Wardrobe] ✓ Search returned ${results.length} product(s)`);
@@ -268,7 +284,7 @@ export class ApiWardrobeRepository implements IWardrobeRepository {
 
   async submitOutfitGeneration(
     weather?: { temperature: number; condition: string; unit: string },
-    idempotencyKey?: string,
+    idempotencyKey?: string
   ): Promise<string> {
     const params = new URLSearchParams();
     if (weather) {
@@ -305,7 +321,7 @@ export class ApiWardrobeRepository implements IWardrobeRepository {
   async streamOutfitGeneration(
     onProgress: (p: OutfitProgress) => void,
     weather?: { temperature: number; condition: string; unit: string },
-    _idempotencyKey?: string,
+    _idempotencyKey?: string
   ): Promise<Outfit[]> {
     const params = new URLSearchParams();
     if (weather) {
@@ -323,7 +339,7 @@ export class ApiWardrobeRepository implements IWardrobeRepository {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Accept': 'text/event-stream',
+        Accept: 'text/event-stream',
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
       body: JSON.stringify({}),
@@ -365,11 +381,8 @@ export class ApiWardrobeRepository implements IWardrobeRepository {
         if (!parsed) continue;
         try {
           const payload = JSON.parse(parsed.data);
-          const stage: OutfitProgress['stage'] = parsed.event === 'done'
-            ? 'done'
-            : parsed.event === 'error'
-              ? 'error'
-              : 'streaming';
+          const stage: OutfitProgress['stage'] =
+            parsed.event === 'done' ? 'done' : parsed.event === 'error' ? 'error' : 'streaming';
           const outfits = payload.outfits
             ? (payload.outfits as Outfit[]).map(hydrateOutfitUrls)
             : undefined;
@@ -393,15 +406,27 @@ export class ApiWardrobeRepository implements IWardrobeRepository {
     throw new Error(lastError ?? 'stream ended without final outfits');
   }
 
-  async pollOutfitJob(jobId: string): Promise<{ status: 'pending' | 'processing' | 'completed' | 'failed'; outfits?: Outfit[]; error?: string }> {
-    const raw = await apiClient.get<{ status: 'pending' | 'processing' | 'completed' | 'failed'; outfits?: Outfit[]; error?: string }>(`/v1/outfits/jobs/${jobId}`);
+  async pollOutfitJob(jobId: string): Promise<{
+    status: 'pending' | 'processing' | 'completed' | 'failed';
+    outfits?: Outfit[];
+    error?: string;
+  }> {
+    const raw = await apiClient.get<{
+      status: 'pending' | 'processing' | 'completed' | 'failed';
+      outfits?: Outfit[];
+      error?: string;
+    }>(`/v1/outfits/jobs/${jobId}`);
     if (raw.outfits) {
       raw.outfits = raw.outfits.map(hydrateOutfitUrls);
     }
     return raw;
   }
 
-  async getOutfits(weather?: { temperature: number; condition: string; unit: string }): Promise<Outfit[]> {
+  async getOutfits(weather?: {
+    temperature: number;
+    condition: string;
+    unit: string;
+  }): Promise<Outfit[]> {
     const params = new URLSearchParams();
     if (weather) {
       params.set('temperature', String(Math.round(weather.temperature)));
@@ -429,9 +454,10 @@ export class ApiWardrobeRepository implements IWardrobeRepository {
       clearTimeout(timeoutId);
     }
 
-    const body = await rawResponse.json().catch(() => ({})) as Record<string, unknown>;
+    const body = (await rawResponse.json().catch(() => ({}))) as Record<string, unknown>;
     if (!rawResponse.ok) {
-      const msg = typeof body.error === 'string' ? body.error : `Outfits failed (${rawResponse.status})`;
+      const msg =
+        typeof body.error === 'string' ? body.error : `Outfits failed (${rawResponse.status})`;
       throw new ApiError(msg, rawResponse.status, body);
     }
 
@@ -444,7 +470,7 @@ export class ApiWardrobeRepository implements IWardrobeRepository {
     console.log(`[Wardrobe] → POST /v1/wardrobe/items/from-archetype-default ${defaultId}`);
     const res = await apiClient.post<{ item: WardrobeItem }>(
       '/v1/wardrobe/items/from-archetype-default',
-      { defaultId },
+      { defaultId }
     );
     // Image URLs from the backend are server-relative; the mobile
     // <Image> needs absolute URLs to fetch directly. Mirrors what
@@ -472,10 +498,12 @@ const hydrateOutfitUrls = (outfit: Outfit): Outfit => {
   // ItemSnapshots arrive with server-relative imageUrl/pngImageUrl
   // (e.g. /v1/wardrobe/items/ad_<hex>/image for fillers). The
   // mobile <Image> component needs absolute URLs.
-  const hydratedSnapshots = outfit.itemSnapshots?.map((snap) => ({
+  const hydratedSnapshots = outfit.itemSnapshots?.map(snap => ({
     ...snap,
     imageUrl: toAbsoluteImageURL(snap.imageUrl) || snap.imageUrl,
-    pngImageUrl: snap.pngImageUrl ? (toAbsoluteImageURL(snap.pngImageUrl) || snap.pngImageUrl) : undefined,
+    pngImageUrl: snap.pngImageUrl
+      ? toAbsoluteImageURL(snap.pngImageUrl) || snap.pngImageUrl
+      : undefined,
   }));
   return {
     ...outfit,

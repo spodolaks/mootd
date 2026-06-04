@@ -5,9 +5,6 @@
 // bundle.
 //
 // Signature matches html-to-image's toPng so call sites can stay identical.
-export const toPng = async (
-  _node: unknown,
-  _options?: unknown,
-): Promise<string> => {
+export const toPng = async (_node: unknown, _options?: unknown): Promise<string> => {
   throw new Error('html-to-image is only available on the web bundle');
 };

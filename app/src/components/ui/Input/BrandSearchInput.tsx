@@ -1,14 +1,6 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  Animated,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { Animated, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import type { TextInputProps, ViewStyle } from 'react-native';
 import { useColorScheme } from '@/src/hooks';
 import { Icon } from '../../icons/Icon';
@@ -25,7 +17,6 @@ const INNER_RADIUS = radius.full - BORDER_WIDTH;
 
 const GRADIENT_COLORS = gradients.primary.colors;
 const GRADIENT_LOCATIONS = gradients.primary.locations;
-
 
 export interface BrandSearchInputProps extends Omit<TextInputProps, 'style'> {
   /** Called when the clear (×) button is pressed */
@@ -80,21 +71,27 @@ export const BrandSearchInput: React.FC<BrandSearchInputProps> = ({
     }).start();
   };
 
-  const handleChangeText = useCallback((text: string) => {
-    onChangeText?.(text);
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    if (text.trim().length === 0) {
-      setSuggestions([]);
-      return;
-    }
-    debounceRef.current = setTimeout(() => {
-      void brandsRepository.searchBrands(text.trim()).then((results) => {
-        setSuggestions(results);
-      }).catch(() => {
+  const handleChangeText = useCallback(
+    (text: string) => {
+      onChangeText?.(text);
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      if (text.trim().length === 0) {
         setSuggestions([]);
-      });
-    }, 300);
-  }, [onChangeText]);
+        return;
+      }
+      debounceRef.current = setTimeout(() => {
+        void brandsRepository
+          .searchBrands(text.trim())
+          .then(results => {
+            setSuggestions(results);
+          })
+          .catch(() => {
+            setSuggestions([]);
+          });
+      }, 300);
+    },
+    [onChangeText]
+  );
 
   const handleClear = () => {
     onChangeText?.('');
@@ -120,7 +117,11 @@ export const BrandSearchInput: React.FC<BrandSearchInputProps> = ({
     <View style={[styles.container, style]}>
       <Pressable onPress={() => inputRef.current?.focus()} style={styles.wrapper}>
         {/* Gradient border layer — fades in on focus */}
-        <Animated.View style={[StyleSheet.absoluteFill, { opacity: gradientOpacity, borderRadius: radius.full }]}>
+        <Animated.View
+          style={[
+            StyleSheet.absoluteFill,
+            { opacity: gradientOpacity, borderRadius: radius.full },
+          ]}>
           <LinearGradient
             colors={GRADIENT_COLORS}
             locations={GRADIENT_LOCATIONS}
@@ -131,8 +132,21 @@ export const BrandSearchInput: React.FC<BrandSearchInputProps> = ({
         </Animated.View>
 
         {/* Static unfocused border */}
-        <Animated.View style={[StyleSheet.absoluteFill, { opacity: Animated.subtract(1, gradientOpacity), borderRadius: radius.full }]}>
-          <View style={[StyleSheet.absoluteFill, { borderRadius: radius.full, borderWidth: BORDER_WIDTH, borderColor: fills.secondary[colorScheme] }]} />
+        <Animated.View
+          style={[
+            StyleSheet.absoluteFill,
+            { opacity: Animated.subtract(1, gradientOpacity), borderRadius: radius.full },
+          ]}>
+          <View
+            style={[
+              StyleSheet.absoluteFill,
+              {
+                borderRadius: radius.full,
+                borderWidth: BORDER_WIDTH,
+                borderColor: fills.secondary[colorScheme],
+              },
+            ]}
+          />
         </Animated.View>
 
         {/* Input background + content */}
@@ -144,7 +158,10 @@ export const BrandSearchInput: React.FC<BrandSearchInputProps> = ({
             value={value}
             onChangeText={handleChangeText}
             onFocus={handleFocus}
-            onBlur={(e) => { handleBlur(); onBlur?.(e); }}
+            onBlur={e => {
+              handleBlur();
+              onBlur?.(e);
+            }}
             placeholder={placeholder}
             placeholderTextColor={placeholderColor}
             returnKeyType="search"
@@ -163,18 +180,15 @@ export const BrandSearchInput: React.FC<BrandSearchInputProps> = ({
       {showSuggestions && (
         <View style={[styles.dropdown, { backgroundColor: dropdownBg }]}>
           <ScrollView keyboardShouldPersistTaps="always" bounces={false}>
-            {suggestions.map((brand) => (
+            {suggestions.map(brand => (
               <Pressable
                 key={brand}
                 style={({ pressed }) => [
                   styles.suggestionItem,
                   pressed && { backgroundColor: fills.tertiary[colorScheme] },
                 ]}
-                onPress={() => handleSuggestionPress(brand)}
-              >
-                <Text style={[typography.body.regular, { color: textColor }]}>
-                  {brand}
-                </Text>
+                onPress={() => handleSuggestionPress(brand)}>
+                <Text style={[typography.body.regular, { color: textColor }]}>{brand}</Text>
               </Pressable>
             ))}
           </ScrollView>

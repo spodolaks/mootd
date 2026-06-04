@@ -7,7 +7,9 @@ export class ApiBrandsRepository implements IBrandsRepository {
   }
 
   async searchBrands(query: string): Promise<string[]> {
-    const response = await apiClient.get<{ brands: string[] }>(`/v1/brands?q=${encodeURIComponent(query)}`);
+    const response = await apiClient.get<{ brands: string[] }>(
+      `/v1/brands?q=${encodeURIComponent(query)}`
+    );
     return response.brands ?? [];
   }
 }

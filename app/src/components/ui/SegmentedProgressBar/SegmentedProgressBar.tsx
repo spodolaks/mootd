@@ -33,12 +33,7 @@ export const SegmentedProgressBar: React.FC<SegmentedProgressBarProps> = ({
           />
         ))}
       </View>
-      {withFade && (
-        <LinearGradient
-          colors={[backgroundColor, 'transparent']}
-          style={styles.fade}
-        />
-      )}
+      {withFade && <LinearGradient colors={[backgroundColor, 'transparent']} style={styles.fade} />}
     </View>
   );
 };

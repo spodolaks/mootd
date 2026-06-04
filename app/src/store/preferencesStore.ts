@@ -142,7 +142,7 @@ function getState(store: PreferencesStore): PreferencesState {
 function update(
   set: (fn: (s: PreferencesStore) => Partial<PreferencesStore>) => void,
   get: () => PreferencesStore,
-  patch: Partial<PreferencesState>,
+  patch: Partial<PreferencesState>
 ) {
   set(() => patch);
   persist(getState(get()));
@@ -155,14 +155,14 @@ const initialState: PreferencesState = { ...DEFAULTS, ...loadSync() };
 export const usePreferencesStore = create<PreferencesStore>((set, get) => ({
   ...initialState,
 
-  setTheme: (theme) => update(set, get, { theme }),
-  setPushNotifications: (pushNotifications) => update(set, get, { pushNotifications }),
-  setDailyOutfitReminder: (dailyOutfitReminder) => update(set, get, { dailyOutfitReminder }),
-  setWeatherAlerts: (weatherAlerts) => update(set, get, { weatherAlerts }),
-  setTemperatureUnit: (temperatureUnit) => update(set, get, { temperatureUnit }),
-  setCreativity: (creativity) => update(set, get, { creativity }),
-  setDisplayName: (displayName) => update(set, get, { displayName }),
-  setEmail: (email) => update(set, get, { email }),
+  setTheme: theme => update(set, get, { theme }),
+  setPushNotifications: pushNotifications => update(set, get, { pushNotifications }),
+  setDailyOutfitReminder: dailyOutfitReminder => update(set, get, { dailyOutfitReminder }),
+  setWeatherAlerts: weatherAlerts => update(set, get, { weatherAlerts }),
+  setTemperatureUnit: temperatureUnit => update(set, get, { temperatureUnit }),
+  setCreativity: creativity => update(set, get, { creativity }),
+  setDisplayName: displayName => update(set, get, { displayName }),
+  setEmail: email => update(set, get, { email }),
 
   hydrate: async () => {
     const persisted = await loadAsync();

@@ -1,4 +1,3 @@
-/* eslint-env jest, node */
 // Jest setup — runs after the test framework is installed,
 // before each test file. Use for mocks of native modules that
 // can't load in the jest-expo node environment.

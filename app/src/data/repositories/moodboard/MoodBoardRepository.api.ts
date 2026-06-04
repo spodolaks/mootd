@@ -27,7 +27,7 @@ const hydrateSavedBoard = (board: SavedMoodBoard): SavedMoodBoard => ({
  *  date, while letting newer call sites forward generatedBatch + jobId so
  *  the server-side feedback emit can preserve the full generation trail. */
 const normaliseOptions = (options?: string | SaveOptions): SaveOptions =>
-  typeof options === 'string' ? { date: options } : options ?? {};
+  typeof options === 'string' ? { date: options } : (options ?? {});
 
 /** Drop fields the wire schema doesn't know about. The FE's Outfit type
  *  carries `itemSnapshots` (the resolved-at-generation list with the

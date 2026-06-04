@@ -14,6 +14,7 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import {
+  Alert,
   Platform,
   Pressable,
   ScrollView,
@@ -31,13 +32,7 @@ import { apiClient } from '@/src/data/api/client';
 import { useColorScheme } from '@/src/hooks';
 import { usePreferencesStore } from '@/src/store/preferencesStore';
 import { useAuthStore } from '@/src/store';
-import {
-  accents,
-  backgrounds,
-  grays,
-  labels,
-  separators,
-} from '@/src/theme/colors';
+import { accents, backgrounds, grays, labels, separators } from '@/src/theme/colors';
 import { typography } from '@/src/theme/typography';
 
 // ─── Component ───────────────────────────────────────────────────────────────
@@ -47,8 +42,8 @@ export const PreferencesScreen: React.FC = () => {
   const router = useRouter();
 
   // Auth
-  const user = useAuthStore((s) => s.user);
-  const signOut = useAuthStore((s) => s.signOut);
+  const user = useAuthStore(s => s.user);
+  const signOut = useAuthStore(s => s.signOut);
 
   // All preferences from the unified store
   const prefs = usePreferencesStore();
@@ -64,7 +59,7 @@ export const PreferencesScreen: React.FC = () => {
   useFocusEffect(
     useCallback(() => {
       setDraftName(prefs.displayName || user?.name || '');
-    }, [prefs.displayName, user?.name]),
+    }, [prefs.displayName, user?.name])
   );
 
   // Gender preference. Loaded from /v1/user/profile; defaults to
@@ -74,7 +69,7 @@ export const PreferencesScreen: React.FC = () => {
     let cancelled = false;
     apiClient
       .get<{ gender?: string }>('/v1/user/profile')
-      .then((p) => {
+      .then(p => {
         if (!cancelled && p.gender) setGender(p.gender);
       })
       .catch(() => {
@@ -105,26 +100,25 @@ export const PreferencesScreen: React.FC = () => {
   // mapping to {0, 0.25, 0.5, 0.75, 1}. Optimistic local update
   // + best-effort PUT /v1/user/profile; a network failure logs
   // and the next save retries.
-  const handleCreativityChange = useCallback((value: string) => {
-    const c = parseFloat(value);
-    if (!Number.isFinite(c)) return;
-    prefs.setCreativity(c);
-    void apiClient
-      .put('/v1/user/profile', { creativity: c })
-      .catch((err: unknown) => {
+  const handleCreativityChange = useCallback(
+    (value: string) => {
+      const c = parseFloat(value);
+      if (!Number.isFinite(c)) return;
+      prefs.setCreativity(c);
+      void apiClient.put('/v1/user/profile', { creativity: c }).catch((err: unknown) => {
         console.warn('[Preferences] creativity sync failed:', err);
       });
-  }, [prefs]);
+    },
+    [prefs]
+  );
 
   // Gender — optimistic local update + best-effort PUT, mirroring
   // the creativity sync above.
   const handleGenderChange = useCallback((value: string) => {
     setGender(value);
-    void apiClient
-      .put('/v1/user/profile', { gender: value })
-      .catch((err: unknown) => {
-        console.warn('[Preferences] gender sync failed:', err);
-      });
+    void apiClient.put('/v1/user/profile', { gender: value }).catch((err: unknown) => {
+      console.warn('[Preferences] gender sync failed:', err);
+    });
   }, []);
 
   const handleDeleteAccount = useCallback(() => {
@@ -136,19 +130,18 @@ export const PreferencesScreen: React.FC = () => {
 
     if (Platform.OS === 'web') {
       // Alert.alert is a no-op on web – use window.confirm instead
-       
+
       if (confirm('This will permanently delete your account. Continue?')) {
         doDelete();
       }
     } else {
-      const { Alert } = require('react-native');
       Alert.alert(
         'Delete Account',
         'This will permanently delete your account and all your data. This action cannot be undone.',
         [
           { text: 'Cancel', style: 'cancel' },
           { text: 'Delete', style: 'destructive', onPress: doDelete },
-        ],
+        ]
       );
     }
   }, [prefs, signOut, router]);
@@ -158,10 +151,7 @@ export const PreferencesScreen: React.FC = () => {
     <SafeAreaView style={[styles.container, { backgroundColor: bg }]} edges={['top']}>
       {/* Header */}
       <View style={styles.header}>
-        <Pressable
-          onPress={() => router.back()}
-          style={styles.backButton}
-        >
+        <Pressable onPress={() => router.back()} style={styles.backButton}>
           <Icon name="chevron-left" size={24} color={text} />
         </Pressable>
         <Text style={[styles.title, { color: text }]}>Preferences</Text>
@@ -171,8 +161,7 @@ export const PreferencesScreen: React.FC = () => {
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
+        showsVerticalScrollIndicator={false}>
         {/* ── Appearance ──────────────────────────────────────────────── */}
         <SettingsSection title="Appearance" color={secondary} cardBackground={cardBg}>
           <SettingsRow
@@ -341,8 +330,7 @@ export const PreferencesScreen: React.FC = () => {
             {draftName !== (prefs.displayName || user?.name || '') && (
               <Pressable
                 onPress={handleSaveName}
-                style={[styles.saveButton, { backgroundColor: accent }]}
-              >
+                style={[styles.saveButton, { backgroundColor: accent }]}>
                 <Text style={styles.saveButtonText}>Save</Text>
               </Pressable>
             )}
@@ -364,7 +352,9 @@ export const PreferencesScreen: React.FC = () => {
             mode="navigation"
             icon="privacy"
             label="Privacy Policy"
-            onPress={() => {/* TODO: open URL */}}
+            onPress={() => {
+              /* TODO: open URL */
+            }}
             textColor={text}
             chevronColor={tertiary}
             dividerColor={divider}
@@ -374,7 +364,9 @@ export const PreferencesScreen: React.FC = () => {
             mode="navigation"
             icon="file"
             label="Terms of Service"
-            onPress={() => {/* TODO: open URL */}}
+            onPress={() => {
+              /* TODO: open URL */
+            }}
             textColor={text}
             chevronColor={tertiary}
             dividerColor={divider}
@@ -392,9 +384,7 @@ export const PreferencesScreen: React.FC = () => {
 
         {/* ── Footer ──────────────────────────────────────────────────── */}
         <View style={styles.footer}>
-          <Text style={[styles.footerText, { color: tertiary }]}>
-            MooTD v1.0.0
-          </Text>
+          <Text style={[styles.footerText, { color: tertiary }]}>MooTD v1.0.0</Text>
         </View>
       </ScrollView>
     </SafeAreaView>

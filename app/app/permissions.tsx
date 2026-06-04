@@ -9,9 +9,5 @@ export default function Permissions() {
     router.push('/loading');
   };
 
-  return (
-    <PermissionsScreen
-      onGetStarted={handleGetStarted}
-    />
-  );
+  return <PermissionsScreen onGetStarted={handleGetStarted} />;
 }

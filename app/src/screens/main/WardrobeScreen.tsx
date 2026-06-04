@@ -1,8 +1,4 @@
-import {
-  GradientIconButton,
-  Icon,
-  Modal,
-} from '@/src/components';
+import { GradientIconButton, Icon, Modal } from '@/src/components';
 import { Skeleton } from '@/src/components/ui';
 import { useColorScheme } from '@/src/hooks';
 import { backgrounds, button, fills, grays, labels } from '@/src/theme/colors';
@@ -38,7 +34,7 @@ import { useTabContentBottomPadding, PILL_GUTTER } from '@/app/(main)/_layout';
 // through and washes out the items.
 const CARD_BG = {
   light: grays.gray5.light, // #E5E5EA — one step darker than page bg #F2F2F7
-  dark: grays.gray4.dark,   // #3A3A3C — the pre-existing dark-theme color
+  dark: grays.gray4.dark, // #3A3A3C — the pre-existing dark-theme color
 };
 
 // F4: stable keyExtractor defined at module scope. The previous inline
@@ -54,7 +50,12 @@ interface ClothingCardImageProps {
   placeholderColor: string;
 }
 
-const ClothingCardImage: React.FC<ClothingCardImageProps> = ({ imageUrl, pngImageUrl, category, placeholderColor }) => {
+const ClothingCardImage: React.FC<ClothingCardImageProps> = ({
+  imageUrl,
+  pngImageUrl,
+  category,
+  placeholderColor,
+}) => {
   const [imgError, setImgError] = useState(false);
   // Prefer bg-removed PNG for clean transparent look on the card.
   const displayUrl = pngImageUrl || imageUrl;
@@ -72,9 +73,7 @@ const ClothingCardImage: React.FC<ClothingCardImageProps> = ({ imageUrl, pngImag
   return (
     <View style={styles.clothingPlaceholder}>
       <Icon name="closet" size={32} color={placeholderColor} />
-      <Text style={[styles.placeholderCategory, { color: placeholderColor }]}>
-        {category}
-      </Text>
+      <Text style={[styles.placeholderCategory, { color: placeholderColor }]}>{category}</Text>
     </View>
   );
 };
@@ -86,7 +85,7 @@ interface CategoryChip {
 }
 
 const toDetectionSteps = (result: ClothingDetectionResult): DetectionStep[] =>
-  result.items.map((item) => ({
+  result.items.map(item => ({
     category: item.category,
     similarItems: [
       {
@@ -103,11 +102,11 @@ export const WardrobeScreen: React.FC = () => {
   const tabBottomPadding = useTabContentBottomPadding();
   const router = useRouter();
   const { initializeFlow } = useWardrobeStore();
-  const startJob = useDetectionJobStore((s) => s.startJob);
-  const jobs = useDetectionJobStore((s) => s.jobs);
-  const consumeCompleted = useDetectionJobStore((s) => s.consumeCompleted);
-  const dismissJob = useDetectionJobStore((s) => s.dismissJob);
-  const showToast = useUIStore((s) => s.showToast);
+  const startJob = useDetectionJobStore(s => s.startJob);
+  const jobs = useDetectionJobStore(s => s.jobs);
+  const consumeCompleted = useDetectionJobStore(s => s.consumeCompleted);
+  const dismissJob = useDetectionJobStore(s => s.dismissJob);
+  const showToast = useUIStore(s => s.showToast);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [isAddModalVisible, setIsAddModalVisible] = useState(false);
@@ -166,7 +165,9 @@ export const WardrobeScreen: React.FC = () => {
     if (!nextCursor || isLoadingMore) return;
     setIsLoadingMore(true);
     try {
-      const { items, nextCursor: cursor } = await wardrobeRepository.getItems({ cursor: nextCursor });
+      const { items, nextCursor: cursor } = await wardrobeRepository.getItems({
+        cursor: nextCursor,
+      });
       setWardrobeItems(prev => [...prev, ...items]);
       setNextCursor(cursor);
     } catch (e) {
@@ -180,20 +181,15 @@ export const WardrobeScreen: React.FC = () => {
   useFocusEffect(
     useCallback(() => {
       void loadItems();
-    }, [loadItems]),
+    }, [loadItems])
   );
 
   const categories: CategoryChip[] = [
     { id: 'all', label: 'All' },
     ...Array.from(
-      new Set(
-        wardrobeItems
-          .map((i) => i.traits['macro_category'] ?? '')
-          .filter(Boolean),
-      ),
-    ).map((cat) => ({ id: cat, label: cat })),
+      new Set(wardrobeItems.map(i => i.traits['macro_category'] ?? '').filter(Boolean))
+    ).map(cat => ({ id: cat, label: cat })),
   ];
-
 
   const handleCategoryPress = (categoryId: string) => {
     setSelectedCategory(categoryId);
@@ -215,7 +211,10 @@ export const WardrobeScreen: React.FC = () => {
       return;
     }
 
-    showToast(`Detected ${steps.length} item${steps.length === 1 ? '' : 's'} — tap to review`, 'success');
+    showToast(
+      `Detected ${steps.length} item${steps.length === 1 ? '' : 's'} — tap to review`,
+      'success'
+    );
     initializeFlow(steps);
     dismissJob(completed.id);
     router.push('/detected-item');
@@ -226,7 +225,7 @@ export const WardrobeScreen: React.FC = () => {
       startJob(uri);
       showToast('Detection started — you can keep browsing', 'info');
     },
-    [startJob, showToast],
+    [startJob, showToast]
   );
 
   const handleCameraPress = useCallback(async () => {
@@ -264,22 +263,26 @@ export const WardrobeScreen: React.FC = () => {
     }
   }, [processImage]);
 
-  const handleItemPress = (item: WardrobeItem) => {
-    router.push({
-      pathname: '/item-details',
-      params: {
-        id: item.id,
-        name: item.label,
-        category: item.category,
-        imageUrl: item.pngImageUrl || item.imageUrl,
-        traits: JSON.stringify(item.traits ?? {}),
-      },
-    });
-  };
+  const handleItemPress = useCallback(
+    (item: WardrobeItem) => {
+      router.push({
+        pathname: '/item-details',
+        params: {
+          id: item.id,
+          name: item.label,
+          category: item.category,
+          imageUrl: item.pngImageUrl || item.imageUrl,
+          traits: JSON.stringify(item.traits ?? {}),
+        },
+      });
+    },
+    [router]
+  );
 
   const filteredItems = wardrobeItems.filter(item => {
     const matchesSearch = item.label.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesCategory = selectedCategory === 'all' || item.traits['macro_category'] === selectedCategory;
+    const matchesCategory =
+      selectedCategory === 'all' || item.traits['macro_category'] === selectedCategory;
     return matchesSearch && matchesCategory;
   });
 
@@ -292,14 +295,9 @@ export const WardrobeScreen: React.FC = () => {
           styles.categoryChip,
           { backgroundColor: isSelected ? chipSelectedBg : searchBgColor },
         ]}
-        onPress={() => handleCategoryPress(category.id)}
-      >
+        onPress={() => handleCategoryPress(category.id)}>
         <Text
-          style={[
-            styles.categoryChipText,
-            { color: isSelected ? chipSelectedText : textColor },
-          ]}
-        >
+          style={[styles.categoryChipText, { color: isSelected ? chipSelectedText : textColor }]}>
           {category.label}
         </Text>
       </Pressable>
@@ -310,28 +308,30 @@ export const WardrobeScreen: React.FC = () => {
   // re-renders, avoiding its internal recycler tearing down visible
   // rows when the parent re-renders for unrelated reasons (scroll
   // position change, tab focus, loading-more flip).
-  const renderClothingItem = useCallback(({ item }: { item: WardrobeItem }) => {
-    return (
-      <Pressable
-        key={item.id}
-        style={styles.gridItem}
-        onPress={() => handleItemPress(item)}
-        testID={`wardrobe-item-${item.id}`}
-        accessibilityRole="button"
-        accessibilityLabel={`Open ${item.label}`}
-      >
-        <View style={[styles.clothingCard, { backgroundColor: cardBgColor }]}>
-          <ClothingCardImage
-            imageUrl={item.imageUrl}
-            pngImageUrl={item.pngImageUrl}
-            category={item.category}
-            placeholderColor={placeholderColor}
-          />
-        </View>
-        <Text style={[styles.itemName, { color: secondaryTextColor }]}>{item.label}</Text>
-      </Pressable>
-    );
-  }, [cardBgColor, placeholderColor, secondaryTextColor, handleItemPress]);
+  const renderClothingItem = useCallback(
+    ({ item }: { item: WardrobeItem }) => {
+      return (
+        <Pressable
+          key={item.id}
+          style={styles.gridItem}
+          onPress={() => handleItemPress(item)}
+          testID={`wardrobe-item-${item.id}`}
+          accessibilityRole="button"
+          accessibilityLabel={`Open ${item.label}`}>
+          <View style={[styles.clothingCard, { backgroundColor: cardBgColor }]}>
+            <ClothingCardImage
+              imageUrl={item.imageUrl}
+              pngImageUrl={item.pngImageUrl}
+              category={item.category}
+              placeholderColor={placeholderColor}
+            />
+          </View>
+          <Text style={[styles.itemName, { color: secondaryTextColor }]}>{item.label}</Text>
+        </Pressable>
+      );
+    },
+    [cardBgColor, placeholderColor, secondaryTextColor, handleItemPress]
+  );
 
   const renderListEmpty = useCallback(() => {
     if (isLoadingItems && wardrobeItems.length === 0) {
@@ -340,7 +340,7 @@ export const WardrobeScreen: React.FC = () => {
       // there's no jump when data arrives.
       return (
         <View style={styles.skeletonGrid}>
-          {[0, 1, 2, 3, 4, 5].map((i) => (
+          {[0, 1, 2, 3, 4, 5].map(i => (
             <View key={i} style={styles.skeletonItem}>
               <Skeleton style={styles.skeletonImage} />
               <Skeleton style={styles.skeletonLabel} />
@@ -386,8 +386,7 @@ export const WardrobeScreen: React.FC = () => {
         horizontal
         showsHorizontalScrollIndicator={false}
         style={styles.categoriesContainer}
-        contentContainerStyle={styles.categoriesContent}
-      >
+        contentContainerStyle={styles.categoriesContent}>
         {categories.map(renderCategoryChip)}
       </ScrollView>
 
@@ -409,11 +408,15 @@ export const WardrobeScreen: React.FC = () => {
         refreshControl={
           <RefreshControl
             refreshing={isRefreshing}
-            onRefresh={() => { void onRefresh(); }}
+            onRefresh={() => {
+              void onRefresh();
+            }}
             tintColor={textColor}
           />
         }
-        onEndReached={() => { void loadMore(); }}
+        onEndReached={() => {
+          void loadMore();
+        }}
         onEndReachedThreshold={0.5}
         style={styles.gridContainer}
         contentContainerStyle={[styles.gridContent, { paddingBottom: tabBottomPadding }]}
@@ -449,27 +452,23 @@ export const WardrobeScreen: React.FC = () => {
         visible={isAddModalVisible}
         title="Add item"
         onDismiss={() => setIsAddModalVisible(false)}
-        showGrabber
-      >
+        showGrabber>
         <View style={styles.modalButtons}>
           <Pressable
             style={[styles.cameraButton, { backgroundColor: cameraBg }]}
-            onPress={handleCameraPress}
-          >
+            onPress={handleCameraPress}>
             <Icon name="camera" size={18} color={cameraText} />
             <Text style={[styles.cameraButtonText, { color: cameraText }]}>Camera</Text>
           </Pressable>
 
           <Pressable
             style={[styles.uploadButton, { backgroundColor: uploadBg }]}
-            onPress={handleUploadPress}
-          >
+            onPress={handleUploadPress}>
             <Icon name="upload" size={18} color={uploadText} />
             <Text style={[styles.uploadButtonText, { color: uploadText }]}>Upload</Text>
           </Pressable>
         </View>
       </Modal>
-
     </SafeAreaView>
   );
 };

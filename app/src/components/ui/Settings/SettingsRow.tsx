@@ -60,7 +60,7 @@ export type SettingsRowProps =
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
-export const SettingsRow: React.FC<SettingsRowProps> = (props) => {
+export const SettingsRow: React.FC<SettingsRowProps> = props => {
   const {
     icon,
     label,
@@ -78,18 +78,11 @@ export const SettingsRow: React.FC<SettingsRowProps> = (props) => {
       <View style={styles.labelContainer}>
         <Text style={[styles.label, { color: textColor }]}>{label}</Text>
         {subtitle != null && (
-          <Text style={[styles.subtitle, { color: subtitleColor ?? textColor }]}>
-            {subtitle}
-          </Text>
+          <Text style={[styles.subtitle, { color: subtitleColor ?? textColor }]}>{subtitle}</Text>
         )}
       </View>
 
-      {mode === 'toggle' && (
-        <Switch
-          value={props.value}
-          onValueChange={props.onValueChange}
-        />
-      )}
+      {mode === 'toggle' && <Switch value={props.value} onValueChange={props.onValueChange} />}
       {mode === 'select' && props.selected && (
         <Icon name="check" size={18} color={props.accentColor ?? '#007AFF'} />
       )}
@@ -106,8 +99,7 @@ export const SettingsRow: React.FC<SettingsRowProps> = (props) => {
       {isInteractive ? (
         <Pressable
           onPress={(props as NavigationRowProps | SelectRowProps).onPress}
-          style={({ pressed }) => pressed ? { opacity: 0.7 } : undefined}
-        >
+          style={({ pressed }) => (pressed ? { opacity: 0.7 } : undefined)}>
           {content}
         </Pressable>
       ) : (
@@ -130,9 +122,7 @@ export const SettingsSection: React.FC<{
 }> = ({ title, color, children, cardBackground }) => (
   <>
     <Text style={[styles.sectionTitle, { color }]}>{title}</Text>
-    <View style={[styles.card, { backgroundColor: cardBackground }]}>
-      {children}
-    </View>
+    <View style={[styles.card, { backgroundColor: cardBackground }]}>{children}</View>
   </>
 );
 

@@ -88,7 +88,7 @@ export const ItemDetailsScreen: React.FC = () => {
     setIsSaving(true);
     try {
       const filtered = Object.fromEntries(
-        Object.entries(traitValues).filter(([, v]) => v.trim() !== ''),
+        Object.entries(traitValues).filter(([, v]) => v.trim() !== '')
       );
       await wardrobeRepository.updateItem(itemId, filtered);
       router.back();
@@ -103,8 +103,7 @@ export const ItemDetailsScreen: React.FC = () => {
     <SafeAreaView style={[styles.container, { backgroundColor }]} edges={['top']}>
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.keyboardAvoid}
-      >
+        style={styles.keyboardAvoid}>
         {/* Header */}
         <View style={styles.header}>
           <Pressable
@@ -112,8 +111,7 @@ export const ItemDetailsScreen: React.FC = () => {
             onPress={() => router.back()}
             hitSlop={8}
             accessibilityRole="button"
-            accessibilityLabel="Go back"
-          >
+            accessibilityLabel="Go back">
             <Icon name="chevron-left" size={24} color={textColor} />
           </Pressable>
           <Text style={[styles.title, { color: textColor }]} numberOfLines={1}>
@@ -126,8 +124,7 @@ export const ItemDetailsScreen: React.FC = () => {
             hitSlop={8}
             accessibilityRole="button"
             accessibilityLabel="Delete item"
-            accessibilityState={{ disabled: isDeleting }}
-          >
+            accessibilityState={{ disabled: isDeleting }}>
             <Icon name="bin" size={22} color={isDeleting ? placeholderColor : destructiveColor} />
           </Pressable>
         </View>
@@ -136,8 +133,7 @@ export const ItemDetailsScreen: React.FC = () => {
           style={styles.scrollView}
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-        >
+          keyboardShouldPersistTaps="handled">
           {/* Item image */}
           <View style={[styles.imageContainer, { backgroundColor: imagePlaceholderBg }]}>
             {itemImageUrl ? (
@@ -173,7 +169,7 @@ export const ItemDetailsScreen: React.FC = () => {
                 title={label}
                 placeholder={`Enter ${label.toLowerCase()}`}
                 value={traitValues[key] ?? ''}
-                onChangeText={(text) => handleTraitChange(key, text)}
+                onChangeText={text => handleTraitChange(key, text)}
               />
             ))}
           </View>
@@ -186,7 +182,9 @@ export const ItemDetailsScreen: React.FC = () => {
           ) : (
             <GradientButton
               label="Save"
-              onPress={() => { void handleSave(); }}
+              onPress={() => {
+                void handleSave();
+              }}
               testID="item-details-save"
               accessibilityLabel="Save changes to this item"
             />
@@ -200,23 +198,22 @@ export const ItemDetailsScreen: React.FC = () => {
         title="Remove item"
         description="Are you sure you want to permanently remove this item from your wardrobe?"
         onDismiss={() => setShowDeleteModal(false)}
-        showGrabber={false}
-      >
+        showGrabber={false}>
         <View style={styles.modalButtons}>
           <Pressable
             style={[styles.modalButton, { backgroundColor: destructiveColor }]}
-            onPress={() => { void handleDeleteConfirm(); }}
+            onPress={() => {
+              void handleDeleteConfirm();
+            }}
             accessibilityRole="button"
-            accessibilityLabel="Confirm remove"
-          >
+            accessibilityLabel="Confirm remove">
             <Text style={[styles.modalButtonText, { color: '#FFFFFF' }]}>Remove</Text>
           </Pressable>
           <Pressable
             style={[styles.modalButton, { backgroundColor: cancelBg }]}
             onPress={() => setShowDeleteModal(false)}
             accessibilityRole="button"
-            accessibilityLabel="Cancel"
-          >
+            accessibilityLabel="Cancel">
             <Text style={[styles.modalButtonText, { color: cancelText }]}>Cancel</Text>
           </Pressable>
         </View>

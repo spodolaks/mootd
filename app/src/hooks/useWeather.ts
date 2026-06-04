@@ -87,16 +87,20 @@ function interpretWeatherCode(code: number): { condition: string; icon: IconName
 }
 
 export function useWeather(): UseWeatherResult {
-  const temperatureUnit = usePreferencesStore((s) => s.temperatureUnit);
+  const temperatureUnit = usePreferencesStore(s => s.temperatureUnit);
   const [weather, setWeather] = useState<WeatherData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   // Hydrate from cache on first mount so the card is visible immediately.
   useEffect(() => {
-    loadCached().then((cached) => {
+    loadCached().then(cached => {
       if (cached) {
-        console.log('[Weather] Loaded from cache:', cached.location, cached.temperature + '°' + cached.unit);
+        console.log(
+          '[Weather] Loaded from cache:',
+          cached.location,
+          cached.temperature + '°' + cached.unit
+        );
         setWeather(cached);
       }
     });
@@ -125,9 +129,9 @@ export function useWeather(): UseWeatherResult {
               return;
             }
             navigator.geolocation.getCurrentPosition(
-              (pos) => resolve({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }),
-              (err) => reject(new Error(err.message)),
-              { enableHighAccuracy: false, timeout: 10000 },
+              pos => resolve({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }),
+              err => reject(new Error(err.message)),
+              { enableHighAccuracy: false, timeout: 10000 }
             );
           });
         } else {
@@ -136,7 +140,7 @@ export function useWeather(): UseWeatherResult {
           coords = last
             ? { latitude: last.coords.latitude, longitude: last.coords.longitude }
             : await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }).then(
-                (p) => ({ latitude: p.coords.latitude, longitude: p.coords.longitude }),
+                p => ({ latitude: p.coords.latitude, longitude: p.coords.longitude })
               );
         }
 
@@ -145,9 +149,14 @@ export function useWeather(): UseWeatherResult {
         }
         latitude = coords.latitude;
         longitude = coords.longitude;
-        console.log(`[Weather] ✓ Location acquired: ${latitude.toFixed(4)}, ${longitude.toFixed(4)}`);
+        console.log(
+          `[Weather] ✓ Location acquired: ${latitude.toFixed(4)}, ${longitude.toFixed(4)}`
+        );
       } catch (locErr) {
-        console.log('[Weather] ⚠ Location unavailable, using default (Tallinn):', locErr instanceof Error ? locErr.message : locErr);
+        console.log(
+          '[Weather] ⚠ Location unavailable, using default (Tallinn):',
+          locErr instanceof Error ? locErr.message : locErr
+        );
         latitude = 59.437;
         longitude = 24.7536;
       }
@@ -158,19 +167,17 @@ export function useWeather(): UseWeatherResult {
       console.log('[Weather] → Fetching weather + geocode...');
       const [weatherRes, geoRes] = await Promise.all([
         fetch(
-          `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,weathercode&daily=temperature_2m_max,temperature_2m_min&timezone=auto&temperature_unit=${apiUnit}&forecast_days=1`,
+          `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,weathercode&daily=temperature_2m_max,temperature_2m_min&timezone=auto&temperature_unit=${apiUnit}&forecast_days=1`
         ),
         fetch(
-          `https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json`,
+          `https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json`
         ),
       ]);
 
       if (!weatherRes.ok) throw new Error('Weather service unavailable');
       const weatherJson = await weatherRes.json();
 
-      const { condition, icon } = interpretWeatherCode(
-        weatherJson.current.weathercode as number,
-      );
+      const { condition, icon } = interpretWeatherCode(weatherJson.current.weathercode as number);
 
       let locationName = 'Current Location';
       if (geoRes.ok) {
@@ -192,17 +199,13 @@ export function useWeather(): UseWeatherResult {
         unit: displayUnit,
         condition,
         icon,
-        lowTemperature: Math.round(
-          (weatherJson.daily.temperature_2m_min as number[])[0],
-        ),
-        highTemperature: Math.round(
-          (weatherJson.daily.temperature_2m_max as number[])[0],
-        ),
+        lowTemperature: Math.round((weatherJson.daily.temperature_2m_min as number[])[0]),
+        highTemperature: Math.round((weatherJson.daily.temperature_2m_max as number[])[0]),
         location: locationName,
       };
 
       console.log(
-        `[Weather] ✓ ${fresh.condition}, ${fresh.temperature}°${fresh.unit}, ${fresh.location}`,
+        `[Weather] ✓ ${fresh.condition}, ${fresh.temperature}°${fresh.unit}, ${fresh.location}`
       );
       setWeather(fresh);
       saveCache(fresh);

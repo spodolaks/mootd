@@ -84,7 +84,7 @@ export type ShareResult =
  *  discriminated union so the UI can decide the right message. */
 export const shareMoodboard = async (
   platform: SharePlatform,
-  target: ShareTarget,
+  target: ShareTarget
 ): Promise<ShareResult> => {
   if (!target.imageUrl) {
     return { kind: 'error', error: new Error('missing imageUrl') };

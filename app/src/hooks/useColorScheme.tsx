@@ -31,13 +31,12 @@ const resolveSystemScheme = (): ColorScheme =>
 
 export const ColorSchemeProvider: React.FC<ColorSchemeProviderProps> = ({ children }) => {
   // Read theme preference from the unified preferences store
-  const themePreference = usePreferencesStore((s) => s.theme);
-  const setTheme = usePreferencesStore((s) => s.setTheme);
+  const themePreference = usePreferencesStore(s => s.theme);
+  const setTheme = usePreferencesStore(s => s.setTheme);
 
   const [systemScheme, setSystemScheme] = useState<ColorScheme>(resolveSystemScheme);
 
-  const colorScheme: ColorScheme =
-    themePreference === 'system' ? systemScheme : themePreference;
+  const colorScheme: ColorScheme = themePreference === 'system' ? systemScheme : themePreference;
 
   useEffect(() => {
     const subscription = Appearance.addChangeListener(({ colorScheme: newScheme }) => {
@@ -52,8 +51,7 @@ export const ColorSchemeProvider: React.FC<ColorSchemeProviderProps> = ({ childr
         colorScheme,
         themePreference,
         setThemePreference: setTheme,
-      }}
-    >
+      }}>
       {children}
     </ColorSchemeContext.Provider>
   );

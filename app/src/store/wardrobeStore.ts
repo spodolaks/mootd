@@ -58,33 +58,133 @@ interface WardrobeState {
 // Default trait options for each category
 const DEFAULT_TRAIT_OPTIONS: Record<string, Trait[]> = {
   blazer: [
-    { id: 'fit', name: 'Fit', selectedValue: null, options: ['Slim Fit', 'Regular Fit', 'Relaxed Fit', 'Oversized'] },
-    { id: 'material', name: 'Material', selectedValue: null, options: ['Wool', 'Cotton', 'Linen', 'Polyester', 'Velvet'] },
-    { id: 'style', name: 'Style', selectedValue: null, options: ['Single-Breasted', 'Double-Breasted', 'Casual', 'Formal'] },
-    { id: 'color', name: 'Color', selectedValue: null, options: ['Black', 'Navy', 'Gray', 'Beige', 'Brown'] },
-    { id: 'occasion', name: 'Occasion', selectedValue: null, options: ['Business', 'Casual', 'Formal Event', 'Smart Casual'] },
+    {
+      id: 'fit',
+      name: 'Fit',
+      selectedValue: null,
+      options: ['Slim Fit', 'Regular Fit', 'Relaxed Fit', 'Oversized'],
+    },
+    {
+      id: 'material',
+      name: 'Material',
+      selectedValue: null,
+      options: ['Wool', 'Cotton', 'Linen', 'Polyester', 'Velvet'],
+    },
+    {
+      id: 'style',
+      name: 'Style',
+      selectedValue: null,
+      options: ['Single-Breasted', 'Double-Breasted', 'Casual', 'Formal'],
+    },
+    {
+      id: 'color',
+      name: 'Color',
+      selectedValue: null,
+      options: ['Black', 'Navy', 'Gray', 'Beige', 'Brown'],
+    },
+    {
+      id: 'occasion',
+      name: 'Occasion',
+      selectedValue: null,
+      options: ['Business', 'Casual', 'Formal Event', 'Smart Casual'],
+    },
   ],
   shirt: [
-    { id: 'fit', name: 'Fit', selectedValue: null, options: ['Slim Fit', 'Regular Fit', 'Relaxed Fit', 'Oversized'] },
-    { id: 'material', name: 'Material', selectedValue: null, options: ['Cotton', 'Linen', 'Silk', 'Polyester', 'Oxford'] },
-    { id: 'collar', name: 'Collar', selectedValue: null, options: ['Point', 'Spread', 'Button-Down', 'Mandarin', 'Band'] },
-    { id: 'pattern', name: 'Pattern', selectedValue: null, options: ['Solid', 'Striped', 'Checkered', 'Plaid', 'Print'] },
-    { id: 'sleeve', name: 'Sleeve', selectedValue: null, options: ['Long Sleeve', 'Short Sleeve', 'Roll-Up', '3/4 Sleeve'] },
+    {
+      id: 'fit',
+      name: 'Fit',
+      selectedValue: null,
+      options: ['Slim Fit', 'Regular Fit', 'Relaxed Fit', 'Oversized'],
+    },
+    {
+      id: 'material',
+      name: 'Material',
+      selectedValue: null,
+      options: ['Cotton', 'Linen', 'Silk', 'Polyester', 'Oxford'],
+    },
+    {
+      id: 'collar',
+      name: 'Collar',
+      selectedValue: null,
+      options: ['Point', 'Spread', 'Button-Down', 'Mandarin', 'Band'],
+    },
+    {
+      id: 'pattern',
+      name: 'Pattern',
+      selectedValue: null,
+      options: ['Solid', 'Striped', 'Checkered', 'Plaid', 'Print'],
+    },
+    {
+      id: 'sleeve',
+      name: 'Sleeve',
+      selectedValue: null,
+      options: ['Long Sleeve', 'Short Sleeve', 'Roll-Up', '3/4 Sleeve'],
+    },
   ],
   pants: [
-    { id: 'fit', name: 'Fit', selectedValue: null, options: ['Slim Fit', 'Regular Fit', 'Relaxed Fit', 'Wide Leg', 'Tapered'] },
-    { id: 'material', name: 'Material', selectedValue: null, options: ['Cotton', 'Wool', 'Denim', 'Linen', 'Polyester'] },
-    { id: 'rise', name: 'Rise', selectedValue: null, options: ['Low Rise', 'Mid Rise', 'High Rise'] },
-    { id: 'style', name: 'Style', selectedValue: null, options: ['Chinos', 'Dress Pants', 'Jeans', 'Cargo', 'Joggers'] },
-    { id: 'length', name: 'Length', selectedValue: null, options: ['Full Length', 'Cropped', 'Ankle Length'] },
+    {
+      id: 'fit',
+      name: 'Fit',
+      selectedValue: null,
+      options: ['Slim Fit', 'Regular Fit', 'Relaxed Fit', 'Wide Leg', 'Tapered'],
+    },
+    {
+      id: 'material',
+      name: 'Material',
+      selectedValue: null,
+      options: ['Cotton', 'Wool', 'Denim', 'Linen', 'Polyester'],
+    },
+    {
+      id: 'rise',
+      name: 'Rise',
+      selectedValue: null,
+      options: ['Low Rise', 'Mid Rise', 'High Rise'],
+    },
+    {
+      id: 'style',
+      name: 'Style',
+      selectedValue: null,
+      options: ['Chinos', 'Dress Pants', 'Jeans', 'Cargo', 'Joggers'],
+    },
+    {
+      id: 'length',
+      name: 'Length',
+      selectedValue: null,
+      options: ['Full Length', 'Cropped', 'Ankle Length'],
+    },
   ],
   // Default traits for unknown categories
   default: [
-    { id: 'fit', name: 'Fit', selectedValue: null, options: ['Slim Fit', 'Regular Fit', 'Relaxed Fit', 'Oversized'] },
-    { id: 'material', name: 'Material', selectedValue: null, options: ['Cotton', 'Polyester', 'Wool', 'Linen', 'Synthetic'] },
-    { id: 'style', name: 'Style', selectedValue: null, options: ['Casual', 'Formal', 'Smart Casual', 'Sporty'] },
-    { id: 'color', name: 'Color', selectedValue: null, options: ['Black', 'White', 'Navy', 'Gray', 'Other'] },
-    { id: 'occasion', name: 'Occasion', selectedValue: null, options: ['Everyday', 'Work', 'Weekend', 'Special Event'] },
+    {
+      id: 'fit',
+      name: 'Fit',
+      selectedValue: null,
+      options: ['Slim Fit', 'Regular Fit', 'Relaxed Fit', 'Oversized'],
+    },
+    {
+      id: 'material',
+      name: 'Material',
+      selectedValue: null,
+      options: ['Cotton', 'Polyester', 'Wool', 'Linen', 'Synthetic'],
+    },
+    {
+      id: 'style',
+      name: 'Style',
+      selectedValue: null,
+      options: ['Casual', 'Formal', 'Smart Casual', 'Sporty'],
+    },
+    {
+      id: 'color',
+      name: 'Color',
+      selectedValue: null,
+      options: ['Black', 'White', 'Navy', 'Gray', 'Other'],
+    },
+    {
+      id: 'occasion',
+      name: 'Occasion',
+      selectedValue: null,
+      options: ['Everyday', 'Work', 'Weekend', 'Special Event'],
+    },
   ],
 };
 
@@ -106,7 +206,7 @@ export const useWardrobeStore = create<WardrobeState>((set, get) => ({
   currentStepIndex: 0,
   items: {},
 
-  initializeFlow: (steps) =>
+  initializeFlow: steps =>
     set({
       detectionSteps: steps,
       currentStepIndex: 0,
@@ -114,12 +214,12 @@ export const useWardrobeStore = create<WardrobeState>((set, get) => ({
     }),
 
   setItemForStep: (stepIndex, item) =>
-    set((state) => ({
+    set(state => ({
       items: { ...state.items, [stepIndex]: item },
     })),
 
   setTraitValue: (traitId, value) =>
-    set((state) => {
+    set(state => {
       const currentItem = state.items[state.currentStepIndex];
       if (!currentItem) return state;
       return {
@@ -127,7 +227,7 @@ export const useWardrobeStore = create<WardrobeState>((set, get) => ({
           ...state.items,
           [state.currentStepIndex]: {
             ...currentItem,
-            traits: currentItem.traits.map((trait) =>
+            traits: currentItem.traits.map(trait =>
               trait.id === traitId ? { ...trait, selectedValue: value } : trait
             ),
           },
@@ -136,12 +236,12 @@ export const useWardrobeStore = create<WardrobeState>((set, get) => ({
     }),
 
   nextStep: () =>
-    set((state) => ({
+    set(state => ({
       currentStepIndex: state.currentStepIndex + 1,
     })),
 
   previousStep: () =>
-    set((state) => ({
+    set(state => ({
       currentStepIndex: Math.max(0, state.currentStepIndex - 1),
     })),
 
@@ -150,7 +250,7 @@ export const useWardrobeStore = create<WardrobeState>((set, get) => ({
     return state.items[state.currentStepIndex] ?? null;
   },
 
-  getItemForStep: (stepIndex) => get().items[stepIndex] ?? null,
+  getItemForStep: stepIndex => get().items[stepIndex] ?? null,
 
   getTotalSteps: () => get().detectionSteps.length,
 
@@ -172,7 +272,7 @@ export const useWardrobeStore = create<WardrobeState>((set, get) => ({
     return Object.keys(state.items)
       .map(Number)
       .sort((a, b) => a - b)
-      .map((index) => state.items[index])
+      .map(index => state.items[index])
       .filter((item): item is WardrobeItem => item !== undefined);
   },
 

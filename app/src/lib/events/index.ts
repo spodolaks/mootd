@@ -29,7 +29,7 @@
 //     (b) silently drops in prod-or-whenever-the-test-flag-is-off.
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import type { AnyEvent, EventName, PropertiesFor } from './types';
+import type { EventName, PropertiesFor } from './types';
 
 const STORAGE_KEY = 'mootd-events-queue-v1';
 const BATCH_SIZE = 25;
@@ -44,7 +44,7 @@ const MAX_QUEUE_DEPTH = 500;
  *  drop a legitimate event than ship a real email address. */
 const PII_REGEX = [
   /^[^\s@]+@[^\s@]+\.[^\s@]+$/, // email
-  /^\+?[\d\s\-()]{8,}$/,        // phone-ish
+  /^\+?[\d\s\-()]{8,}$/, // phone-ish
 ];
 
 interface QueuedEvent {
@@ -85,9 +85,7 @@ const state: SDKState = {
 /** Boot the SDK. Restores the queue from AsyncStorage and
  *  schedules the periodic flush. Idempotent — calling twice
  *  is a no-op. */
-export async function start(opts: {
-  apiBaseUrl: string;
-}): Promise<void> {
+export async function start(opts: { apiBaseUrl: string }): Promise<void> {
   if (state.started) return;
   state.started = true;
   state.apiBaseUrl = opts.apiBaseUrl;
@@ -155,10 +153,7 @@ export function rotateSessionId(): string {
  *  call site via the discriminated-union types.
  *
  *  Pattern: events.emit('app_opened', { platform: 'ios', ... }) */
-export function emit<N extends EventName>(
-  name: N,
-  properties: PropertiesFor<N>,
-): void {
+export function emit<N extends EventName>(name: N, properties: PropertiesFor<N>): void {
   // Defence-in-depth PII check. Drops + warns rather than
   // throwing — the call site shouldn't care.
   const safe = scrubPII(properties as Record<string, unknown>, name);
@@ -212,7 +207,7 @@ export async function flush(): Promise<void> {
         Authorization: `Bearer ${state.authToken}`,
       },
       body: JSON.stringify({
-        events: batch.map((e) => ({
+        events: batch.map(e => ({
           name: e.name,
           sessionId: e.sessionId,
           properties: e.properties,
@@ -266,7 +261,7 @@ async function persistQueue(): Promise<void> {
  *  pattern matches (event is dropped + a warning logged). */
 function scrubPII(
   properties: Record<string, unknown>,
-  eventName: string,
+  eventName: string
 ): Record<string, unknown> | null {
   for (const [k, v] of Object.entries(properties)) {
     if (typeof v !== 'string') continue;
@@ -275,7 +270,7 @@ function scrubPII(
         if (__DEV__) {
           console.warn(
             `[events] dropped ${eventName}: property ${k} looks like PII (${re}). ` +
-              `Use an ID or count instead.`,
+              `Use an ID or count instead.`
           );
         }
         return null;
@@ -292,17 +287,12 @@ function scrubPII(
  *  back to a Math.random approach for safety. */
 function generateSessionId(): string {
   // Prefer the standard if it exists.
-   
+
   const cr = (globalThis as any).crypto;
   if (cr && typeof cr.randomUUID === 'function') {
     return cr.randomUUID();
   }
-  return (
-    'sess-' +
-    Date.now().toString(36) +
-    '-' +
-    Math.random().toString(36).slice(2, 10)
-  );
+  return 'sess-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
 }
 
 // Type re-export so callers can pull AnyEvent etc. from

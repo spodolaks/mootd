@@ -8,10 +8,10 @@ import { apiClient } from '@/src/data/api/client';
 
 export default function Index() {
   const router = useRouter();
-  const signInWithGoogle = useAuthStore((state) => state.signInWithGoogle);
-  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
-  const isLoading = useAuthStore((state) => state.isLoading);
-  const error = useAuthStore((state) => state.error);
+  const signInWithGoogle = useAuthStore(state => state.signInWithGoogle);
+  const isAuthenticated = useAuthStore(state => state.isAuthenticated);
+  const isLoading = useAuthStore(state => state.isLoading);
+  const error = useAuthStore(state => state.error);
 
   /**
    * Route the signed-in user onward. A user with no profile gender is
@@ -86,10 +86,6 @@ export default function Index() {
   };
 
   return (
-    <WelcomeScreen
-      onGoogleSignIn={handleGoogleSignIn}
-      isLoading={isLoading}
-      errorMessage={error}
-    />
+    <WelcomeScreen onGoogleSignIn={handleGoogleSignIn} isLoading={isLoading} errorMessage={error} />
   );
 }
