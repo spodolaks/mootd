@@ -186,7 +186,8 @@ export const PermissionsScreen: React.FC<PermissionsScreenProps> = ({ onGetStart
 
           <View style={styles.descriptionContainer}>
             <Text variant="body" style={[styles.description, { color: secondaryTextColor }]}>
-              For best experience....
+              Turn on notifications so you never miss your daily outfit, plus location for
+              weather-aware recommendations.
             </Text>
           </View>
 

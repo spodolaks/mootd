@@ -165,7 +165,7 @@ export const TraitSelectionScreen: React.FC<TraitSelectionScreenProps> = ({
             <Text
               variant="subheadline"
               style={[styles.traitsDescription, { color: secondaryTextColor }]}>
-              Check the traits and.....
+              Review the detected traits and edit anything that looks off.
             </Text>
           </View>
 

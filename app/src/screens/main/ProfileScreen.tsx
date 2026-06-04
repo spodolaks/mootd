@@ -1,5 +1,5 @@
 import React from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Image } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -35,8 +35,22 @@ export const ProfileScreen: React.FC = () => {
   const idleBadgeColor = accents.green[colorScheme];
 
   const handleSignOut = () => {
-    signOut();
-    router.replace('/');
+    const doSignOut = () => {
+      signOut();
+      router.replace('/');
+    };
+
+    if (Platform.OS === 'web') {
+      // Alert.alert is a no-op on web – use window.confirm instead
+      if (confirm('Sign out of your account?')) {
+        doSignOut();
+      }
+    } else {
+      Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Sign Out', style: 'destructive', onPress: doSignOut },
+      ]);
+    }
   };
 
   // First letter(s) of display name for fallback avatar

@@ -183,7 +183,7 @@ export const DetectedItemScreen: React.FC<DetectedItemScreenProps> = ({
         {/* Title Section */}
         <View style={styles.titleSection}>
           <Text variant="title1" weight="semiBold" style={styles.title}>
-            We detected a black {detectedCategory}
+            We detected your {detectedCategory}
           </Text>
         </View>
 

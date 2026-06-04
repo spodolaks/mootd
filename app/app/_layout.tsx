@@ -14,6 +14,7 @@ import {
   Text,
   TouchableOpacity,
   StyleSheet,
+  useColorScheme as useSystemColorScheme,
 } from 'react-native';
 import 'react-native-reanimated';
 
@@ -22,6 +23,7 @@ import { useAuthStore } from '@/src/store';
 import * as events from '@/src/lib/events';
 import { getApiBaseURL } from '@/src/data/api/client';
 import { OfflineBanner } from '@/src/components/ui';
+import { backgrounds, labels, button } from '@/src/theme/colors';
 
 // ─── Error Boundary ──────────────────────────────────────────────────────────
 
@@ -48,21 +50,38 @@ class AppErrorBoundary extends Component<{ children: ReactNode }, ErrorBoundaryS
   render() {
     if (this.state.hasError) {
       return (
-        <View style={errorStyles.container}>
-          <Text style={errorStyles.title}>Something went wrong</Text>
-          <Text style={errorStyles.message}>
-            {this.state.error?.message ?? 'An unexpected error occurred.'}
-          </Text>
-          <TouchableOpacity
-            style={errorStyles.button}
-            onPress={() => this.setState({ hasError: false, error: null })}>
-            <Text style={errorStyles.buttonText}>Try again</Text>
-          </TouchableOpacity>
-        </View>
+        <ErrorFallback
+          error={this.state.error}
+          onRetry={() => this.setState({ hasError: false, error: null })}
+        />
       );
     }
     return this.props.children;
   }
+}
+
+// Functional fallback so it can read the system color scheme via hooks.
+// Rendered outside ColorSchemeProvider (the boundary wraps it), so it uses
+// react-native's useColorScheme directly rather than the app context hook.
+function ErrorFallback({ error, onRetry }: { error: Error | null; onRetry: () => void }) {
+  const colorScheme = useSystemColorScheme() ?? 'light';
+  return (
+    <View style={[errorStyles.container, { backgroundColor: backgrounds.primary[colorScheme] }]}>
+      <Text style={[errorStyles.title, { color: labels.primary[colorScheme] }]}>
+        Something went wrong
+      </Text>
+      <Text style={[errorStyles.message, { color: labels.tertiary[colorScheme] }]}>
+        {error?.message ?? 'An unexpected error occurred.'}
+      </Text>
+      <TouchableOpacity
+        style={[errorStyles.button, { backgroundColor: button.primary.background[colorScheme] }]}
+        onPress={onRetry}>
+        <Text style={[errorStyles.buttonText, { color: button.primary.foreground[colorScheme] }]}>
+          Try again
+        </Text>
+      </TouchableOpacity>
+    </View>
+  );
 }
 
 const errorStyles = StyleSheet.create({
@@ -71,17 +90,14 @@ const errorStyles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     padding: 24,
-    backgroundColor: '#F2F2F7',
   },
   title: {
     fontSize: 20,
     fontWeight: '600',
-    color: '#000000',
     marginBottom: 8,
   },
   message: {
     fontSize: 14,
-    color: 'rgba(60,60,67,0.6)',
     textAlign: 'center',
     marginBottom: 24,
   },
@@ -89,10 +105,8 @@ const errorStyles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingVertical: 12,
     borderRadius: 12,
-    backgroundColor: '#000000',
   },
   buttonText: {
-    color: '#FFFFFF',
     fontWeight: '600',
     fontSize: 16,
   },
