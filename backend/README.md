@@ -1,36 +1,35 @@
 # MOOTD Backend
 
-Go REST API for the MOOTD wardrobe app. Handles authentication, user profiles, and AI-powered clothing detection.
+Go REST API for the MOOTD wardrobe app. Handles authentication, user profiles, AI-powered clothing detection, async outfit generation (pluggable LLM providers), and saved moodboards — backed by MongoDB + Redis.
 
 ## Package Structure
 
-Each domain is a self-contained package under `internal/` with its own handler, repository, domain types, and routes — making packages independently navigable and AI-context-friendly.
+Each domain is a self-contained package under `internal/` with its own handler, domain types, and routes (plus a repository/service where needed) — making packages independently navigable and AI-context-friendly.
 
 ```
 backend/
-├── cmd/api/main.go              # Entry point, graceful shutdown
+├── cmd/api/main.go              # Entry point, workers, graceful shutdown  (+ ops tools under cmd/)
 ├── internal/
-│   ├── app/app.go               # Dependency wiring and middleware stack
-│   ├── config/config.go         # Environment variable loading
-│   ├── db/mongo.go              # MongoDB connection
-│   ├── auth/                    # Google OAuth + JWT issuance
-│   ├── user/                    # User profile management
-│   ├── wardrobe/                # Clothing detection + item CRUD
-│   ├── health/                  # Liveness and readiness checks
-│   └── shared/
-│       ├── jwt/                 # Token generation and validation
-│       ├── middleware/          # CORS, auth, logging middleware
-│       └── response/            # JSON encoding helpers
+│   ├── app/app.go               # Dependency wiring + middleware stack
+│   ├── config/config.go         # Env var loading + production boot guards
+│   ├── db/mongo.go              # MongoDB connection + index bootstrap
+│   │   # HTTP-serving domains (handler + domain + routes; repository/service as needed):
+│   ├── auth/  user/  wardrobe/  outfit/  moodboard/  feedback/  brands/
+│   ├── generic/  surface/  privacy/  events/  health/
+│   ├── admin/                   # Admin subsystem (MFA, RBAC, audit, funnels, evals, budgets) + gen/
+│   │   # Support packages:
+│   ├── archetype/  budget/  observability/  buildinfo/  usergen/
+│   └── shared/                  # jwt, middleware, response, pagination, metrics, logging
 └── Dockerfile                   # Multi-stage build (golang:1.24-alpine → alpine:3.21)
 ```
 
 ## Middleware Chain
 
 ```
-CORS → Logging → [Route Handler]
+metrics → RequestID → Recover → Logging → CORS → global rate limit → mux → [auth, per-route] → handler
 ```
 
-Auth middleware is applied selectively on protected routes (all `/v1/user/*` and `/v1/wardrobe/*` paths). It validates the Bearer JWT and stores the user ID in the request context.
+Auth is applied **selectively per-route** (most `/v1/*` endpoints; exceptions include `/v1/auth/*`, the health checks, and the public moodboard-image route). It validates the Bearer JWT and stores the user ID in the request context. `/admin/v1/*` is served on a separate, IP-allowlisted mux. See `backend/CLAUDE.md` for the full chain.
 
 ## API Reference
 
@@ -247,6 +246,60 @@ Permanently removes an item. Only the authenticated user's items can be deleted.
 
 ---
 
+### Outfit Generation
+
+Requires `Authorization: Bearer <jwt>`.
+
+#### `GET /v1/outfits`
+Synchronous generation — returns recommended outfits directly. Accepts optional `?temperature=&condition=&unit=` weather params.
+
+#### `POST /v1/outfits/generate`
+Async generation (LLM-backed). Returns `202 { "jobId": "..." }`. Honours an optional `Idempotency-Key` header (60s dedupe window). When called with `Accept: text/event-stream`, streams per-stage progress over SSE and returns the result on the same connection instead of requiring polling. **Rate-limited** per user: 5/min burst + 50/day.
+
+#### `GET /v1/outfits/jobs/{id}`
+Polls an async job. Status is one of `pending | processing | completed | failed`; `outfits` is populated on completion. Ownership-checked (404 if the job belongs to another user).
+
+#### `POST /v1/outfits/feedback`
+Records thumbs-up/down and swap feedback for a generated batch (consumed by the training pipeline).
+
+---
+
+### Moodboards
+
+Requires `Authorization: Bearer <jwt>` (except the image route).
+
+#### `GET /v1/moodboards`
+Lists the authenticated user's saved moodboards.
+
+#### `POST /v1/moodboards`
+Saves a chosen outfit as a moodboard — persists the outfit, the full generated batch, and a client-captured collage PNG (≤5 MiB, stored in GridFS). One board per user per date (unique index).
+
+#### `GET /v1/moodboards/{id}/image`
+Returns the rendered collage PNG. **Currently public** (UUID-as-capability, mirroring the wardrobe-image route); moving to signed/authenticated URLs is tracked separately.
+
+---
+
+### Other Endpoints
+
+Index of the remaining surface (detailed shapes live in each domain's `routes.go` / `handler.go`):
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `POST` | `/v1/auth/refresh` | Rotate the access + refresh token pair (refresh is single-use) |
+| `POST` | `/v1/auth/logout` | Invalidate the refresh token (always `204`) |
+| `POST` / `GET` | `/v1/wardrobe/detect-jobs[/{id}]` | Async clothing-detection: submit + poll |
+| `POST` | `/v1/wardrobe/items/from-archetype-default` | Claim an archetype-default ("filler") suggestion into the wardrobe |
+| `POST` | `/v1/wardrobe/archetype-rejections` | Reject a filler suggestion so it isn't offered again |
+| `POST` / `GET` | `/v1/brands` | Save / list per-user brand history |
+| `GET` / `POST` | `/v1/generic/items`, `/v1/generic/trigger` | Archetype-default catalog items |
+| `DELETE` | `/v1/privacy/self` | Delete the account + cascade user data |
+| `GET` | `/v1/privacy/export` | GDPR data export |
+| `GET` | `/v1/surfaces/`, `/v1/surfaces/{id}` | Collage panel/background surface assets |
+| `GET` | `/v1/health` | Client min-version + maintenance flag (no DB roundtrip) |
+| — | `/admin/v1/*` | Admin subsystem — separate, IP-allowlisted (see `backend/internal/admin`) |
+
+---
+
 ## Environment Variables
 
 | Variable | Default | Notes |
@@ -287,8 +340,10 @@ curl -sS http://127.0.0.1:8081/v1/wardrobe/items \
 
 ## Database
 
-MongoDB 8.0 with two collections:
+MongoDB 8.0. Core collections:
 
-**`users`** — `_id` (string, Google sub), `email`, `name`, `avatarUrl`, `googleId` (indexed), `createdAt`, `updatedAt`
+**`users`** — `_id` (string, Google sub), `email`, `name`, `avatarUrl`, `googleId` (unique index), `createdAt`, `updatedAt`
 
-**`wardrobe_items`** — `_id` (UUID v4), `userId` (indexed), `category`, `label`, `imageUrl`, `traits` (map), `createdAt` (sorted desc)
+**`wardrobe_items`** — `_id` (UUID v4), `userId` (indexed), `category`, `label`, `imageUrl`, `pngImageUrl?`, `traits` (map), `createdAt` (sorted desc)
+
+Plus per-domain collections including `moodboards` (unique `userId`+`date`), `outfit_feedback`, `outfit_cache`, `generic_items`, `llm_calls` (cost ledger), and the `admin.*` collections. Redis holds the outfit cache, rate-limit counters, async job state, and per-user spend tracking.
