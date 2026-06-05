@@ -45,6 +45,16 @@ const buildItemMap = (items: WardrobeItem[]): Map<string, WardrobeItem> => {
 // name+items fingerprint for any legacy path without an id.
 const outfitKey = (o: Outfit): string => o.id ?? `${o.name}|${o.items.join(',')}`;
 
+// Bounded async-generation poll. The backend caps generation at
+// ~2 min and a stale-job sweeper eventually fails wedged jobs, but
+// the client must not spin forever if a job never leaves
+// `processing` (Redis/Mongo lag, a dropped worker). Poll a little
+// past the backend budget with a gentle backoff, then surface a
+// retryable timeout instead of an infinite spinner.
+const POLL_DEADLINE_MS = 150_000;
+const POLL_BASE_INTERVAL_MS = 2_000;
+const POLL_MAX_INTERVAL_MS = 5_000;
+
 export const MoodBoardScreen: React.FC = () => {
   const colorScheme = useColorScheme() ?? 'light';
   const [screenState, setScreenState] = useState<ScreenState>('loading');
@@ -168,8 +178,14 @@ export const MoodBoardScreen: React.FC = () => {
         } else {
           jobId = await wardrobeRepository.submitOutfitGeneration(weatherParams, idempotencyKey);
           let result: { status: string; outfits?: Outfit[]; error?: string };
+          const startedAt = Date.now();
+          let interval = POLL_BASE_INTERVAL_MS;
           do {
-            await new Promise(resolve => setTimeout(resolve, 2000));
+            if (Date.now() - startedAt > POLL_DEADLINE_MS) {
+              throw new Error('Generation timed out. Please try again.');
+            }
+            await new Promise(resolve => setTimeout(resolve, interval));
+            interval = Math.min(interval + 1_000, POLL_MAX_INTERVAL_MS);
             result = await wardrobeRepository.pollOutfitJob(jobId);
           } while (result.status === 'pending' || result.status === 'processing');
           if (result.status === 'failed') {
