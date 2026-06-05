@@ -6,37 +6,55 @@ Go REST API. Each domain package is self-contained to keep AI context windows ma
 
 ```
 backend/
-├── cmd/api/main.go          # Entry point: config load, DB connect, graceful shutdown
+├── cmd/
+│   ├── api/main.go          # Entry point: config load, DB connect, workers, graceful shutdown
+│   └── …                    # Ops/one-shot tools: bootstrap-admin, seed-surfaces, eval, hash-curator, daily-summary-preview
 ├── internal/
-│   ├── app/app.go           # Wires all dependencies, builds middleware stack, registers routes
-│   ├── config/config.go     # Env var loading with defaults
-│   ├── db/mongo.go          # MongoDB connection (ConnectMongo)
-│   ├── admin/               # Admin panel auth + handlers (P0-03 / P0-04 / P1-05+)
-│   │   └── gen/             # Generated wire-shape types (DO NOT EDIT — `make gen-admin`)
-│   ├── auth/                # Google OAuth + JWT issuance + refresh token flow
-│   ├── user/                # User profile management
-│   ├── wardrobe/            # Clothing detection + item CRUD
-│   ├── outfit/              # Outfit generation (async) + recommendations
-│   │   ├── domain.go        # Request/response types, OutfitGenerator interface
-│   │   ├── handler.go       # HTTP handlers
-│   │   ├── service.go       # Business logic (generation orchestration, caching)
-│   │   ├── repository.go    # MongoDB persistence
-│   │   ├── routes.go        # Route registration
-│   │   ├── ollama.go        # OutfitGenerator implementation: Ollama (local)
-│   │   ├── claude.go        # OutfitGenerator implementation: Claude (Anthropic)
-│   │   └── openai.go        # OutfitGenerator implementation: OpenAI
-│   ├── health/              # /healthz + /readyz
+│   ├── app/app.go           # Wires all dependencies, builds the middleware stack, registers routes (large)
+│   ├── config/config.go     # Env var loading with defaults + production boot guards
+│   ├── db/mongo.go          # MongoDB connection + central index bootstrap (EnsureIndexes)
+│   │
+│   │  # ── HTTP-serving domains (handler + domain + routes; repository/service where needed) ──
+│   ├── auth/                # Google OAuth + JWT issuance + refresh-token flow
+│   ├── user/                # User profile management + account-deletion cascade
+│   ├── wardrobe/            # Clothing detection (sync + async jobs) + item CRUD
+│   ├── outfit/              # Outfit generation (async, pluggable LLM providers) + cache + job store
+│   │   ├── generator.go     # Generator interface (Name + Generate) — provider-agnostic
+│   │   ├── {ollama,openai,claude}_generator.go  # Provider implementations
+│   │   ├── cascade.go       # Ordered provider fallback + per-provider health cooldown
+│   │   ├── prompts.go       # System/user prompt construction + injection hardening (v3)
+│   │   ├── cache.go / redis_cache.go            # Result cache (Mongo + Redis), 24h TTL
+│   │   └── jobs.go          # Async job store (Mongo source-of-truth + Redis cache) + stale sweeper
+│   ├── moodboard/           # Saved moodboards (chosen outfit + collage PNG) + image serving
+│   ├── feedback/            # Outfit feedback events (thumbs / swaps) for training
+│   ├── brands/              # Per-user brand history
+│   ├── generic/             # Archetype-default ("filler") catalog items
+│   ├── surface/             # Collage panel/background surface assets
+│   ├── privacy/             # GDPR data export + account deletion
+│   ├── events/              # Client analytics event ingestion (SDK lifecycle)
+│   ├── health/              # /healthz + /readyz + /v1/health (client min-version / maintenance)
+│   ├── admin/               # Admin subsystem: MFA/TOTP, RBAC, audit log, funnels, retention,
+│   │   │                    #   eval suite, prompt A/B tests, tier routing, budgets, reports
+│   │   └── gen/             # Generated wire types (DO NOT EDIT — `make gen-admin`)
+│   │
+│   │  # ── Support packages (no HTTP surface) ──
+│   ├── archetype/           # Style-archetype profiles + scoring
+│   ├── budget/              # Per-user LLM spend tracking / reservation
+│   ├── observability/       # LLM cost ledger (llm_calls) + price table
+│   ├── buildinfo/           # Build metadata
+│   ├── usergen/             # Generated user-API types (DO NOT EDIT — `make gen-user`)
 │   └── shared/
 │       ├── jwt/             # HS256 token generation and validation
-│       ├── middleware/      # CORS, Auth (JWT), Logging, RateLimit
-│       ├── response/        # WriteJSON helper, strict JSON decoder
+│       ├── middleware/      # RequestID, Recover, Logging, CORS, RateLimit, auth, admin IP allowlist
+│       ├── response/        # JSON helpers + typed error envelope (WriteJSONErrWithCode)
 │       ├── pagination/      # Cursor-based pagination helpers
-│       └── logging/         # Structured logging utilities
+│       ├── metrics/         # Prometheus instrumentation
+│       └── logging/         # slog-backed structured logger
 ```
 
 ## Domain Package Convention
 
-Every domain package (`auth`, `user`, `wardrobe`, `outfit`, `health`) follows the same layout:
+The HTTP-serving domains — `auth`, `user`, `wardrobe`, `outfit`, `moodboard`, `feedback`, `brands`, `generic`, `surface`, `privacy`, `events`, `health`, and the `admin` subsystem — broadly follow the same layout, with `repository.go`/`service.go` present only where a domain needs them (e.g. `auth`/`user`/`wardrobe` keep their logic in `handler.go`; `outfit`/`privacy` add a `service.go`; `outfit` persists via `cache.go`/`jobs.go` rather than a `repository.go`):
 
 ```
 domain/
@@ -58,13 +76,18 @@ When adding a new endpoint, follow this pattern:
 ## Middleware Chain
 
 ```
-CORS → Logging → RateLimit → [Auth (selective)] → Handler
+metrics.Instrument → RequestID → Recover → Logging → CORS → globalRateLimit
+  → [admin IP allowlist on /admin/v1/*] → mux → [Auth (selective, per-route)] → Handler
 ```
 
-- `middleware.CORS` — applies globally; origin allowlist from `CORS_ALLOWED_ORIGINS`
-- `middleware.Logging` — applies globally; logs `METHOD PATH DURATION`
-- `middleware.RateLimit` — per-user rate limiting via Redis; applied to expensive endpoints (e.g., outfit generation)
-- `middleware.RequireAuth` — applied selectively in route registrations; validates JWT, stores `userID` in `context.Value(middleware.UserIDKey)`
+- `metrics.Instrument` — wraps the root handler once; per-route Prometheus duration histogram (route label normalised by `routeLabel` to bound cardinality)
+- `RequestID` — honours an inbound `X-Request-ID` (capped at 64 chars) or mints a UUIDv4; echoed in the response and surfaced by `Recover` + the error envelope
+- `Recover` — converts a panic into a JSON 500 (logs reqID + userID + stack); the Sentry/DataDog hook point
+- `Logging` — logs `METHOD PATH STATUS DURATION`
+- `CORS` — origin allowlist from `CORS_ALLOWED_ORIGINS` (refuses `*`/empty when `ENVIRONMENT=production`)
+- `globalRateLimit` — global Redis limiter; additional per-route limiters apply to expensive endpoints (outfit generation is 5/min burst + 50/day per user)
+- `/admin/v1/*` and `/metrics` are served on a separate mux; admin is gated by an IP allowlist
+- **Auth is applied selectively per-route** (not globally) via `RequireAuth`; it validates the JWT and stores `userID` in `context.Value(middleware.UserIDKey)`
 
 To get user ID in a handler:
 ```go
@@ -77,10 +100,15 @@ if !ok {
 
 ## Error Response Convention
 
-All error responses use:
+A typed JSON error envelope is available via `response.WriteJSONErrWithCode`,
+emitting `{ "error", "code", "requestId" }` with a stable machine-readable
+`code` (see `response.ErrorCode`). This is the preferred form for new
+handlers. Many existing handlers still return the older minimal shape:
 ```json
 { "error": "human-readable message" }
 ```
+and a few method-guards use plain-text `http.Error`; standardising on the
+typed envelope is in progress.
 
 Standard status codes:
 - `400` — bad request (invalid body, missing field, validation)
@@ -114,18 +142,19 @@ Use the pagination helpers when adding new list endpoints to keep the pattern co
 The outfit package uses a pluggable generator pattern:
 
 ```go
-type OutfitGenerator interface {
-    Generate(ctx context.Context, req GenerateRequest) (*GenerateResponse, error)
+type Generator interface {
+    Name() string
+    Generate(ctx context.Context, req GeneratorRequest) ([]Outfit, *Usage, error)
 }
 ```
 
-Three implementations: `OllamaGenerator`, `ClaudeGenerator`, `OpenAIGenerator`. The active implementation is selected at startup based on `OUTFIT_PROVIDER`.
+Three implementations: `OllamaGenerator`, `ClaudeGenerator`, `OpenAIGenerator` (Claude uses Anthropic tool-use with an enum of valid item IDs + optional vision, which makes ID hallucination structurally impossible). Selection is driven by `OUTFIT_PROVIDER`; a `CascadeGenerator` can chain providers with per-provider health cooldowns, and each call returns `*Usage` for the cost ledger.
 
 ### Async Flow
 
-1. `POST /v1/outfits/generate` — validates request, creates a job in Redis, starts generation in a goroutine, returns `{ jobId }` immediately
-2. `GET /v1/outfits/jobs/{id}` — returns job status (`pending`, `running`, `completed`, `failed`) and result when complete
-3. Completed outfits are cached in Redis to avoid regeneration for identical inputs
+1. `POST /v1/outfits/generate` — validates the request, creates a job (MongoDB is the source of truth, Redis a write-through cache), starts generation in a goroutine bounded by a concurrency semaphore (`OUTFIT_MAX_CONCURRENT`, default 8), and returns `{ jobId }` (202). When the client sends `Accept: text/event-stream`, the same endpoint streams per-stage progress over SSE instead.
+2. `GET /v1/outfits/jobs/{id}` — returns job status (`pending`, `processing`, `completed`, `failed`) and the result when complete. Ownership-checked (404 on mismatch); a stale-job sweeper fails jobs stuck in `processing` past ~10 min.
+3. Completed outfits are cached (24h TTL) to avoid regenerating identical inputs.
 
 ## Auth: Refresh Token Flow
 
@@ -165,10 +194,11 @@ func (h *Handler) Item(w http.ResponseWriter, r *http.Request) {
 
 ## ID Extraction from URL
 
-Until Go 1.22 path variables are used, extract IDs by trimming the route prefix:
+Routing is plain `http.ServeMux` with prefix registration; handlers currently extract IDs by trimming the route prefix:
 ```go
 itemID := strings.TrimPrefix(r.URL.Path, "/v1/wardrobe/items/")
 ```
+This predates Go 1.22 routing. The project is on **Go 1.24**, so new routes may instead use method+`{id}` patterns and `r.PathValue("id")`; the existing prefix-trim routes have not been migrated.
 
 ## JSON Helpers
 
@@ -227,8 +257,10 @@ to regenerate `internal/admin/gen/types.go` from it.
 
 Hand-written types in `internal/admin/{domain,users,overview,traces}.go`
 remain the structs handlers return — the generated package is
-**reference + drift detection** only. CI runs `make gen-check`; if
-the spec or the gen output drift, the build fails.
+**reference + drift detection** only. `make gen-check` regenerates
+and diffs the output, but it is **not currently wired into CI**, so
+spec/codegen drift is not enforced automatically — run it locally
+after changing a contract. (Wiring it into CI is tracked separately.)
 
 When changing an admin endpoint shape:
 1. Edit `mootd-contracts/openapi/admin-api.yaml`, push.

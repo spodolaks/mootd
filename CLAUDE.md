@@ -58,9 +58,9 @@ See `backend/README.md` for the full API reference.
 
 ## Key Design Decisions
 
-- **Semi-microservice backend**: Each domain (`auth`, `user`, `wardrobe`, `outfit`, `health`) is a self-contained package with handler + service + repository + domain types. This keeps AI context windows small when working on one domain.
+- **Semi-microservice backend**: Each domain is a self-contained package (handler + domain types, plus repository/service where needed) to keep AI context windows small. The HTTP-serving domains are `auth`, `user`, `wardrobe`, `outfit`, `moodboard`, `feedback`, `brands`, `generic`, `surface`, `privacy`, `events`, and `health`, alongside a large `admin/` subsystem (MFA, RBAC, audit log, funnels, retention, eval suite, prompt A/B tests, tier routing, budgets) and support packages (`archetype`, `budget`, `observability`, `shared`). See `backend/CLAUDE.md` for the full map.
 - **Repository pattern with mock/API switching**: Frontend uses `EXPO_PUBLIC_DATA_SOURCE` to swap between real API and in-memory mocks. Enables offline development.
-- **No shared code between frontend and backend**: TypeScript types in `app/src/domain/` are manually kept in sync with Go structs in `backend/internal/*/domain.go`. Update both when changing API shapes.
+- **No shared code between frontend and backend**: TypeScript types in `app/src/domain/` are kept in sync with Go structs in `backend/internal/*/domain.go` — update both when changing API shapes. The admin and user APIs additionally have vendored OpenAPI contracts (`backend/contracts/*.yaml`) that generate reference types (`make gen-user` / `gen-admin`); handlers still return hand-written structs, so the generated types are a drift-detection aid, not the wire source.
 - **Pluggable outfit generation**: The `OUTFIT_PROVIDER` env var selects between Ollama (local), Claude, and OpenAI for generating outfit recommendations. All three implement the same `OutfitGenerator` interface.
 - **Redis for caching and rate limiting**: Outfit results are cached in Redis. Per-user rate limiting and async job state are also stored in Redis.
 - **Refresh token auth flow**: Short-lived access tokens (15 min) with long-lived refresh tokens (30 days). The frontend's `apiClient` intercepts 401 responses and transparently refreshes the access token before retrying the request.
