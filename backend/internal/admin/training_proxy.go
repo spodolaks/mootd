@@ -84,6 +84,11 @@ func (h *Handler) TrainingTrial(w http.ResponseWriter, r *http.Request, trialID 
 		response.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "missing trial id"})
 		return
 	}
+	// Reject traversal / injection before interpolating upstream (#108 B2).
+	if !safePathSegment(trialID) {
+		response.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid trial id"})
+		return
+	}
 	if !h.hitlReady(w) {
 		return
 	}
@@ -108,10 +113,11 @@ func (h *Handler) TrainingBlob(w http.ResponseWriter, r *http.Request, rest stri
 		return
 	}
 	// rest = "{bucket}/{id}". Both segments are orchestrator-minted
-	// ([a-z]+ bucket, 24-hex id); reject anything else so we don't
-	// proxy arbitrary upstream paths.
+	// ([a-z]+ bucket, 24-hex id); validate each against the safe
+	// segment class so a value like ".." can't traverse to another
+	// orchestrator path via the service-token proxy (#108 B2).
 	bucket, id, ok := strings.Cut(rest, "/")
-	if !ok || bucket == "" || id == "" || strings.Contains(id, "/") {
+	if !ok || !safePathSegment(bucket) || !safePathSegment(id) {
 		response.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "blob path must be {bucket}/{id}"})
 		return
 	}

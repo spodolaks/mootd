@@ -58,6 +58,7 @@ type Admin struct {
 	MFASecret        string     `bson:"mfaSecret,omitempty"`        // base32 TOTP seed
 	MFAEnforced      bool       `bson:"mfaEnforced,omitempty"`      // require TOTP on login
 	MFARecoveryCodes []string   `bson:"mfaRecoveryCodes,omitempty"` // sha256 hex of each
+	MFALastTOTPStep  int64      `bson:"mfaLastTotpStep,omitempty"`  // highest consumed TOTP step; blocks replay within the validity window (#108 B4)
 	Roles            []Role     `bson:"roles"`
 	CreatedAt        time.Time  `bson:"createdAt"`
 	UpdatedAt        time.Time  `bson:"updatedAt"`
