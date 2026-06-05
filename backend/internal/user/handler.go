@@ -144,8 +144,10 @@ func (h *Handler) deleteAccount(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Generous timeout — GridFS cleanup on a large wardrobe takes time, and a
-	// partial deletion is worse than a slow one.
-	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	// partial deletion is worse than a slow one. Decouple from the request's
+	// cancellation so a client disconnect mid-erase can't strand a half-deleted
+	// account; the erasure runs to completion server-side (#96).
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 60*time.Second)
 	defer cancel()
 
 	if err := h.cascade(ctx, userID); err != nil {

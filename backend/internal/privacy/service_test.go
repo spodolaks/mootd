@@ -42,3 +42,20 @@ func keys(m map[string]string) []string {
 	}
 	return out
 }
+
+// TestBlobPurgerCollections_AreAllowlisted guards the #96 wiring: every
+// collection routed through a GridFS blob purger (in app.go) must still be a
+// known user-scoped collection. If the allowlist entry is renamed without
+// updating the purger key, the delegation silently breaks and image blobs
+// orphan again — the exact bug #96 fixes.
+func TestBlobPurgerCollections_AreAllowlisted(t *testing.T) {
+	allow := map[string]bool{}
+	for _, c := range userScopedCollections {
+		allow[c.Name] = true
+	}
+	for _, name := range []string{"wardrobe_items", "moodboards", "detection_runs"} {
+		if !allow[name] {
+			t.Errorf("blob-purged collection %q is not in userScopedCollections", name)
+		}
+	}
+}

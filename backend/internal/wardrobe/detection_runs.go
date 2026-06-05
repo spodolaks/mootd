@@ -237,6 +237,47 @@ func (r *DetectionRunMongoRepository) SaveInputImage(ctx context.Context, runID 
 	return err
 }
 
+// DeleteAllByUser removes every detection_runs row owned by userID along with
+// its input-image blob in the "detection_inputs" GridFS bucket (keyed by run
+// id). Returns the number of run rows deleted. Blob cleanup is best-effort: a
+// missing or transient blob must never block account erasure (#96).
+func (r *DetectionRunMongoRepository) DeleteAllByUser(ctx context.Context, userID string) (int, error) {
+	cur, err := r.col().Find(ctx, bson.M{"userId": userID}, options.Find().SetProjection(bson.M{"_id": 1}))
+	if err != nil {
+		return 0, err
+	}
+	var ids []struct {
+		ID string `bson:"_id"`
+	}
+	if err := cur.All(ctx, &ids); err != nil {
+		return 0, err
+	}
+
+	bucket := r.inputBucket()
+	for _, row := range ids {
+		// Input images are stored with filename == run id; delete by filename.
+		fcur, ferr := bucket.GetFilesCollection().Find(ctx, bson.M{"filename": row.ID})
+		if ferr != nil {
+			continue
+		}
+		for fcur.Next(ctx) {
+			var f struct {
+				ID any `bson:"_id"`
+			}
+			if err := fcur.Decode(&f); err == nil && f.ID != nil {
+				_ = bucket.Delete(ctx, f.ID)
+			}
+		}
+		_ = fcur.Close(ctx)
+	}
+
+	res, err := r.col().DeleteMany(ctx, bson.M{"userId": userID})
+	if err != nil {
+		return 0, err
+	}
+	return int(res.DeletedCount), nil
+}
+
 // GetInputImage reads the original input photo from GridFS.
 func (r *DetectionRunMongoRepository) GetInputImage(ctx context.Context, runID string) ([]byte, string, error) {
 	bucket := r.inputBucket()

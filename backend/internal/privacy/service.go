@@ -3,6 +3,7 @@ package privacy
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -23,13 +24,30 @@ var ErrUserNotFound = errors.New("privacy: user not found or already purged")
 // docs where userId=X" 9 times. The collections are an
 // allowlist baked into one place — easy to audit.
 type Service struct {
-	client *mongo.Client
-	dbName string
+	client      *mongo.Client
+	dbName      string
+	blobPurgers map[string]BlobPurgeFunc
 }
 
 // NewService constructs a Service.
 func NewService(client *mongo.Client, dbName string) *Service {
 	return &Service{client: client, dbName: dbName}
+}
+
+// BlobPurgeFunc erases, for one user, BOTH the GridFS image blobs and the
+// documents of a single collection, returning the number of documents removed.
+// Supplied by the owning repository (wardrobe, moodboard, detection) so the
+// GridFS filename scheme stays encapsulated where the writes live — the privacy
+// package must never duplicate it, since that drift is exactly what #96 fixes.
+type BlobPurgeFunc func(ctx context.Context, userID string) (int, error)
+
+// WithBlobPurgers registers per-collection purgers that own GridFS cleanup. For
+// any collection in userScopedCollections that has a purger here, Purge
+// delegates to it instead of a plain DeleteMany (which would orphan the image
+// blobs). Wired in app.go once the owning repos exist. Returns s for chaining.
+func (s *Service) WithBlobPurgers(purgers map[string]BlobPurgeFunc) *Service {
+	s.blobPurgers = purgers
+	return s
 }
 
 func (s *Service) col(name string) *mongo.Collection {
@@ -90,6 +108,21 @@ func (s *Service) Purge(ctx context.Context, userID string) (*PurgeReport, error
 	}
 
 	for _, c := range userScopedCollections {
+		// Collections whose documents also own GridFS image blobs are erased
+		// through an injected purger so the blobs go too; everything else is a
+		// straight document delete. Without this, image blobs survived erasure
+		// as permanent orphans (#96).
+		if purge, ok := s.blobPurgers[c.Name]; ok {
+			n, err := purge(ctx, userID)
+			if err != nil {
+				return nil, fmt.Errorf("privacy: purge %s: %w", c.Name, err)
+			}
+			if n > 0 {
+				report.Collections[c.Name] = int64(n)
+				report.Total += int64(n)
+			}
+			continue
+		}
 		filter := bson.M{c.Field: userID}
 		res, err := s.col(c.Name).DeleteMany(ctx, filter)
 		if err != nil {
