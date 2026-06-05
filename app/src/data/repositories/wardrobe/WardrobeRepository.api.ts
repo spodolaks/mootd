@@ -8,7 +8,7 @@ import type {
 } from '@/src/domain';
 import type { OutfitProgress } from '@/src/domain/interfaces/IWardrobeRepository';
 import { Platform } from 'react-native';
-import { ApiError, apiClient, getApiBaseURL, getAuthToken } from '@/src/data/api/client';
+import { ApiError, apiClient, authFetch, getApiBaseURL, getAuthToken } from '@/src/data/api/client';
 
 interface DetectAPIResponse {
   items: {
@@ -35,6 +35,12 @@ const DETECT_TIMEOUT_MS = 4 * 60 * 1000; // detection can take up to 4 min on th
 // 60 s is a comfortable cap for both — anything beyond that should fail fast
 // and surface the error to the user instead of hanging the screen.
 const OUTFITS_TIMEOUT_MS = 60 * 1000;
+
+// SSE generation: bound the connect/headers phase only. Once the
+// stream's headers arrive authFetch clears its timer, so the body
+// (which streams progress for up to the backend's ~2 min cap) is not
+// cut off by this value.
+const STREAM_CONNECT_TIMEOUT_MS = 20 * 1000;
 
 // Convert a relative image path (/v1/wardrobe/items/{id}/image) to an absolute URL.
 const toAbsoluteImageURL = (imageUrl: string | undefined): string => {
@@ -331,21 +337,24 @@ export class ApiWardrobeRepository implements IWardrobeRepository {
     }
     const qs = params.toString();
     const path = `/v1/outfits/generate${qs ? `?${qs}` : ''}`;
-    const baseURL = getApiBaseURL();
-    const token = getAuthToken();
     console.log(`[Wardrobe] → POST(stream) ${path}`);
 
-    const res = await fetch(`${baseURL}${path}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'text/event-stream',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    // Route through authFetch so a mid-session access-token expiry
+    // triggers the shared 401 silent-refresh (a bare fetch here would
+    // 401 and get swallowed by the sync fallback), and a 429 surfaces
+    // the friendly rate-limit message. timeoutMs bounds connect/headers
+    // only — the SSE body stream below is not subject to it.
+    const res = await authFetch(
+      path,
+      {
+        method: 'POST',
+        headers: { Accept: 'text/event-stream' },
+        body: JSON.stringify({}),
       },
-      body: JSON.stringify({}),
-    });
-    if (!res.ok || !res.body) {
-      throw new Error(`stream open failed: HTTP ${res.status}`);
+      { timeoutMs: STREAM_CONNECT_TIMEOUT_MS }
+    );
+    if (!res.body) {
+      throw new Error('stream open failed: response has no body');
     }
 
     const reader = res.body.getReader();
@@ -434,32 +443,13 @@ export class ApiWardrobeRepository implements IWardrobeRepository {
       params.set('unit', weather.unit === 'fahrenheit' ? 'F' : 'C');
     }
     const qs = params.toString();
-    const url = `${getApiBaseURL()}/v1/outfits${qs ? `?${qs}` : ''}`;
+    const path = `/v1/outfits${qs ? `?${qs}` : ''}`;
 
-    console.log(`[Wardrobe] → GET ${url}`);
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), OUTFITS_TIMEOUT_MS);
-
-    let rawResponse: Response;
-    try {
-      rawResponse = await fetch(url, {
-        method: 'GET',
-        signal: controller.signal,
-        headers: {
-          'Content-Type': 'application/json',
-          ...(getAuthToken() ? { Authorization: `Bearer ${getAuthToken()}` } : {}),
-        },
-      });
-    } finally {
-      clearTimeout(timeoutId);
-    }
-
-    const body = (await rawResponse.json().catch(() => ({}))) as Record<string, unknown>;
-    if (!rawResponse.ok) {
-      const msg =
-        typeof body.error === 'string' ? body.error : `Outfits failed (${rawResponse.status})`;
-      throw new ApiError(msg, rawResponse.status, body);
-    }
+    console.log(`[Wardrobe] → GET ${path}`);
+    // Route through authFetch for the shared 401-refresh + friendly 429
+    // handling (this path previously used a bare fetch and bypassed both).
+    const res = await authFetch(path, { method: 'GET' }, { timeoutMs: OUTFITS_TIMEOUT_MS });
+    const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
 
     const outfits = ((body.outfits as Outfit[] | undefined) ?? []).map(hydrateOutfitUrls);
     console.log(`[Wardrobe] ✓ Outfits received — ${outfits.length} outfit(s)`, outfits);
