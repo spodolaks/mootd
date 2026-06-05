@@ -182,13 +182,29 @@ func (h *Handler) TrainingExport(w http.ResponseWriter, r *http.Request) {
 		}
 		return nil
 	})
+	errMsg := ""
 	if streamErr != nil {
-		// Headers + partial body already on the wire — can't switch to
-		// a JSON error. Log it; the JSONL consumer sees a clean EOF.
+		errMsg = streamErr.Error()
+		// Headers + partial body are already on the wire, so we can't
+		// switch to an HTTP error. Emit a trailing sentinel record so a
+		// truncated export is DETECTABLE in-band instead of looking like
+		// a clean EOF (#111 F4); also recorded in the audit metadata
+		// below as the authoritative server-side signal. Consumers
+		// should treat a final `_export_error` line (or a missing
+		// `_export_complete`) as truncation and discard the file.
+		_ = enc.Encode(map[string]any{"_export_error": errMsg, "emitted": emitted})
+		if flusher != nil {
+			flusher.Flush()
+		}
 		h.logger.Printf("admin training export (%s): stream failed after %d rows: %v", format, total, streamErr)
 	}
+	// On success we deliberately emit NO terminator line — the output
+	// stays byte-identical to what existing consumers parse. The
+	// authoritative "did this complete?" signal is the audit row's
+	// `complete` flag + `emitted` count recorded below, which a
+	// consumer can cross-check against the rows it received.
 
-	h.auditTrainingExport(r, format, since, minAgreement, emitted, skipped, total)
+	h.auditTrainingExport(r, format, since, minAgreement, emitted, skipped, total, errMsg)
 }
 
 // reconstructGold rebuilds the human-approved structured description
@@ -314,7 +330,7 @@ func flatDiffers(a, b map[string]any) bool {
 // auditTrainingExport writes one admin_audit row per export. Best-effort
 // (same contract as the traces export audit) — we don't deny a served
 // export over an audit hiccup.
-func (h *Handler) auditTrainingExport(r *http.Request, format string, since time.Time, minAgreement float64, emitted, skipped, total int) {
+func (h *Handler) auditTrainingExport(r *http.Request, format string, since time.Time, minAgreement float64, emitted, skipped, total int, errMsg string) {
 	if h.repo == nil {
 		return
 	}
@@ -324,10 +340,15 @@ func (h *Handler) auditTrainingExport(r *http.Request, format string, since time
 		adminEmail = a.Email
 	}
 	meta := map[string]any{
-		"format":  format,
-		"emitted": emitted,
-		"skipped": skipped,
-		"scanned": total,
+		"format":   format,
+		"emitted":  emitted,
+		"skipped":  skipped,
+		"scanned":  total,
+		"complete": errMsg == "",
+	}
+	if errMsg != "" {
+		// Truncated export — the file on the client is incomplete (#111 F4).
+		meta["error"] = errMsg
 	}
 	if !since.IsZero() {
 		meta["since"] = since.UTC().Format(time.RFC3339)
