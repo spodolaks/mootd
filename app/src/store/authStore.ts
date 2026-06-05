@@ -49,6 +49,13 @@ async function clearTokenSecurely(): Promise<void> {
   await SecureStore.deleteItemAsync(SECURE_SESSION_KEY);
 }
 
+/**
+ * Guards signOut against re-entrancy. A wave of requests that all 401 and all
+ * fail to refresh would otherwise each call signOut → a storm of logout calls
+ * and redundant state churn. First caller wins; the rest no-op (#98).
+ */
+let isSigningOut = false;
+
 export interface AuthState {
   user: AuthUser | null;
   session: AuthSession | null;
@@ -209,33 +216,40 @@ export const useAuthStore = create<AuthState>(set => ({
   },
 
   signOut: async () => {
-    // P2-01: emit before clearing the token so the event flushes
-    // with valid auth. The SDK keeps queueing post-signout (in
-    // case of immediate sign-back-in), but those land on the
-    // next user's session — anonymous queue gets the rest.
-    events.emit('signed_out', {});
-    void events.flush();
+    // Re-entrancy guard: dedup a storm of concurrent signOuts (#98).
+    if (isSigningOut) return;
+    isSigningOut = true;
+    try {
+      // P2-01: emit before clearing the token so the event flushes
+      // with valid auth. The SDK keeps queueing post-signout (in
+      // case of immediate sign-back-in), but those land on the
+      // next user's session — anonymous queue gets the rest.
+      events.emit('signed_out', {});
+      void events.flush();
 
-    // Revoke the refresh token server-side first so a lost device can't keep
-    // minting new access tokens. We do NOT await this call — network failures
-    // must not block local sign-out, and the user expects an instant UI.
-    const refreshToken = useAuthStore.getState().session?.refreshToken;
-    if (refreshToken) {
-      void authRepository.logout(refreshToken).catch(() => {
-        /* already swallowed in repo */
+      // Revoke the refresh token server-side first so a lost device can't keep
+      // minting new access tokens. We do NOT await this call — network failures
+      // must not block local sign-out, and the user expects an instant UI.
+      const refreshToken = useAuthStore.getState().session?.refreshToken;
+      if (refreshToken) {
+        void authRepository.logout(refreshToken).catch(() => {
+          /* already swallowed in repo */
+        });
+      }
+
+      setAuthToken(null);
+      await clearTokenSecurely().catch(err => {
+        console.warn('[Auth] Failed to clear secure token:', err);
       });
+      set({
+        user: null,
+        session: null,
+        isAuthenticated: false,
+        error: null,
+      });
+    } finally {
+      isSigningOut = false;
     }
-
-    setAuthToken(null);
-    await clearTokenSecurely().catch(err => {
-      console.warn('[Auth] Failed to clear secure token:', err);
-    });
-    set({
-      user: null,
-      session: null,
-      isAuthenticated: false,
-      error: null,
-    });
   },
 
   clearError: () => set({ error: null }),
