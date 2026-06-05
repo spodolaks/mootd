@@ -316,8 +316,12 @@ func (r *MongoRepository) DeleteAllByUser(ctx context.Context, userID string) (i
 
 	bucket := r.gridFSBucket()
 	for _, row := range ids {
-		// Best-effort GridFS cleanup — a missing file is not an error.
+		// Best-effort GridFS cleanup — a missing file is not an error. Two blobs
+		// can exist per item: the original (keyed by id) and a transcoded PNG
+		// variant (keyed by id+"-png", written by the PNG worker). Purge both so
+		// account erasure doesn't strand the PNG (#96).
 		_ = r.deleteGridFSByName(ctx, bucket, row.ID)
+		_ = r.deleteGridFSByName(ctx, bucket, row.ID+"-png")
 	}
 
 	res, err := r.collection().DeleteMany(ctx, bson.M{"userId": userID})

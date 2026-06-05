@@ -5,6 +5,7 @@ import (
 	"context"
 	cryptoRand "crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -627,28 +628,31 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 	}
 	moodboardHandler.RegisterRoutes(mux, authMiddleware)
 
-	// Wire the user-deletion cascade now that we have all the owning repos.
-	// Order: images + items → moodboards → feedback → user doc. The user doc
-	// is deleted last so that if any earlier step fails, the user can still
-	// re-authenticate and retry; deleting the user first would strand
-	// orphaned data.
+	// Make the privacy purge GridFS-aware: collections whose documents also own
+	// image blobs are erased through the owning repo's DeleteAllByUser (blobs +
+	// docs) rather than a doc-only DeleteMany. Without this, wardrobe / moodboard
+	// / detection image blobs survived a purge as permanent orphans (#96).
+	privacySvc.WithBlobPurgers(map[string]privacy.BlobPurgeFunc{
+		"wardrobe_items": wardrobeRepo.DeleteAllByUser,
+		"moodboards":     moodboardRepo.DeleteAllByUser,
+		"detection_runs": detectionRunRepo.DeleteAllByUser,
+	})
+
+	// DELETE /v1/user/profile and DELETE /v1/privacy/self now share ONE erasure
+	// orchestrator (privacy.Service.Purge): the full collection set + GridFS
+	// blobs + the user doc deleted last, idempotent and re-runnable. The old
+	// bespoke cascade here deleted a narrower set and skipped GridFS — that
+	// weaker path is gone (#96).
 	userCascade := user.CascadeFn(func(ctx context.Context, userID string) error {
-		if n, err := wardrobeRepo.DeleteAllByUser(ctx, userID); err != nil {
-			return err
-		} else if n > 0 {
-			a.Logger.Printf("delete account: removed %d wardrobe items for user %s", n, userID)
+		report, err := privacySvc.Purge(ctx, userID)
+		if errors.Is(err, privacy.ErrUserNotFound) {
+			return nil // already erased — idempotent success
 		}
-		if n, err := moodboardRepo.DeleteAllByUser(ctx, userID); err != nil {
+		if err != nil {
 			return err
-		} else if n > 0 {
-			a.Logger.Printf("delete account: removed %d moodboards for user %s", n, userID)
 		}
-		if n, err := feedbackRepo.DeleteAllByUser(ctx, userID); err != nil {
-			return err
-		} else if n > 0 {
-			a.Logger.Printf("delete account: removed %d feedback events for user %s", n, userID)
-		}
-		return userRepo.DeleteByID(ctx, userID)
+		a.Logger.Printf("delete account: user %s erased — %d docs across %d collections", userID, report.Total, len(report.Collections))
+		return nil
 	})
 	user.NewHandler(a.Logger, userRepo, userCascade).RegisterRoutes(mux, authMiddleware)
 

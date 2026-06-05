@@ -15,14 +15,21 @@ import (
 	"mootd/backend/internal/shared/response"
 )
 
+// purgeExporter is the subset of *Service the handler depends on. Declared as
+// an interface so handler tests can inject a fake without a live Mongo.
+type purgeExporter interface {
+	Purge(ctx context.Context, userID string) (*PurgeReport, error)
+	Export(ctx context.Context, userID string) (*ExportData, error)
+}
+
 // Handler serves the self-serve privacy endpoints.
 type Handler struct {
 	logger *log.Logger
-	svc    *Service
+	svc    purgeExporter
 }
 
 // NewHandler constructs a privacy Handler.
-func NewHandler(logger *log.Logger, svc *Service) *Handler {
+func NewHandler(logger *log.Logger, svc purgeExporter) *Handler {
 	return &Handler{logger: logger, svc: svc}
 }
 
@@ -50,7 +57,11 @@ func (h *Handler) SelfPurge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	// Erasure must run to completion even if the client disconnects mid-call —
+	// a half-deleted account is worse than a slow one. Decouple from the
+	// request's cancellation (keeping its values for log correlation) so closing
+	// the app or dropping the connection can't abort the purge (#96).
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 60*time.Second)
 	defer cancel()
 
 	report, err := h.svc.Purge(ctx, userID)
