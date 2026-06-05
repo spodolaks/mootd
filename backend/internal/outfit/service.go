@@ -1112,13 +1112,26 @@ func formatTopArchetypes(archs []archetype.ScoredArchetype) string {
 }
 
 // buildCacheKey produces a deterministic key for the outfit cache.
-// The key changes when the wardrobe membership, weather bucket, or top
-// archetypes change — so a fresh wardrobe item or different weather forces
-// re-generation, but tapping "regenerate" twice in a row hits the cache.
+// The key changes when the user's owned wardrobe membership, weather bucket,
+// or top archetypes change — so a fresh wardrobe item or different weather
+// forces re-generation, but tapping "regenerate" twice in identical
+// conditions hits the cache.
+//
+// Archetype-default fillers (id prefix "ad_") are deliberately EXCLUDED from
+// the key. They are sampled at random per call (Mongo $sample, mootd#72), so
+// keying on them would change the hash every time and make the cache
+// unreachable for filler-heavy (small) wardrobes — exactly the cold-start
+// users we most want to serve cheaply from cache instead of re-paying the
+// LLM. Keying on owned items only means an identical owned wardrobe +
+// weather + archetypes returns the cached batch (fillers included) within
+// the TTL.
 func buildCacheKey(userID string, items []wardrobe.ClothingItem, weather Weather, top []archetype.ScoredArchetype) string {
-	ids := make([]string, len(items))
-	for i, item := range items {
-		ids[i] = item.ID
+	ids := make([]string, 0, len(items))
+	for _, item := range items {
+		if strings.HasPrefix(item.ID, "ad_") {
+			continue // archetype-default filler — randomly sampled, see above
+		}
+		ids = append(ids, item.ID)
 	}
 	sort.Strings(ids)
 
