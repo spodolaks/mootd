@@ -1,5 +1,5 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -18,15 +18,7 @@ import { useColorScheme } from '@/src/hooks';
 import { accents, backgrounds, button, fills, grays, labels } from '@/src/theme/colors';
 import { typography } from '@/src/theme/typography';
 import { wardrobeRepository } from '@/src/data/repositories';
-
-// Fixed trait keys shown in the editor. Values come from the item's traits map.
-const TRAIT_KEYS: { key: string; label: string }[] = [
-  { key: 'color', label: 'Color' },
-  { key: 'material', label: 'Material' },
-  { key: 'size', label: 'Size' },
-  { key: 'brand', label: 'Brand' },
-  { key: 'occasion', label: 'Occasion' },
-];
+import { buildTraitList } from '@/src/store';
 
 export const ItemDetailsScreen: React.FC = () => {
   const colorScheme = useColorScheme() ?? 'light';
@@ -44,13 +36,21 @@ export const ItemDetailsScreen: React.FC = () => {
   const itemCategory = params.category || '';
   const itemImageUrl = params.imageUrl || '';
 
-  const initialTraits: Record<string, string> = (() => {
+  const initialTraits = useMemo<Record<string, string>>(() => {
     try {
       return params.traits ? (JSON.parse(params.traits) as Record<string, string>) : {};
     } catch {
       return {};
     }
-  })();
+  }, [params.traits]);
+
+  // Render one field per stored trait plus any category-template traits the
+  // item doesn't have yet — no hardcoded key list, so a trait added to the
+  // template (or returned by the detector) shows up here automatically.
+  const traitFields = useMemo(
+    () => buildTraitList(itemCategory, initialTraits),
+    [itemCategory, initialTraits]
+  );
 
   const [traitValues, setTraitValues] = useState<Record<string, string>>(initialTraits);
   const [isSaving, setIsSaving] = useState(false);
@@ -163,13 +163,13 @@ export const ItemDetailsScreen: React.FC = () => {
 
           {/* Trait fields */}
           <View style={styles.traitsContainer}>
-            {TRAIT_KEYS.map(({ key, label }) => (
+            {traitFields.map(field => (
               <Input
-                key={key}
-                title={label}
-                placeholder={`Enter ${label.toLowerCase()}`}
-                value={traitValues[key] ?? ''}
-                onChangeText={text => handleTraitChange(key, text)}
+                key={field.id}
+                title={field.name}
+                placeholder={`Enter ${field.name.toLowerCase()}`}
+                value={traitValues[field.id] ?? ''}
+                onChangeText={text => handleTraitChange(field.id, text)}
               />
             ))}
           </View>

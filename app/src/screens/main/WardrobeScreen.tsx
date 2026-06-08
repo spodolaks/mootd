@@ -186,8 +186,13 @@ export const WardrobeScreen: React.FC = () => {
 
   const categories: CategoryChip[] = [
     { id: 'all', label: 'All' },
+    // Group by the item's canonical category. Fall back to the legacy
+    // `macro_category` trait for rows created by the old detector, which set
+    // that trait instead of populating the top-level category.
     ...Array.from(
-      new Set(wardrobeItems.map(i => i.traits['macro_category'] ?? '').filter(Boolean))
+      new Set(
+        wardrobeItems.map(i => i.category || i.traits['macro_category'] || '').filter(Boolean)
+      )
     ).map(cat => ({ id: cat, label: cat })),
   ];
 
@@ -282,7 +287,8 @@ export const WardrobeScreen: React.FC = () => {
   const filteredItems = wardrobeItems.filter(item => {
     const matchesSearch = item.label.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesCategory =
-      selectedCategory === 'all' || item.traits['macro_category'] === selectedCategory;
+      selectedCategory === 'all' ||
+      (item.category || item.traits['macro_category']) === selectedCategory;
     return matchesSearch && matchesCategory;
   });
 

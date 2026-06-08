@@ -196,7 +196,10 @@ function analyzeWardrobe(items: WardrobeItem[]): ScoredArchetype[] {
     const t = item.traits;
     if (t.color) allColors.push(t.color.toLowerCase());
     if (t.color_secondary) allColors.push(t.color_secondary.toLowerCase());
-    if (t.fabric) allMaterials.push(t.fabric.toLowerCase());
+    // The singleitem backend emits "material"; the legacy detector emits
+    // "fabric". Accept either so the material signal is never silently empty.
+    const material = t.material ?? t.fabric;
+    if (material) allMaterials.push(material.toLowerCase());
     if (t.style) allStyles.push(t.style.toLowerCase());
     if (t.occasion) allOccasions.push(t.occasion.toLowerCase());
     if (t.details) allDetails.push(t.details.toLowerCase());
@@ -420,7 +423,9 @@ export const StyleAnalysisScreen: React.FC = () => {
           />
           <SignalRow
             label="Key materials"
-            values={[...new Set(items.map(i => i.traits.fabric).filter(Boolean))].slice(0, 5)}
+            values={[
+              ...new Set(items.map(i => i.traits.material ?? i.traits.fabric).filter(Boolean)),
+            ].slice(0, 5)}
             textColor={textColor}
             secondaryText={secondaryText}
             chipBg={backgrounds.primary[colorScheme]}

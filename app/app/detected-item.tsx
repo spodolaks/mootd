@@ -2,7 +2,7 @@ import { useRouter } from 'expo-router';
 import { wardrobeRepository } from '@/src/data/repositories';
 import { DetectedItemScreen } from '@/src/screens';
 import type { ClothingSearchProduct } from '@/src/domain';
-import { useWardrobeStore, getDefaultTraitsForCategory, type WardrobeItem } from '@/src/store';
+import { useWardrobeStore, buildTraitList, type WardrobeItem } from '@/src/store';
 
 export default function DetectedItem() {
   const router = useRouter();
@@ -52,32 +52,15 @@ export default function DetectedItem() {
     }
 
     // Use the backend UUID directly as the item ID so updateItem calls use the correct ID.
-    // Build trait list dynamically from ALL detected traits, then fill in any missing defaults.
+    // Build the trait list from ALL detected traits merged with the category
+    // template (see buildTraitList). Brand is pulled out and handled
+    // separately because it can also come from the brand-search selection,
+    // not just detection.
     const detectedTraits = selectedItem.traits ?? {};
-    const defaultTraits = getDefaultTraitsForCategory(currentStep.category);
-    const seenIds = new Set<string>();
+    const { brand: detectedBrand, ...rest } = detectedTraits;
+    const allTraits = buildTraitList(currentStep.category, rest);
 
-    // First: create traits from all detected values
-    const traitsFromDetection = Object.entries(detectedTraits)
-      .filter(([key]) => key !== 'brand') // brand handled separately below
-      .map(([key, value]) => {
-        seenIds.add(key);
-        // Find matching default for display name and options, if any
-        const defaultMatch = defaultTraits.find(t => t.id === key);
-        return {
-          id: key,
-          name: defaultMatch?.name ?? key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
-          selectedValue: value,
-          options: defaultMatch?.options ?? [],
-        };
-      });
-
-    // Then: add any defaults that weren't in the detected traits
-    const missingDefaults = defaultTraits.filter(t => !seenIds.has(t.id)).map(t => ({ ...t }));
-
-    const allTraits = [...traitsFromDetection, ...missingDefaults];
-
-    const brandTrimmed = (detectedTraits['brand'] || brand).trim();
+    const brandTrimmed = (detectedBrand || brand).trim();
     const traitsWithBrand = brandTrimmed
       ? [...allTraits, { id: 'brand', name: 'Brand', selectedValue: brandTrimmed, options: [] }]
       : allTraits;
@@ -128,8 +111,9 @@ export default function DetectedItem() {
   ) => {
     if (!currentStep) return;
 
-    // For product selections, start with defaults (no detected traits available)
-    const defaultTraits = getDefaultTraitsForCategory(currentStep.category).map(t => ({ ...t }));
+    // For product selections there are no detected traits — start from the
+    // category template.
+    const defaultTraits = buildTraitList(currentStep.category, {});
     const brandTrimmed = brand.trim();
     const traitsWithBrand = brandTrimmed
       ? [...defaultTraits, { id: 'brand', name: 'Brand', selectedValue: brandTrimmed, options: [] }]

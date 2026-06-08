@@ -9,6 +9,8 @@ export { useAuthStore, type AuthState } from './authStore';
 export {
   useWardrobeStore,
   getDefaultTraitsForCategory,
+  buildTraitList,
+  prettifyTraitKey,
   type WardrobeItem,
   type Trait,
   type DetectionStep,
