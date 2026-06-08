@@ -26,6 +26,10 @@ const toDetectionSteps = (result: ClothingDetectionResult): DetectionStep[] =>
             ? { uri: item.imageUrl }
             : undefined,
         hasPng: !!item.pngImageUrl,
+        // Carry the detected attributes through to the review flow.
+        // Without this the onboarding wizard dropped every detected
+        // trait (material, color, fit, …) and showed an empty form.
+        traits: item.traits,
       },
     ],
   }));

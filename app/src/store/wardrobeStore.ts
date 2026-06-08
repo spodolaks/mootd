@@ -195,6 +195,44 @@ export const getDefaultTraitsForCategory = (category: string): Trait[] => {
   return traits.map(trait => ({ ...trait, options: [...trait.options] }));
 };
 
+// Turn a raw trait key (e.g. "color_secondary", "graphics_description")
+// into a human-readable field title ("Color Secondary", "Graphics
+// Description"). Used as the display-name fallback for any trait that
+// isn't in the category template.
+export const prettifyTraitKey = (key: string): string =>
+  key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+
+// buildTraitList is the single source of truth for "which trait fields to
+// show for an item". It merges a flat traits map (from detection or from a
+// stored wardrobe item) with the category template so that EVERY screen
+// renders the same dynamic set:
+//   1. one field per provided trait, in insertion order, pre-filled with
+//      its value (label + options come from the category template when the
+//      key matches, otherwise the key is prettified and options are empty);
+//   2. then any category-template traits the map didn't already cover,
+//      rendered empty so the user can still fill them in.
+// Add a trait to DEFAULT_TRAIT_OPTIONS (or have the detector emit it) and it
+// flows to onboarding, the item editor, and anywhere else that renders this
+// list — no per-screen hardcoded key lists.
+export const buildTraitList = (category: string, traits: Record<string, string>): Trait[] => {
+  const defaults = getDefaultTraitsForCategory(category);
+  const seen = new Set<string>();
+
+  const fromTraits: Trait[] = Object.entries(traits).map(([key, value]) => {
+    seen.add(key);
+    const match = defaults.find(t => t.id === key);
+    return {
+      id: key,
+      name: match?.name ?? prettifyTraitKey(key),
+      selectedValue: value,
+      options: match?.options ?? [],
+    };
+  });
+
+  const missingDefaults = defaults.filter(t => !seen.has(t.id)).map(t => ({ ...t }));
+  return [...fromTraits, ...missingDefaults];
+};
+
 // NOTE: Persistence via zustand/middleware is intentionally omitted here.
 // zustand v5's middleware package uses import.meta.env which Metro's web
 // bundler does not support. Once Expo/Metro adds import.meta support (or
