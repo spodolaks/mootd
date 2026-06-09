@@ -177,8 +177,30 @@ export const useAuthStore = create<AuthState>(set => ({
         session.refreshToken = refreshToken;
       }
 
-      // Check token expiry before restoring.
+      // The access token is short-lived (15 min); session.expiresAt is its
+      // expiry, not the refresh token's. If it has expired but we still hold a
+      // refresh token (valid for 30 days), mint a fresh access token instead of
+      // forcing a full re-login — otherwise simply reopening the app the next
+      // day always bounced the user back to the login screen (#146).
       if (new Date(session.expiresAt) <= new Date()) {
+        if (refreshToken) {
+          try {
+            const newSession = await authRepository.refresh(refreshToken);
+            await saveTokenSecurely(newSession.accessToken, newSession);
+            setAuthToken(newSession.accessToken);
+            set({
+              user: newSession.user,
+              session: newSession,
+              isAuthenticated: true,
+              sessionRestored: true,
+            });
+            syncToPreferences(newSession.user);
+            return;
+          } catch {
+            // Refresh token rejected (expired/revoked) — fall through to a
+            // clean signed-out state.
+          }
+        }
         await clearTokenSecurely();
         set({ sessionRestored: true });
         return;
