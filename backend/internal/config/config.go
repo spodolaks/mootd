@@ -111,7 +111,7 @@ type Config struct {
 	EnableMockLogin bool
 
 	// Outfit generation provider selection.
-	OutfitProvider   string // "claude" or "ollama"
+	OutfitProvider   string // single provider ("claude") or a cascade chain ("claude,openai,ollama")
 	AnthropicBaseURL string
 	AnthropicAPIKey  string
 	AnthropicModel   string
@@ -192,15 +192,32 @@ func Load(logger *log.Logger) Config {
 		logger.Printf("WARNING: DETECTION_API_KEY not set — clothing detection will fail in production.")
 	}
 
-	outfitProvider := strings.ToLower(GetEnv("OUTFIT_PROVIDER", defaultOutfitProvider))
-	if outfitProvider != "claude" && outfitProvider != "ollama" && outfitProvider != "openai" {
-		logger.Printf("WARNING: invalid OUTFIT_PROVIDER=%q, falling back to %q", outfitProvider, defaultOutfitProvider)
-		outfitProvider = defaultOutfitProvider
+	// OUTFIT_PROVIDER may be a single provider ("claude") or a comma-separated
+	// cascade chain ("claude,openai,ollama"). Validate each entry — the old
+	// whole-string whitelist rejected every chain and silently downgraded the
+	// documented production setup to single-provider Ollama, making the cascade
+	// and tier-routing layers unreachable.
+	rawOutfitProvider := GetEnv("OUTFIT_PROVIDER", defaultOutfitProvider)
+	providers, dropped := parseOutfitProviders(rawOutfitProvider)
+	for _, d := range dropped {
+		logger.Printf("WARNING: ignoring unknown OUTFIT_PROVIDER entry %q (valid: claude, openai, ollama)", d)
 	}
+	if len(providers) == 0 {
+		logger.Printf("WARNING: no valid OUTFIT_PROVIDER in %q, falling back to %q", rawOutfitProvider, defaultOutfitProvider)
+		providers = []string{defaultOutfitProvider}
+	}
+	outfitProvider := strings.Join(providers, ",")
 
 	anthropicAPIKey := GetEnv("ANTHROPIC_API_KEY", "")
-	if outfitProvider == "claude" && anthropicAPIKey == "" {
-		logger.Printf("WARNING: OUTFIT_PROVIDER=claude but ANTHROPIC_API_KEY is not set — outfit generation will fail.")
+	hasClaude := false
+	for _, p := range providers {
+		if p == "claude" {
+			hasClaude = true
+			break
+		}
+	}
+	if hasClaude && anthropicAPIKey == "" {
+		logger.Printf("WARNING: OUTFIT_PROVIDER includes claude but ANTHROPIC_API_KEY is not set — outfit generation will fail.")
 	}
 
 	anthropicVision := strings.EqualFold(GetEnv("ANTHROPIC_VISION", defaultAnthropicVision), "true")
@@ -263,6 +280,38 @@ func containsWildcard(origins []string) bool {
 		}
 	}
 	return false
+}
+
+// validOutfitProviders is the set of provider names the generator layer
+// (app.go's buildOne) knows how to construct. Anything else is dropped from the
+// OUTFIT_PROVIDER chain.
+var validOutfitProviders = map[string]bool{"claude": true, "ollama": true, "openai": true}
+
+// parseOutfitProviders normalises the OUTFIT_PROVIDER value, which may be a
+// single provider ("claude") or a comma-separated cascade chain
+// ("claude,openai,ollama"). Each entry is lower-cased and trimmed; empties and
+// unknown names are dropped (the latter returned in `dropped` for warning
+// logs); duplicates are removed while preserving order. Returns an empty
+// `providers` when nothing valid remains, so the caller can fall back to the
+// default.
+func parseOutfitProviders(raw string) (providers []string, dropped []string) {
+	seen := make(map[string]bool)
+	for _, p := range strings.Split(raw, ",") {
+		p = strings.ToLower(strings.TrimSpace(p))
+		if p == "" {
+			continue
+		}
+		if !validOutfitProviders[p] {
+			dropped = append(dropped, p)
+			continue
+		}
+		if seen[p] {
+			continue
+		}
+		seen[p] = true
+		providers = append(providers, p)
+	}
+	return providers, dropped
 }
 
 // GetEnv retrieves an environment variable with a fallback value.
