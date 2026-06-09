@@ -7,22 +7,11 @@
  *  • Reusable <SettingsRow> / <SettingsSection> components instead of
  *    inline sub-components – composable across screens.
  *  • Declarative section configs make adding new rows trivial.
- *  • Platform.OS === 'web' guard on Alert.alert (no-op on web) replaced
- *    with a confirm() fallback.
  *  • All interactive elements use Pressable (web-safe).
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
-import {
-  Alert,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
@@ -43,7 +32,6 @@ export const PreferencesScreen: React.FC = () => {
 
   // Auth
   const user = useAuthStore(s => s.user);
-  const signOut = useAuthStore(s => s.signOut);
 
   // All preferences from the unified store
   const prefs = usePreferencesStore();
@@ -121,30 +109,13 @@ export const PreferencesScreen: React.FC = () => {
     });
   }, []);
 
+  // Account deletion is a real, irreversible GDPR purge (DELETE /v1/privacy/self).
+  // It lives on the dedicated Privacy & Data screen, which has the typed-DELETE
+  // confirmation, busy state, purge report, and error handling. This row routes
+  // there rather than performing a (previously fake, local-only) deletion here.
   const handleDeleteAccount = useCallback(() => {
-    const doDelete = () => {
-      prefs.reset();
-      signOut();
-      router.replace('/');
-    };
-
-    if (Platform.OS === 'web') {
-      // Alert.alert is a no-op on web – use window.confirm instead
-
-      if (confirm('This will permanently delete your account. Continue?')) {
-        doDelete();
-      }
-    } else {
-      Alert.alert(
-        'Delete Account',
-        'This will permanently delete your account and all your data. This action cannot be undone.',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Delete', style: 'destructive', onPress: doDelete },
-        ]
-      );
-    }
-  }, [prefs, signOut, router]);
+    router.push('/privacy');
+  }, [router]);
 
   // ─── Render ────────────────────────────────────────────────────────────────
   return (
