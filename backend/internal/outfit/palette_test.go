@@ -2,9 +2,12 @@ package outfit
 
 import (
 	"bytes"
+	"encoding/binary"
+	"hash/crc32"
 	"image"
 	"image/color"
 	"image/png"
+	"strings"
 	"testing"
 )
 
@@ -153,6 +156,46 @@ func TestExtractDominantColor_TransparencyIgnored(t *testing.T) {
 	}
 	if got != "#00FF00" {
 		t.Errorf("got = %q, want %q — transparent pixels leaked into the vote", got, "#00FF00")
+	}
+}
+
+// pngWithDeclaredSize builds the PNG signature + a valid IHDR chunk declaring
+// width x height (8-bit truecolor), with a correct CRC so image.DecodeConfig
+// parses the dimensions. No pixel data follows — DecodeConfig reads only the
+// header, which is exactly what the decompression-bomb guard inspects.
+func pngWithDeclaredSize(width, height uint32) []byte {
+	var out bytes.Buffer
+	out.Write([]byte{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a})
+
+	ihdr := make([]byte, 13)
+	binary.BigEndian.PutUint32(ihdr[0:4], width)
+	binary.BigEndian.PutUint32(ihdr[4:8], height)
+	ihdr[8] = 8 // bit depth
+	ihdr[9] = 2 // color type: truecolor (RGB)
+	// ihdr[10..12] = compression/filter/interlace = 0
+
+	chunk := append([]byte("IHDR"), ihdr...)
+	var lenBuf [4]byte
+	binary.BigEndian.PutUint32(lenBuf[:], uint32(len(ihdr)))
+	out.Write(lenBuf[:])
+	out.Write(chunk)
+	var crcBuf [4]byte
+	binary.BigEndian.PutUint32(crcBuf[:], crc32.ChecksumIEEE(chunk))
+	out.Write(crcBuf[:])
+	return out.Bytes()
+}
+
+// TestExtractDominantColor_RejectsOversizedDimensions is the #142 guarantee:
+// an image whose header declares an enormous canvas is rejected from the
+// header, before image.Decode would allocate a multi-GB pixel buffer.
+func TestExtractDominantColor_RejectsOversizedDimensions(t *testing.T) {
+	bomb := pngWithDeclaredSize(100000, 100000) // 1e10 px, far over the 24 MP budget
+	_, err := extractDominantColor(bomb)
+	if err == nil {
+		t.Fatal("expected error for oversized image dimensions, got nil")
+	}
+	if !strings.Contains(err.Error(), "too large") {
+		t.Fatalf("expected the size-budget guard to fire, got: %v", err)
 	}
 }
 
