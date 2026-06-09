@@ -214,6 +214,7 @@ Use `response.WriteJSON(w, status, payload)` for all JSON responses. For decodin
 | `JWT_SECRET` | HMAC signing key — **must change in production** |
 | `ADMIN_JWT_SECRET` | HMAC signing key for admin-panel JWTs. **Must be set in production AND must differ from `JWT_SECRET`** — the backend refuses to start if they match (prevents user-token replay as admin token). |
 | `DETECTION_API_KEY` | External clothing detection service API key |
+| `GOOGLE_CLIENT_IDS` | Comma-separated allowlist of Google OAuth client IDs accepted by `/v1/auth/google`. The presented token's audience must match one of these (prevents token-substitution account takeover). Defaults to the built-in web client ID; set this if you use a dedicated iOS/Android client. |
 | `CORS_ALLOWED_ORIGINS` | Comma-separated allowed origins (default: `*`). **Must be set to an explicit origin list in production** — the server refuses to start when `ENVIRONMENT=production` and the list is `*` or empty. |
 | `MONGO_URI` | MongoDB connection string |
 | `DETECTION_API_BASE_URL` | External detection service base URL |

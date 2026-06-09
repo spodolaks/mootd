@@ -47,6 +47,15 @@ const (
 	defaultAdminJWTSecret = "admin-dev-secret-change-in-production-min-32-chars!!"
 	// defaultCORSOrigins allows all origins in development.
 	defaultCORSOrigins = "*"
+	// defaultGoogleClientID is mootd's own Google OAuth web client ID — the
+	// same value the frontend signs in with (app/src/hooks/useGoogleAuth.ts).
+	// It is the secure default for the GOOGLE_CLIENT_IDS audience allowlist so
+	// that the /v1/auth/google audience check (which rejects tokens minted for
+	// any OTHER OAuth client) works out of the box without breaking real
+	// sign-in. A client ID is public, not a secret. Deployments that use a
+	// different/additional client (e.g. a dedicated iOS/Android client) must
+	// list every accepted client ID in GOOGLE_CLIENT_IDS.
+	defaultGoogleClientID = "991290253393-eompo9m0q8up56n7iabg30tn62lkd5h2.apps.googleusercontent.com"
 	// defaultDetectionBaseURL is the local clothing-detection service.
 	// Override via DETECTION_API_BASE_URL environment variable.
 	defaultDetectionBaseURL = "http://localhost:8000"
@@ -123,6 +132,13 @@ type Config struct {
 
 	// Redis for caching, rate limiting, and async jobs.
 	RedisURL string
+
+	// GoogleClientIDs is the allowlist of Google OAuth client IDs whose tokens
+	// /v1/auth/google will accept. The audience of the presented token must
+	// match one of these, preventing token-substitution (confused-deputy)
+	// account takeover. Loaded from GOOGLE_CLIENT_IDS (comma-separated);
+	// defaults to mootd's own web client ID when unset.
+	GoogleClientIDs []string
 }
 
 // DefaultReadTimeout returns the default read timeout for HTTP servers.
@@ -213,6 +229,22 @@ func Load(logger *log.Logger) Config {
 		logger.Printf("WARNING: mock-login endpoint is enabled (ENABLE_MOCK_LOGIN=true, ENVIRONMENT=%s). Do NOT enable this in production.", env)
 	}
 
+	// Google OAuth audience allowlist. The token presented to /v1/auth/google
+	// must have been minted for one of these client IDs; otherwise any valid
+	// Google token (e.g. one issued to an unrelated attacker app) could be
+	// replayed to take over the matching mootd account. Defaults to mootd's own
+	// web client ID so real sign-in keeps working without extra config.
+	var googleClientIDs []string
+	for _, id := range strings.Split(GetEnv("GOOGLE_CLIENT_IDS", ""), ",") {
+		if trimmed := strings.TrimSpace(id); trimmed != "" {
+			googleClientIDs = append(googleClientIDs, trimmed)
+		}
+	}
+	if len(googleClientIDs) == 0 {
+		googleClientIDs = []string{defaultGoogleClientID}
+		logger.Printf("INFO: GOOGLE_CLIENT_IDS not set — defaulting Google sign-in audience allowlist to the built-in web client ID. Set GOOGLE_CLIENT_IDS if you use a different/additional OAuth client (e.g. a dedicated iOS/Android client).")
+	}
+
 	cfg := Config{
 		HTTPAddr:            GetEnv("HTTP_ADDR", defaultHTTPAddr),
 		MongoURI:            GetEnv("MONGO_URI", defaultMongoURI),
@@ -237,6 +269,7 @@ func Load(logger *log.Logger) Config {
 		OpenAIAPIKey:        GetEnv("OPENAI_API_KEY", ""),
 		RedisURL:            GetEnv("REDIS_URL", defaultRedisURL),
 		EnableMockLogin:     enableMockLogin,
+		GoogleClientIDs:     googleClientIDs,
 	}
 
 	return cfg

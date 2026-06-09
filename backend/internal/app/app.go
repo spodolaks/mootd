@@ -70,6 +70,11 @@ type App struct {
 	// Fail-closed: must be explicitly true in config *and* Environment must not
 	// be "production".
 	EnableMockLogin bool
+
+	// GoogleClientIDs is the allowlist of Google OAuth client IDs whose tokens
+	// /v1/auth/google accepts (audience binding — prevents token-substitution
+	// account takeover).
+	GoogleClientIDs []string
 }
 
 // NewHTTPHandler wires up all domain routes and wraps the mux with shared middleware.
@@ -148,7 +153,7 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 	// is off.
 	enableMockLogin := a.EnableMockLogin && a.Environment != "production"
 	authRepo := auth.NewMongoRepository(a.MongoClient, a.MongoDB)
-	auth.NewHandler(a.Logger, authRepo, a.JWTSecret).RegisterRoutes(mux, enableMockLogin, authLimit)
+	auth.NewHandler(a.Logger, authRepo, a.JWTSecret, a.GoogleClientIDs).RegisterRoutes(mux, enableMockLogin, authLimit)
 
 	// Admin auth (P0-03) + first protected endpoints (P0-04 audit log
 	// foundation, P1-05 users list). Separate JWT issuer, separate
