@@ -105,6 +105,7 @@ export const WardrobeScreen: React.FC = () => {
   const startJob = useDetectionJobStore(s => s.startJob);
   const jobs = useDetectionJobStore(s => s.jobs);
   const consumeCompleted = useDetectionJobStore(s => s.consumeCompleted);
+  const consumeFailed = useDetectionJobStore(s => s.consumeFailed);
   const dismissJob = useDetectionJobStore(s => s.dismissJob);
   const showToast = useUIStore(s => s.showToast);
   const [searchQuery, setSearchQuery] = useState('');
@@ -204,27 +205,6 @@ export const WardrobeScreen: React.FC = () => {
     setIsAddModalVisible(true);
   };
 
-  // Watch for completed detection jobs and navigate to review
-  useEffect(() => {
-    const completed = consumeCompleted();
-    if (!completed) return;
-
-    const steps = toDetectionSteps(completed.result!);
-    if (steps.length === 0) {
-      showToast('No items detected. Try a different photo.', 'error');
-      dismissJob(completed.id);
-      return;
-    }
-
-    showToast(
-      `Detected ${steps.length} item${steps.length === 1 ? '' : 's'} — tap to review`,
-      'success'
-    );
-    initializeFlow(steps);
-    dismissJob(completed.id);
-    router.push('/detected-item');
-  }, [jobs, consumeCompleted, dismissJob, initializeFlow, router, showToast]);
-
   const processImage = useCallback(
     (uri: string) => {
       startJob(uri);
@@ -232,6 +212,42 @@ export const WardrobeScreen: React.FC = () => {
     },
     [startJob, showToast]
   );
+
+  // Watch for completed/failed detection jobs. Completed jobs route to the
+  // review flow; failed/timed-out jobs surface an alert with a Retry that
+  // re-runs detection from the stored image URI. Both branches dismiss the
+  // job afterwards so it doesn't re-fire on the next render.
+  useEffect(() => {
+    const completed = consumeCompleted();
+    if (completed) {
+      const steps = toDetectionSteps(completed.result!);
+      if (steps.length === 0) {
+        showToast('No items detected. Try a different photo.', 'error');
+        dismissJob(completed.id);
+        return;
+      }
+
+      showToast(
+        `Detected ${steps.length} item${steps.length === 1 ? '' : 's'} — tap to review`,
+        'success'
+      );
+      initializeFlow(steps);
+      dismissJob(completed.id);
+      router.push('/detected-item');
+      return;
+    }
+
+    const failed = consumeFailed();
+    if (failed) {
+      // Dismiss first so the alert's Retry (which enqueues a fresh job) can't
+      // be re-consumed by this same failed entry on the next render.
+      dismissJob(failed.id);
+      Alert.alert('Detection failed', failed.error || 'We couldn’t detect clothing in that photo.', [
+        { text: 'Dismiss', style: 'cancel' },
+        { text: 'Retry', onPress: () => processImage(failed.imageUri) },
+      ]);
+    }
+  }, [jobs, consumeCompleted, consumeFailed, dismissJob, initializeFlow, router, showToast, processImage]);
 
   const handleCameraPress = useCallback(async () => {
     setIsAddModalVisible(false);

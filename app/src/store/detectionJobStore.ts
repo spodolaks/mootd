@@ -21,6 +21,12 @@ interface DetectionJobState {
   startJob: (imageUri: string) => string;
   /** Get the most recent completed job (if any) and clear it. */
   consumeCompleted: () => DetectionJob | null;
+  /**
+   * Get a failed/timed-out job (if any). Mirrors `consumeCompleted`: it only
+   * reads — the caller surfaces the failure and then calls `dismissJob` so it
+   * doesn't re-fire on the next render.
+   */
+  consumeFailed: () => DetectionJob | null;
   /** Dismiss/remove a job by ID. */
   dismissJob: (jobId: string) => void;
   /** Check if any job is currently in progress. */
@@ -149,6 +155,12 @@ export const useDetectionJobStore = create<DetectionJobState>((set, get) => ({
     const state = get();
     const completed = state.jobs.find(j => j.status === 'completed');
     return completed ?? null;
+  },
+
+  consumeFailed: () => {
+    const state = get();
+    const failed = state.jobs.find(j => j.status === 'failed');
+    return failed ?? null;
   },
 
   dismissJob: (jobId: string) => {

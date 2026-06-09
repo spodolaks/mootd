@@ -4,7 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Icon, Text } from '@/src/components';
 import { useColorScheme } from '@/src/hooks';
-import { useDetectionJobStore, type DetectionJob } from '@/src/store';
+import { useDetectionJobStore, useUIStore, type DetectionJob } from '@/src/store';
 import { accents, backgrounds, fills, grays, labels } from '@/src/theme/colors';
 import { typography } from '@/src/theme/typography';
 import { spacing } from '@/src/theme/spacing';
@@ -23,11 +23,13 @@ const JobCard: React.FC<{
   job: DetectionJob;
   colorScheme: 'light' | 'dark';
   onDismiss: (id: string) => void;
-}> = ({ job, colorScheme, onDismiss }) => {
+  onRetry: (job: DetectionJob) => void;
+}> = ({ job, colorScheme, onDismiss, onRetry }) => {
   const cardBg = grays.gray5[colorScheme];
   const textColor = labels.primary[colorScheme];
   const secondaryText = labels.secondary[colorScheme];
   const tertiaryText = labels.tertiary[colorScheme];
+  const accentBlue = accents.blue[colorScheme];
 
   const statusColor =
     job.status === 'completed'
@@ -58,9 +60,30 @@ const JobCard: React.FC<{
           </Text>
         </View>
         {job.status !== 'detecting' && (
-          <Pressable onPress={() => onDismiss(job.id)} hitSlop={8}>
-            <Icon name="close" size={16} color={tertiaryText} />
-          </Pressable>
+          <View style={styles.jobActions}>
+            {job.status === 'failed' && (
+              <Pressable
+                onPress={() => onRetry(job)}
+                hitSlop={8}
+                style={styles.retryButton}
+                testID={`detection-retry-${job.id}`}
+                accessibilityRole="button"
+                accessibilityLabel="Retry detection for this photo">
+                <Icon name="reset" size={14} color={accentBlue} />
+                <Text variant="footnote" weight="semiBold" style={{ color: accentBlue }}>
+                  Retry
+                </Text>
+              </Pressable>
+            )}
+            <Pressable
+              onPress={() => onDismiss(job.id)}
+              hitSlop={8}
+              testID={`detection-dismiss-${job.id}`}
+              accessibilityRole="button"
+              accessibilityLabel="Dismiss this detection job">
+              <Icon name="close" size={16} color={tertiaryText} />
+            </Pressable>
+          </View>
         )}
       </View>
 
@@ -96,6 +119,20 @@ export const DetectionActivityScreen: React.FC = () => {
   const router = useRouter();
   const jobs = useDetectionJobStore(s => s.jobs);
   const dismissJob = useDetectionJobStore(s => s.dismissJob);
+  const startJob = useDetectionJobStore(s => s.startJob);
+  const showToast = useUIStore(s => s.showToast);
+
+  // Re-run detection from the failed job's stored image. Same path the
+  // Wardrobe screen uses (startJob + a "detection started" toast); the old
+  // failed entry is removed so it doesn't pile up below the fresh one.
+  const handleRetry = React.useCallback(
+    (job: DetectionJob) => {
+      startJob(job.imageUri);
+      dismissJob(job.id);
+      showToast('Detection restarted — you can keep browsing', 'info');
+    },
+    [startJob, dismissJob, showToast]
+  );
 
   const backgroundColor = backgrounds.primary[colorScheme];
   const textColor = labels.primary[colorScheme];
@@ -124,7 +161,13 @@ export const DetectionActivityScreen: React.FC = () => {
           </View>
         ) : (
           jobs.map(job => (
-            <JobCard key={job.id} job={job} colorScheme={colorScheme} onDismiss={dismissJob} />
+            <JobCard
+              key={job.id}
+              job={job}
+              colorScheme={colorScheme}
+              onDismiss={dismissJob}
+              onRetry={handleRetry}
+            />
           ))
         )}
       </ScrollView>
@@ -180,6 +223,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
+  },
+  jobActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+  },
+  retryButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
   },
   statusText: {
     marginLeft: 26,
