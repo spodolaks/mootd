@@ -38,6 +38,30 @@ func quietLogger() *log.Logger {
 	return log.New(io.Discard, "", 0)
 }
 
+// fakeSpendTracker records budget-tracker increments so tests can assert
+// the daily-cap counter is bumped for the right calls.
+type fakeSpendTracker struct {
+	mu         sync.Mutex
+	calls      int
+	totalUSD   float64
+	lastUserID string
+}
+
+func (f *fakeSpendTracker) Increment(_ context.Context, userID string, costUSD float64) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls++
+	f.totalUSD += costUSD
+	f.lastUserID = userID
+	return nil
+}
+
+func (f *fakeSpendTracker) snapshot() (calls int, total float64, lastUser string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.calls, f.totalUSD, f.lastUserID
+}
+
 // stubPriceRepo serves a single in-memory price row so the recorder
 // has a non-nil price table to consult. We don't assert on cost in
 // these tests — that's pricing_test.go's job — but ComputeCost would
@@ -159,6 +183,84 @@ func TestRecord_ArchivalFieldsTruncatedAtCap(t *testing.T) {
 		if !strings.HasSuffix(field, "…(truncated)") {
 			t.Errorf("%s missing truncation sentinel", name)
 		}
+	}
+}
+
+// TestRecord_IncrementsBudgetOnFailedButBilledCall is the #153 guarantee:
+// a call that failed but still consumed (billed) tokens must count against
+// the per-user daily cap, otherwise enforcement (Redis) drifts below the
+// ledger during failure storms.
+func TestRecord_IncrementsBudgetOnFailedButBilledCall(t *testing.T) {
+	r, repo := newRecorderForTest(t)
+	tracker := &fakeSpendTracker{}
+	r.WithSpendTracker(tracker)
+
+	r.Record(context.Background(),
+		CallContext{UserID: "u", Feature: "outfit_generate"},
+		CallObservation{
+			Provider: "test", Model: "test-model",
+			InputTokens: 1000, OutputTokens: 500,
+			StartedAt: time.Now(), EndedAt: time.Now(),
+			Err: errors.New("provider 500 after streaming partial output"),
+		})
+
+	row := repo.snapshot()[0]
+	if row.Status != "error" {
+		t.Fatalf("Status = %q; want error", row.Status)
+	}
+	if row.CostUSD <= 0 {
+		t.Fatalf("CostUSD = %v; want > 0 (tokens were billed)", row.CostUSD)
+	}
+	calls, total, lastUser := tracker.snapshot()
+	if calls != 1 {
+		t.Fatalf("tracker increments = %d; want 1 (failed-but-billed must count)", calls)
+	}
+	if total != row.CostUSD {
+		t.Errorf("tracker total = %v; want row cost %v", total, row.CostUSD)
+	}
+	if lastUser != "u" {
+		t.Errorf("tracker userID = %q; want u", lastUser)
+	}
+}
+
+// TestRecord_IncrementsBudgetOnSuccess guards the pre-existing happy-path
+// behaviour so the #153 change doesn't accidentally drop success increments.
+func TestRecord_IncrementsBudgetOnSuccess(t *testing.T) {
+	r, _ := newRecorderForTest(t)
+	tracker := &fakeSpendTracker{}
+	r.WithSpendTracker(tracker)
+
+	r.Record(context.Background(),
+		CallContext{UserID: "u", Feature: "outfit_generate"},
+		CallObservation{
+			Provider: "test", Model: "test-model",
+			InputTokens: 100, OutputTokens: 100,
+			StartedAt: time.Now(), EndedAt: time.Now(),
+		})
+
+	if calls, _, _ := tracker.snapshot(); calls != 1 {
+		t.Fatalf("tracker increments = %d; want 1 on a successful billed call", calls)
+	}
+}
+
+// TestRecord_NoBudgetIncrementWhenZeroCost confirms the cost>0 guard still
+// holds: a call that consumed no tokens (e.g. an error before any billing)
+// must not bump the counter.
+func TestRecord_NoBudgetIncrementWhenZeroCost(t *testing.T) {
+	r, _ := newRecorderForTest(t)
+	tracker := &fakeSpendTracker{}
+	r.WithSpendTracker(tracker)
+
+	r.Record(context.Background(),
+		CallContext{UserID: "u", Feature: "outfit_generate"},
+		CallObservation{
+			Provider: "test", Model: "test-model",
+			StartedAt: time.Now(), EndedAt: time.Now(),
+			Err: errors.New("connection refused before any tokens"),
+		})
+
+	if calls, _, _ := tracker.snapshot(); calls != 0 {
+		t.Fatalf("tracker increments = %d; want 0 when cost is 0", calls)
 	}
 }
 
