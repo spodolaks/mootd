@@ -117,6 +117,11 @@ func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// redactedEmail is shown in place of a user email to admins lacking the
+// users:pii permission. Full redaction (not a partial mask) so the value can't
+// be used to confirm or enumerate a specific address (#140).
+const redactedEmail = "[redacted]"
+
 // ListUsers handles GET /admin/v1/users.
 //
 // Cursor pagination, search on email, optional active-in-30d filter.
@@ -146,15 +151,15 @@ func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// PII redaction. Phase 0: every admin is full PII (RoleAdmin), so
-	// nothing redacted yet. P5-04 reads the role list from context
-	// and redacts when users:pii is missing.
-	// Stub the hook here so the future change is one-line:
-	//
-	//   roles, _ := middleware.AdminRolesFromContext(r.Context())
-	//   if !hasPermission(roles, "users:pii") {
-	//       for i := range summaries { summaries[i].Email = redactEmail(summaries[i].Email) }
-	//   }
+	// PII redaction (#140): admins without users:pii (e.g. engineer,
+	// readonly) get user emails masked. The route requires users:read, so
+	// callers still see the row + its counts — just not the address, which
+	// would otherwise let a non-PII role read or enumerate customer emails.
+	if !HasPermissionFromContext(r, PermUsersPII) {
+		for i := range summaries {
+			summaries[i].Email = redactedEmail
+		}
+	}
 
 	response.WriteJSON(w, http.StatusOK, UsersListResponse{
 		Users:      summaries,
@@ -305,8 +310,11 @@ func (h *Handler) Overview(w http.ResponseWriter, r *http.Request) {
 		cacheMetrics = nil
 	}
 
-	// Resolve user IDs → emails for the recent-calls feed.
-	if len(calls) > 0 {
+	// Resolve user IDs → emails for the recent-calls feed. Only for admins
+	// with users:pii (#140) — spend:read alone (this route's gate) must not
+	// expose customer emails. Without the permission we skip the join entirely
+	// so the addresses are never even fetched.
+	if len(calls) > 0 && HasPermissionFromContext(r, PermUsersPII) {
 		ids := make([]string, 0, len(calls))
 		seen := make(map[string]struct{}, len(calls))
 		for _, c := range calls {
@@ -1341,13 +1349,24 @@ func (h *Handler) GetTrace(w http.ResponseWriter, r *http.Request) {
 
 	// Best-effort email join — same pattern as Overview's recent-
 	// calls feed. Single point lookup, never blocks the response on
-	// failure.
-	if h.overviewRepo != nil && detail.UserID != "" {
+	// failure. Gated on users:pii (#140): traces:read alone (this route's
+	// gate, held by engineer/readonly) must not expose the customer email.
+	if h.overviewRepo != nil && detail.UserID != "" && HasPermissionFromContext(r, PermUsersPII) {
 		if emails, err := h.overviewRepo.EmailsForUserIDs(ctx, []string{detail.UserID}); err == nil {
 			if e, ok := emails[detail.UserID]; ok {
 				detail.UserEmail = e
 			}
 		}
+	}
+
+	// The raw prompt + response carry the user's wardrobe/prompt content, which
+	// is PII under the RBAC model. Strip them for admins without users:pii
+	// (#140); traces:read roles (engineer/readonly) still see metadata, cost,
+	// timing, and status for debugging.
+	if !HasPermissionFromContext(r, PermUsersPII) {
+		detail.SystemPrompt = ""
+		detail.UserMessage = ""
+		detail.ResponseRaw = ""
 	}
 
 	response.WriteJSON(w, http.StatusOK, detail)
