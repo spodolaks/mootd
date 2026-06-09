@@ -44,7 +44,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, authLimit Middleware, requi
 	// role→permission map.
 	//
 	// Endpoints intentionally without a permission gate:
-	//   /me, /build-info, /search   — every authenticated admin
+	//   /me, /build-info            — every authenticated admin
 	//                                  needs these for navigation.
 	//   /audit                      — admins reviewing their own
 	//                                  actions; gating it behind a
@@ -52,7 +52,10 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, authLimit Middleware, requi
 	//                                  the audit trail's purpose.
 	mux.Handle("/admin/v1/me", requireAdmin(http.HandlerFunc(h.Me)))
 	mux.Handle("/admin/v1/build-info", requireAdmin(http.HandlerFunc(h.BuildInfoHandler)))
-	mux.Handle("/admin/v1/search", requireAdmin(http.HandlerFunc(h.Search)))
+	// /search is an email lookup (its only result kind today is user-by-email),
+	// so it requires users:pii — without a gate any admin, including roles with
+	// zero user permissions, could enumerate customer emails (#140).
+	mux.Handle("/admin/v1/search", requireAdmin(RequirePermission(PermUsersPII)(http.HandlerFunc(h.Search))))
 	mux.Handle("/admin/v1/audit", requireAdmin(http.HandlerFunc(h.ListAudit)))
 	// PII reveal audit (P5-04 / mootd-admin#37). Internal perm
 	// gate inside the handler so a missing perm returns the
