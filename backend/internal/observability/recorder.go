@@ -19,7 +19,7 @@ import (
 type LLMRecorder struct {
 	repo    LLMCallRepository
 	prices  *PriceTable
-	tracker SpendIncrementer // optional — bumps the budget tracker on every successful call
+	tracker SpendIncrementer // optional — bumps the budget tracker on every billed call (cost > 0), success or failure
 	logger  *log.Logger
 }
 
@@ -199,11 +199,21 @@ func (r *LLMRecorder) Record(ctx context.Context, cc CallContext, obs CallObserv
 	// daily counter so the next request's enforcement gate sees
 	// today's spend including this call. Best-effort — Redis
 	// blips are logged but never fail the user-facing request,
-	// same pattern as the ledger write above. Skip when no cost
-	// was incurred (e.g. Ollama: free) or no userID was attached.
-	if r.tracker != nil && cost > 0 && cc.UserID != "" && status == "success" {
+	// same pattern as the ledger write above.
+	//
+	// Increment whenever a cost was actually billed (cost > 0),
+	// REGARDLESS of status. A failed attempt that still consumed
+	// tokens — a provider erroring mid-stream, or a cascade hop that
+	// billed before failing over — costs real money and must count
+	// against the daily cap. Gating on status=="success" (the old
+	// behaviour) let failure storms undercount spend, so the
+	// enforcement gate (Redis) drifted below the ledger (#153, a
+	// follow-up to the #106 billed-but-failed accounting). Skipped
+	// only when no cost was incurred (e.g. Ollama: free, or an error
+	// before any tokens) or no userID was attached.
+	if r.tracker != nil && cost > 0 && cc.UserID != "" {
 		if terr := r.tracker.Increment(ctx, cc.UserID, cost); terr != nil {
-			r.logger.Printf("observability: budget tracker increment failed: %v (user=%s, cost=$%.4f)", terr, cc.UserID, cost)
+			r.logger.Printf("observability: budget tracker increment failed: %v (user=%s, cost=$%.4f, status=%s)", terr, cc.UserID, cost, status)
 		}
 	}
 }
