@@ -8,7 +8,7 @@ import type {
 } from '@/src/domain';
 import type { OutfitProgress } from '@/src/domain/interfaces/IWardrobeRepository';
 import { Platform } from 'react-native';
-import { ApiError, apiClient, authFetch, getApiBaseURL, getAuthToken } from '@/src/data/api/client';
+import { ApiError, apiClient, authFetch, getApiBaseURL } from '@/src/data/api/client';
 
 interface DetectAPIResponse {
   items: {
@@ -89,32 +89,34 @@ export class ApiWardrobeRepository implements IWardrobeRepository {
 
     let rawResponse: Response;
     try {
-      // Use raw fetch for multipart upload so the runtime sets the correct
-      // Content-Type: multipart/form-data; boundary=... header automatically.
-      // apiClient.postFormData passes a headers object which can interfere with
-      // the boundary generation on some React Native / web versions.
-      rawResponse = await fetch(`${getApiBaseURL()}/v1/wardrobe/detect`, {
-        method: 'POST',
-        body: formData,
-        signal: controller.signal,
-        headers: {
-          // Only the auth header — no Content-Type override.
-          ...(getAuthToken() ? { Authorization: `Bearer ${getAuthToken()}` } : {}),
+      // Route through authFetch (#149) so a mid-session access-token expiry
+      // triggers the shared 401 silent-refresh + retry instead of failing the
+      // upload. We pass our own AbortController signal (authFetch prefers it
+      // over its own) so the existing DETECT_TIMEOUT_MS cap + heartbeat stay
+      // intact. Content-Type is set to undefined so authFetch drops its default
+      // application/json and the runtime sets the correct
+      // multipart/form-data; boundary=... header automatically (mirrors
+      // apiClient.postFormData + streamOutfitGeneration).
+      rawResponse = await authFetch(
+        '/v1/wardrobe/detect',
+        {
+          method: 'POST',
+          body: formData,
+          signal: controller.signal,
+          headers: {
+            'Content-Type': undefined as unknown as string,
+          },
         },
-      });
+        { timeoutMs: DETECT_TIMEOUT_MS }
+      );
     } finally {
       clearInterval(heartbeat);
       clearTimeout(timeoutId);
     }
 
+    // authFetch throws ApiError on a non-2xx (with body.error as the message),
+    // so by here the response is 2xx — just parse the success body.
     const body = (await rawResponse.json().catch(() => ({}))) as Record<string, unknown>;
-
-    if (!rawResponse.ok) {
-      const msg =
-        typeof body.error === 'string' ? body.error : `Detection failed (${rawResponse.status})`;
-      console.log(`[Wardrobe] ✗ ${rawResponse.status} — ${msg}`);
-      throw new ApiError(msg, rawResponse.status, body);
-    }
 
     const data = body as { items: DetectAPIResponse['items'] };
     console.log(
@@ -161,22 +163,23 @@ export class ApiWardrobeRepository implements IWardrobeRepository {
       } as unknown as Blob);
     }
 
-    const response = await fetch(`${getApiBaseURL()}/v1/wardrobe/detect-jobs`, {
+    // Route through authFetch (#149) so an expired access token is silently
+    // refreshed + retried instead of returning a 401 that the caller's sync
+    // fallback would mistake for "async endpoint unavailable". A genuine 503
+    // (or unknown route) still throws ApiError here, so the sync-detection
+    // fallback in detectionJobStore continues to fire. Content-Type is set to
+    // undefined so authFetch drops its default application/json and the runtime
+    // sets the multipart/form-data; boundary=... header automatically.
+    const response = await authFetch('/v1/wardrobe/detect-jobs', {
       method: 'POST',
       body: formData,
       headers: {
-        ...(getAuthToken() ? { Authorization: `Bearer ${getAuthToken()}` } : {}),
+        'Content-Type': undefined as unknown as string,
       },
     });
 
+    // authFetch throws ApiError on a non-2xx, so by here the response is 2xx.
     const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
-    if (!response.ok) {
-      const msg =
-        typeof body.error === 'string'
-          ? body.error
-          : `Detection submit failed (${response.status})`;
-      throw new ApiError(msg, response.status, body);
-    }
 
     const jobId = body.jobId;
     if (typeof jobId !== 'string' || !jobId) {

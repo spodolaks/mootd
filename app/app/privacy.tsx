@@ -21,7 +21,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Icon } from '@/src/components';
 import { useColorScheme } from '@/src/hooks';
-import { apiClient } from '@/src/data/api/client';
+import { apiClient, authFetch } from '@/src/data/api/client';
 import { useAuthStore } from '@/src/store';
 import { accents, backgrounds, grays, labels, separators } from '@/src/theme/colors';
 import { typography } from '@/src/theme/typography';
@@ -104,15 +104,11 @@ export default function PrivacyScreen() {
       // comes from Content-Length on the response.
       // Mobile ZIP-download UX is deferred — for now we point
       // the user at the web export route.
-      const res = await fetch(`${process.env.EXPO_PUBLIC_API_URL}/v1/privacy/export`, {
-        method: 'GET',
-        headers: {
-          Authorization: `Bearer ${useAuthStore.getState().session?.accessToken ?? ''}`,
-        },
-      });
-      if (!res.ok) {
-        throw new Error(`Export failed: HTTP ${res.status}`);
-      }
+      // Route through authFetch (#149) so the bearer is attached, the
+      // base URL is resolved, and a mid-session access-token expiry
+      // triggers the shared 401 silent-refresh + retry. authFetch
+      // throws ApiError on a non-2xx, so no manual !res.ok check.
+      const res = await authFetch('/v1/privacy/export', { method: 'GET' });
       const buf = await res.arrayBuffer();
       Alert.alert(
         'Export ready',
