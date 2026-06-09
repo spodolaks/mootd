@@ -2,6 +2,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -78,7 +79,17 @@ export const ItemDetailsScreen: React.FC = () => {
       await wardrobeRepository.deleteItem(itemId);
       router.back();
     } catch (e) {
+      // Surface the failure with a retry instead of silently swallowing it
+      // (#159) — the user otherwise can't tell a failed delete from a hang.
       console.error('Delete failed:', e);
+      Alert.alert(
+        "Couldn't remove item",
+        'Something went wrong removing this item. Please try again.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Retry', onPress: () => void handleDeleteConfirm() },
+        ]
+      );
     } finally {
       setIsDeleting(false);
     }
@@ -93,7 +104,17 @@ export const ItemDetailsScreen: React.FC = () => {
       await wardrobeRepository.updateItem(itemId, filtered);
       router.back();
     } catch (e) {
+      // Surface the failure with a retry and keep the user's edits on screen
+      // (we don't navigate away on error) instead of silently losing them (#159).
       console.error('Save failed:', e);
+      Alert.alert(
+        "Couldn't save changes",
+        'Your edits were not saved. Please check your connection and try again.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Retry', onPress: () => void handleSave() },
+        ]
+      );
     } finally {
       setIsSaving(false);
     }
