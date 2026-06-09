@@ -748,8 +748,16 @@ func (s *Service) generateOutfitsImpl(ctx context.Context, userID string, weathe
 	// Validate, score, enrich, dedupe.
 	filtered := s.ValidateOutfits(parsedOutfits, items, effectiveScores)
 
+	// A "degraded" batch must NOT be written to the 24h cache: either the
+	// generator errored, or we had to pad with deterministic fallback outfits.
+	// Caching either would serve the canned/low-quality result for up to a day
+	// after the provider recovered — a one-minute outage becoming a one-day
+	// quality regression with no escape hatch (#151).
+	degraded := err != nil
+
 	// Deterministic fallback if the generator failed or under-delivered.
 	if len(filtered) < 3 {
+		before := len(filtered)
 		fallback := buildFallbackOutfits(items, topArchetypes, 4-len(filtered))
 		fbValidated := s.ValidateOutfits(fallback, items, effectiveScores)
 		seenIDs := make(map[string]bool)
@@ -764,6 +772,11 @@ func (s *Service) generateOutfitsImpl(ctx context.Context, userID string, weathe
 			if len(filtered) >= 4 {
 				break
 			}
+		}
+		if len(filtered) > before {
+			// Fallback outfits were actually appended → batch is partly
+			// deterministic, don't cache it.
+			degraded = true
 		}
 		if len(filtered) > 0 {
 			s.logger.Printf("outfit: fallback fired for user %s — %d outfits returned", userID, len(filtered))
@@ -813,7 +826,11 @@ func (s *Service) generateOutfitsImpl(ctx context.Context, userID string, weathe
 	filtered = s.resolveSurfaceURLs(filtered, panels, backgrounds)
 
 	if s.cache != nil && len(filtered) >= 3 {
-		s.cache.Set(ctx, cacheKey, filtered)
+		if degraded {
+			s.logger.Printf("outfit: not caching degraded result for user %s (generator error or fallback padding) — next request regenerates", userID)
+		} else {
+			s.cache.Set(ctx, cacheKey, filtered)
+		}
 	}
 
 	s.logger.Printf("outfit: returning %d outfits for user %s", len(filtered), userID)
