@@ -15,6 +15,13 @@ import (
 // explicit origin allowlist instead of accidentally shipping an open policy.
 var ErrCORSWildcardInProduction = errors.New("CORS_ALLOWED_ORIGINS must be an explicit comma-separated list in production; wildcard '*' is not permitted")
 
+// ErrAdminAllowlistEmptyInProduction is returned when ENVIRONMENT=production is
+// set but ADMIN_ALLOWED_IPS is empty. An empty allowlist makes
+// middleware.AdminIPAllowlist fail OPEN (allow-all), which also re-exposes the
+// unauthenticated /metrics endpoint. Refusing to start forces operators to
+// supply an explicit source-IP allowlist instead of silently dropping it.
+var ErrAdminAllowlistEmptyInProduction = errors.New("ADMIN_ALLOWED_IPS must be an explicit comma-separated CIDR/IP list in production; an empty allowlist fails open and exposes /metrics")
+
 const (
 	defaultHTTPAddr          = ":8080"
 	defaultMongoURI          = "mongodb://mootd:mootd_dev@mongo:27017/?authSource=admin"
@@ -203,6 +210,13 @@ func Load(logger *log.Logger) Config {
 		logger.Printf("WARNING: CORS_ALLOWED_ORIGINS contains '*' — acceptable for development, but must be an explicit origin list in production.")
 	}
 
+	// Admin IP allowlist must be explicit in production. Empty → the allowlist
+	// middleware fails open (allow-all), re-exposing the unauthenticated
+	// /metrics endpoint that #108 moved behind it (#143).
+	if err := validateAdminAllowlist(GetEnv("ADMIN_ALLOWED_IPS", ""), env); err != nil {
+		logger.Fatalf("FATAL: %v. Set ADMIN_ALLOWED_IPS to the trusted admin source IPs/CIDRs (e.g. \"203.0.113.4/32,10.0.0.0/8\") — it gates /admin/v1/* and /metrics.", err)
+	}
+
 	detectionAPIKey := GetEnv("DETECTION_API_KEY", "")
 	if detectionAPIKey == "" {
 		logger.Printf("WARNING: DETECTION_API_KEY not set — clothing detection will fail in production.")
@@ -313,6 +327,27 @@ func containsWildcard(origins []string) bool {
 		}
 	}
 	return false
+}
+
+// validateAdminAllowlist returns an error when the admin IP allowlist is unsafe
+// for the given environment. In production an empty list (after trimming) is
+// rejected, because middleware.AdminIPAllowlist treats an empty list as
+// allow-all — which would leave /metrics reachable unauthenticated.
+func validateAdminAllowlist(raw, env string) error {
+	if env != "production" {
+		return nil
+	}
+	hasEntry := false
+	for _, c := range strings.Split(raw, ",") {
+		if strings.TrimSpace(c) != "" {
+			hasEntry = true
+			break
+		}
+	}
+	if !hasEntry {
+		return ErrAdminAllowlistEmptyInProduction
+	}
+	return nil
 }
 
 // validOutfitProviders is the set of provider names the generator layer
