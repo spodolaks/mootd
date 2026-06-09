@@ -22,6 +22,19 @@ var ErrCORSWildcardInProduction = errors.New("CORS_ALLOWED_ORIGINS must be an ex
 // supply an explicit source-IP allowlist instead of silently dropping it.
 var ErrAdminAllowlistEmptyInProduction = errors.New("ADMIN_ALLOWED_IPS must be an explicit comma-separated CIDR/IP list in production; an empty allowlist fails open and exposes /metrics")
 
+// ErrSecretTooShortInProduction is returned when ENVIRONMENT=production is set
+// but a JWT signing secret (JWT_SECRET / ADMIN_JWT_SECRET) is shorter than
+// minSecretLength characters after trimming. A short HMAC key is brute-forceable,
+// so refusing to start forces operators to supply a high-entropy secret instead
+// of a weak placeholder.
+var ErrSecretTooShortInProduction = errors.New("JWT signing secret must be at least 32 characters in production")
+
+// minSecretLength is the minimum length (after trimming) accepted for an HMAC
+// JWT signing secret in production. 32 chars / 256 bits matches the HS256 output
+// size — anything shorter weakens the signature. Enforced only in production;
+// the development defaults (which are themselves >= 32) are exempt.
+const minSecretLength = 32
+
 const (
 	defaultHTTPAddr          = ":8080"
 	defaultMongoURI          = "mongodb://mootd:mootd_dev@mongo:27017/?authSource=admin"
@@ -195,6 +208,16 @@ func Load(logger *log.Logger) Config {
 	if adminJWTSecret == jwtSecret {
 		logger.Fatalf("FATAL: ADMIN_JWT_SECRET must differ from JWT_SECRET. Sharing the secret defeats the issuer separation — any user token could be replayed as an admin token.")
 	}
+	// Enforce a length floor on both HMAC signing secrets in production. A short
+	// key is brute-forceable, so an operator-supplied placeholder shorter than
+	// minSecretLength must refuse to boot. The dev defaults are >= minSecretLength
+	// so non-production deployments are unaffected.
+	if err := validateSecretLength(jwtSecret, env); err != nil {
+		logger.Fatalf("FATAL: JWT_SECRET %v. Generate a high-entropy value, e.g. `openssl rand -base64 48`.", err)
+	}
+	if err := validateSecretLength(adminJWTSecret, env); err != nil {
+		logger.Fatalf("FATAL: ADMIN_JWT_SECRET %v. Generate a high-entropy value, e.g. `openssl rand -base64 48`.", err)
+	}
 
 	rawOrigins := GetEnv("CORS_ALLOWED_ORIGINS", defaultCORSOrigins)
 	var origins []string
@@ -346,6 +369,20 @@ func validateAdminAllowlist(raw, env string) error {
 	}
 	if !hasEntry {
 		return ErrAdminAllowlistEmptyInProduction
+	}
+	return nil
+}
+
+// validateSecretLength returns an error when an HMAC JWT signing secret is too
+// short for the given environment. In production a secret with fewer than
+// minSecretLength characters (after trimming) is rejected; outside production any
+// length is accepted so the development defaults keep working.
+func validateSecretLength(secret, env string) error {
+	if env != "production" {
+		return nil
+	}
+	if len(strings.TrimSpace(secret)) < minSecretLength {
+		return ErrSecretTooShortInProduction
 	}
 	return nil
 }

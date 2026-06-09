@@ -81,10 +81,15 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, authLimit Middleware, requi
 	mux.Handle("/admin/v1/traces/summary", requireAdmin(RequirePermission(PermTracesRead)(http.HandlerFunc(h.TracesSummaryHandler))))
 	mux.Handle("/admin/v1/traces/", requireAdmin(RequirePermission(PermTracesRead)(http.HandlerFunc(h.GetTrace))))
 
-	// Model routing — write-only sensitive surface. PUT requires
-	// routing:write; GET is allowed for anyone with users:read so
-	// they can see what's configured.
-	mux.Handle("/admin/v1/model-routing", requireAdmin(http.HandlerFunc(h.ModelRouting)))
+	// Model routing — sensitive config surface. The dispatcher serves
+	// both GET and PUT, so the route is gated at spend:read (the floor
+	// the sibling cost surfaces — /overview, /reports/weekly — use), which
+	// previously had no permission gate at all and was reachable by any
+	// authenticated admin (#145). The mutating PUT keeps its stricter
+	// inline routing:write check in updateModelRouting, so this floor does
+	// not weaken the write path: routing:write is admin-only and admin also
+	// holds spend:read.
+	mux.Handle("/admin/v1/model-routing", requireAdmin(RequirePermission(PermSpendRead)(http.HandlerFunc(h.ModelRouting))))
 
 	// Weekly report — preview wide, send narrow.
 	mux.Handle("/admin/v1/reports/weekly", requireAdmin(RequirePermission(PermSpendRead)(http.HandlerFunc(h.WeeklyReport))))
