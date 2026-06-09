@@ -1,4 +1,5 @@
 import { useAuthStore } from '../authStore';
+import { authRepository } from '@/src/data';
 
 // Reset store between tests
 beforeEach(() => {
@@ -48,5 +49,30 @@ describe('authStore', () => {
     expect(state.isAuthenticated).toBe(false);
     expect(state.user).toBeNull();
     expect(state.session).toBeNull();
+  });
+
+  it('signOut is re-entrant-safe: concurrent calls revoke once (#98)', async () => {
+    useAuthStore.setState({
+      user: { id: '1', email: 'a@b.com', name: 'A' },
+      session: {
+        accessToken: 'tok',
+        refreshToken: 'refresh-xyz',
+        expiresAt: '2099-01-01T00:00:00Z',
+        user: { id: '1', email: 'a@b.com', name: 'A' },
+        mode: 'mock',
+      },
+      isAuthenticated: true,
+    });
+    const logoutSpy = jest.spyOn(authRepository, 'logout').mockResolvedValue(undefined);
+
+    await Promise.all([
+      useAuthStore.getState().signOut(),
+      useAuthStore.getState().signOut(),
+      useAuthStore.getState().signOut(),
+    ]);
+
+    expect(logoutSpy).toHaveBeenCalledTimes(1);
+    expect(useAuthStore.getState().isAuthenticated).toBe(false);
+    logoutSpy.mockRestore();
   });
 });

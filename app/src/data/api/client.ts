@@ -135,6 +135,16 @@ const buildHeaders = (overrides: HeadersInit | undefined): Record<string, string
   return merged;
 };
 
+/**
+ * Auth endpoints mint or rotate tokens, so a 401 from one must NEVER drive the
+ * token-refresh interceptor. Refreshing to retry the refresh call itself awaits
+ * the in-flight refresh promise that is awaiting this very request — a deadlock
+ * that wedges the whole API layer; and a logout 401 would loop signOut →
+ * logout → signOut. Auth calls therefore bypass the 401 interceptor (#98).
+ */
+const isAuthEndpoint = (endpoint: string): boolean =>
+  endpoint.replace(/^https?:\/\/[^/]+/, '').startsWith('/v1/auth/');
+
 let isRefreshing = false;
 let refreshPromise: Promise<boolean> | null = null;
 
@@ -263,8 +273,9 @@ const request = async <T>(
       );
     }
 
-    // Attempt token refresh on 401 before throwing
-    if (response.status === 401 && _authToken) {
+    // Attempt token refresh on 401 before throwing — but never for auth
+    // endpoints, which would recurse into the refresh/logout flow (#98).
+    if (response.status === 401 && _authToken && !isAuthEndpoint(endpoint)) {
       const refreshed = await attemptRefresh();
       if (refreshed) {
         // Retry the original request with the new token
@@ -337,7 +348,8 @@ export const authFetch = async (
   let response = await run();
 
   // 401 → silent refresh + one retry, sharing apiClient's dedup'd refresh.
-  if (response.status === 401 && _authToken) {
+  // Auth endpoints bypass this — refreshing to retry them recurses (#98).
+  if (response.status === 401 && _authToken && !isAuthEndpoint(endpoint)) {
     const refreshed = await attemptRefresh();
     if (refreshed) {
       response = await run();

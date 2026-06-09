@@ -1,4 +1,4 @@
-import { ApiError, authFetch } from '../client';
+import { ApiError, apiClient, authFetch, setAuthToken } from '../client';
 
 describe('ApiError', () => {
   it('stores status and details', () => {
@@ -73,5 +73,46 @@ describe('authFetch', () => {
     expect(err).toBeInstanceOf(ApiError);
     expect(err.status).toBe(500);
     expect(err.message).toBe('boom');
+  });
+});
+
+describe('401 interceptor — auth endpoints bypass refresh (#98)', () => {
+  const originalFetch = global.fetch;
+
+  const resp = (status: number, body: Record<string, unknown>): Partial<Response> => ({
+    ok: status >= 200 && status < 300,
+    status,
+    headers: { get: () => null } as unknown as Headers,
+    json: async () => body,
+    text: async () => JSON.stringify(body),
+  });
+
+  afterEach(() => {
+    (global as unknown as { fetch: typeof fetch }).fetch = originalFetch;
+    setAuthToken(null);
+  });
+
+  it('does not refresh-retry a 401 from /v1/auth/refresh (no recursion/deadlock)', async () => {
+    setAuthToken('stale-access-token'); // would otherwise satisfy the _authToken guard
+    const fetchMock = jest.fn(async () => resp(401, { error: 'invalid refresh token' }));
+    (global as unknown as { fetch: unknown }).fetch = fetchMock;
+
+    await expect(
+      apiClient.post('/v1/auth/refresh', { refreshToken: 'expired' })
+    ).rejects.toMatchObject({ status: 401 });
+
+    // Exactly one network call — the interceptor did not re-enter the refresh flow.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not refresh-retry a 401 from /v1/auth/logout', async () => {
+    setAuthToken('stale-access-token');
+    const fetchMock = jest.fn(async () => resp(401, { error: 'nope' }));
+    (global as unknown as { fetch: unknown }).fetch = fetchMock;
+
+    await expect(authFetch('/v1/auth/logout', { method: 'POST' })).rejects.toMatchObject({
+      status: 401,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
