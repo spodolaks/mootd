@@ -18,6 +18,15 @@ export interface UseWeatherResult {
   weather: WeatherData | null;
   loading: boolean;
   error: string | null;
+  /**
+   * True when weather is unavailable specifically because the OS location
+   * permission has not been granted. The hook CHECKS permission (it never
+   * prompts) — requesting is the dedicated Permissions screen's job. Consumers
+   * can use this to offer an "enable location" affordance instead of silently
+   * showing no weather. `weather` stays null in this state (we never fabricate
+   * a fallback city), so outfit generation proceeds weather-less.
+   */
+  needsLocationPermission: boolean;
   refresh: () => Promise<void>;
 }
 
@@ -91,6 +100,7 @@ export function useWeather(): UseWeatherResult {
   const [weather, setWeather] = useState<WeatherData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [needsLocationPermission, setNeedsLocationPermission] = useState(false);
 
   // Hydrate from cache on first mount so the card is visible immediately.
   useEffect(() => {
@@ -109,21 +119,20 @@ export function useWeather(): UseWeatherResult {
   const fetchWeather = useCallback(async () => {
     setLoading(true);
     setError(null);
-    console.log('[Weather] → Requesting location...');
+    setNeedsLocationPermission(false);
+    console.log('[Weather] → Checking location permission...');
     try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        console.log('[Weather] ⚠ Location permission denied — will use default location');
-      }
-
       let latitude: number;
       let longitude: number;
-      try {
-        let coords: { latitude: number; longitude: number } | null = null;
 
-        if (Platform.OS === 'web') {
-          // Use the browser's native geolocation API directly on web.
-          coords = await new Promise((resolve, reject) => {
+      if (Platform.OS === 'web') {
+        // On web, expo-location's permission API isn't meaningful — the
+        // browser's geolocation call handles its own permission prompt and
+        // rejects if the user denies. We never call this on the hook's behalf
+        // beyond reading the position, so let it run and surface any denial
+        // as a clean "unavailable" state below (no fabricated fallback city).
+        const coords = await new Promise<{ latitude: number; longitude: number }>(
+          (resolve, reject) => {
             if (!navigator.geolocation) {
               reject(new Error('Geolocation not supported'));
               return;
@@ -133,33 +142,38 @@ export function useWeather(): UseWeatherResult {
               err => reject(new Error(err.message)),
               { enableHighAccuracy: false, timeout: 10000 }
             );
-          });
-        } else {
-          // On native, try last-known first (instant), then fall back to a fresh fix.
-          const last = await Location.getLastKnownPositionAsync();
-          coords = last
-            ? { latitude: last.coords.latitude, longitude: last.coords.longitude }
-            : await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }).then(
-                p => ({ latitude: p.coords.latitude, longitude: p.coords.longitude })
-              );
-        }
-
-        if (!coords) {
-          throw new Error('Could not determine location');
-        }
+          }
+        );
         latitude = coords.latitude;
         longitude = coords.longitude;
-        console.log(
-          `[Weather] ✓ Location acquired: ${latitude.toFixed(4)}, ${longitude.toFixed(4)}`
-        );
-      } catch (locErr) {
-        console.log(
-          '[Weather] ⚠ Location unavailable, using default (Tallinn):',
-          locErr instanceof Error ? locErr.message : locErr
-        );
-        latitude = 59.437;
-        longitude = 24.7536;
+      } else {
+        // CHECK (don't request) the OS permission. Requesting belongs to the
+        // dedicated Permissions screen — popping the system prompt from a
+        // screen mount gives the user zero context. If permission isn't
+        // granted, surface a needs-permission state and leave weather null
+        // instead of fabricating a wrong-city (Tallinn) fallback.
+        const { status } = await Location.getForegroundPermissionsAsync();
+        if (status !== 'granted') {
+          console.log('[Weather] ⚠ Location permission not granted — weather unavailable');
+          setNeedsLocationPermission(true);
+          setLoading(false);
+          return;
+        }
+
+        // Permission granted: try last-known first (instant), then a fresh fix.
+        const last = await Location.getLastKnownPositionAsync();
+        const coords = last
+          ? { latitude: last.coords.latitude, longitude: last.coords.longitude }
+          : await Location.getCurrentPositionAsync({
+              accuracy: Location.Accuracy.Balanced,
+            }).then(p => ({ latitude: p.coords.latitude, longitude: p.coords.longitude }));
+        latitude = coords.latitude;
+        longitude = coords.longitude;
       }
+
+      console.log(
+        `[Weather] ✓ Location acquired: ${latitude.toFixed(4)}, ${longitude.toFixed(4)}`
+      );
 
       const apiUnit = temperatureUnit === 'fahrenheit' ? 'fahrenheit' : 'celsius';
       const displayUnit: 'c' | 'f' = temperatureUnit === 'fahrenheit' ? 'f' : 'c';
@@ -222,5 +236,5 @@ export function useWeather(): UseWeatherResult {
     void fetchWeather();
   }, [fetchWeather]);
 
-  return { weather, loading, error, refresh: fetchWeather };
+  return { weather, loading, error, needsLocationPermission, refresh: fetchWeather };
 }
