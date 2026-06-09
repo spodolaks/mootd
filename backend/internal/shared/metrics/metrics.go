@@ -116,10 +116,29 @@ func Instrument(next http.Handler, routeOf func(*http.Request) string) http.Hand
 				route = "_unknown"
 			}
 		}
+		route = boundRouteLabel(route, rw.status)
 		httpRequestDuration.
 			WithLabelValues(r.Method, route, strconv.Itoa(rw.status)).
 			Observe(time.Since(start).Seconds())
 	})
+}
+
+// notFoundRoute is the single route label used for every 404 response.
+const notFoundRoute = "_notfound"
+
+// boundRouteLabel keeps the `route` label space bounded. Unmatched paths —
+// scanner probes like /.env, /wp-login.php, /v1/<garbage> — reach routeOf and
+// come back as their raw path, so on a public host each distinct probe would
+// mint a new timeseries and grow the scrape payload without bound. Folding
+// every 404 into one label caps that. A real route that legitimately 404s
+// already carries a bounded label (e.g. /v1/wardrobe/items/{id}); folding its
+// 404s in here only loses per-route not-found breakdown — an acceptable trade
+// for a bounded label space (#155).
+func boundRouteLabel(route string, status int) string {
+	if status == http.StatusNotFound {
+		return notFoundRoute
+	}
+	return route
 }
 
 // statusWriter mirrors the one in shared/middleware/logging.go
