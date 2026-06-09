@@ -1,4 +1,4 @@
-import { Tabs } from 'expo-router';
+import { Redirect, Tabs } from 'expo-router';
 import React from 'react';
 import { View, Pressable, StyleSheet, Platform } from 'react-native';
 import { BottomTabBarProps } from '@react-navigation/bottom-tabs';
@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AddTab } from '@/src/components';
 import { useColorScheme } from '@/src/hooks';
+import { useAuthStore } from '@/src/store';
 import { backgrounds, separators } from '@/src/theme/colors';
 import type { IconName } from '@/src/components';
 
@@ -99,6 +100,16 @@ function FloatingPillTabBar({ state, descriptors: _descriptors, navigation }: Bo
 }
 
 export default function MainTabLayout() {
+  // Auth gate (#147). The root layout blocks rendering until restoreSession
+  // completes, so isAuthenticated is final by the time this renders: a
+  // logged-out user reaching a (main) route via deep link or web URL is sent
+  // to the login screen instead of seeing protected UI fire unauthenticated
+  // API calls.
+  const isAuthenticated = useAuthStore(s => s.isAuthenticated);
+  if (!isAuthenticated) {
+    return <Redirect href="/" />;
+  }
+
   return (
     <Tabs
       initialRouteName="moodboard"
