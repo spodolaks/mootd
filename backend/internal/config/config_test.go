@@ -28,6 +28,32 @@ func TestValidateAdminAllowlist(t *testing.T) {
 	}
 }
 
+func TestValidateSecretLength(t *testing.T) {
+	tests := []struct {
+		name    string
+		secret  string
+		env     string
+		wantErr error
+	}{
+		{"production short secret is rejected", "too-short", "production", ErrSecretTooShortInProduction},
+		{"production empty secret is rejected", "", "production", ErrSecretTooShortInProduction},
+		{"production whitespace-padded short secret is rejected", "   short   ", "production", ErrSecretTooShortInProduction},
+		{"production exactly 32 chars is accepted", "abcdefghijklmnopqrstuvwxyz012345", "production", nil},
+		{"production 33 chars is accepted", "abcdefghijklmnopqrstuvwxyz0123456", "production", nil},
+		{"production user dev default is accepted", defaultJWTSecret, "production", nil},
+		{"production admin dev default is accepted", defaultAdminJWTSecret, "production", nil},
+		{"development short secret is allowed", "short", "development", nil},
+		{"development empty secret is allowed", "", "development", nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := validateSecretLength(tt.secret, tt.env); !errors.Is(err, tt.wantErr) {
+				t.Fatalf("validateSecretLength(%q, %q) = %v, want %v", tt.secret, tt.env, err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestParseOutfitProviders(t *testing.T) {
 	tests := []struct {
 		name        string

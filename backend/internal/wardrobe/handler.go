@@ -876,7 +876,12 @@ func ssrfSafeControl(_, address string, _ syscall.RawConn) error {
 var imageDownloadClient = &http.Client{
 	Timeout: 30 * time.Second,
 	Transport: &http.Transport{
-		Proxy: http.ProxyFromEnvironment,
+		// No proxy. http.ProxyFromEnvironment would let an operator-set (or
+		// attacker-injected) HTTP(S)_PROXY route the request through a proxy,
+		// which dials the proxy host instead of the image host — bypassing
+		// ssrfSafeControl (it only ever sees the proxy's IP) and re-opening the
+		// SSRF hole the Control hook closes. We always dial the target directly.
+		Proxy: nil,
 		DialContext: (&net.Dialer{
 			Timeout:   10 * time.Second,
 			KeepAlive: 30 * time.Second,

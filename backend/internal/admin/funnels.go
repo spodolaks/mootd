@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -196,6 +197,19 @@ func (r *FunnelsMongoRepository) Create(ctx context.Context, f Funnel) (Funnel, 
 	if f.AnalysisDays <= 0 || f.AnalysisDays > 180 {
 		return Funnel{}, errors.New("admin: analysisDays must be 1-180")
 	}
+	// Step filter values are spliced verbatim into `properties.<k>` of the
+	// Stats $match (see Stats below). A non-scalar value — a map or slice — is
+	// a Mongo operator object (e.g. {"$ne": ...}, {"$where": ...}), which would
+	// turn an equality filter into an attacker-controlled query operator. Only
+	// scalar equality filters are allowed; reject anything else at write time so
+	// the bad shape never reaches the database.
+	for _, s := range f.Steps {
+		for k, v := range s.Filters {
+			if !isScalarFilterValue(v) {
+				return Funnel{}, fmt.Errorf("admin: funnel step filter %q must be a scalar value (operator objects are not allowed)", k)
+			}
+		}
+	}
 	if f.ID == "" {
 		f.ID = "fn_" + generateAuditID()[len("aud_"):]
 	}
@@ -206,6 +220,24 @@ func (r *FunnelsMongoRepository) Create(ctx context.Context, f Funnel) (Funnel, 
 		return Funnel{}, err
 	}
 	return f, nil
+}
+
+// isScalarFilterValue reports whether v is a plain scalar suitable for an
+// equality $match on properties.<k>. Maps and slices/arrays are rejected
+// because, once spliced into the Stats $match, they are interpreted by Mongo as
+// operator objects ({"$ne": ...}) or value lists rather than the equality the
+// funnel UI intends — the Mongo-operator-injection vector. nil and all scalar
+// kinds (string/number/bool) are allowed.
+func isScalarFilterValue(v interface{}) bool {
+	if v == nil {
+		return true
+	}
+	switch reflect.ValueOf(v).Kind() {
+	case reflect.Map, reflect.Slice, reflect.Array:
+		return false
+	default:
+		return true
+	}
 }
 
 // Stats walks the steps and computes per-user pass-through.

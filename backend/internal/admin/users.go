@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"errors"
+	"regexp"
 	"sort"
 	"strconv"
 	"time"
@@ -283,9 +284,12 @@ func (r *UsersMongoRepository) ListSummaries(ctx context.Context, q UsersQuery) 
 
 	filter := bson.M{}
 	if q.Search != "" {
-		// Case-insensitive contains. Acceptable performance at our
+		// Case-insensitive contains. QuoteMeta escapes regex
+		// metacharacters so a search like "a+++..." can't be turned into a
+		// pathological (ReDoS) pattern or alter the match semantics — same
+		// hardening search.go already applies. Acceptable performance at our
 		// scale; if list pages grow large we'd add a text index.
-		filter["email"] = bson.M{"$regex": q.Search, "$options": "i"}
+		filter["email"] = bson.M{"$regex": regexp.QuoteMeta(q.Search), "$options": "i"}
 	}
 	if q.Active {
 		// "Active" = updated in the last 30 days. The user collection
