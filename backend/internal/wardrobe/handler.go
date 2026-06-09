@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -250,10 +252,16 @@ func (h *Handler) processDetected(ctx context.Context, userID string, detected [
 				imgData = d.ImageData
 				imgCT = "image/png"
 			} else if d.ImageURL != "" {
-				var dlErr error
-				imgData, imgCT, dlErr = downloadImage(ctx, d.ImageURL)
-				if dlErr != nil {
-					h.logger.Printf("wardrobe: download image for item %s: %v", itemID, dlErr)
+				if !isAllowedImageURL(d.ImageURL) {
+					// The detection service supplied this URL; treat it as
+					// untrusted and refuse non-public targets before fetching.
+					h.logger.Printf("wardrobe: refusing detection image for item %s from disallowed URL", itemID)
+				} else {
+					var dlErr error
+					imgData, imgCT, dlErr = downloadImage(ctx, d.ImageURL)
+					if dlErr != nil {
+						h.logger.Printf("wardrobe: download image for item %s: %v", itemID, dlErr)
+					}
 				}
 			}
 
@@ -799,45 +807,94 @@ func (h *Handler) ServeImage(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// isAllowedImageURL validates that the URL points to a safe external host.
-// Blocks requests to internal/private IPs to prevent SSRF attacks.
+// blockedIP reports whether ip is in a range outbound image fetches must never
+// reach: loopback, private (RFC1918 / IPv6 ULA), link-local (which includes the
+// 169.254.169.254 cloud-metadata endpoint), unspecified, or multicast. This is
+// the authoritative SSRF gate — it runs on the *resolved* peer IP at dial time
+// (see ssrfSafeControl), so it also defeats DNS rebinding and redirect-to-internal,
+// neither of which a hostname allowlist can catch.
+func blockedIP(ip net.IP) bool {
+	return ip.IsLoopback() ||
+		ip.IsPrivate() ||
+		ip.IsLinkLocalUnicast() ||
+		ip.IsLinkLocalMulticast() ||
+		ip.IsUnspecified() ||
+		ip.IsMulticast()
+}
+
+// isAllowedImageURL is a structural pre-check on an outbound image URL: it must
+// be http(s), carry a host, and not be an obvious internal literal IP or name.
+// It is intentionally DNS-blind — the real enforcement is ssrfSafeControl, which
+// screens the resolved IP at connect time and on every redirect hop. This
+// pre-check rejects the easy cases early and is reused by CheckRedirect to screen
+// each redirect target's URL.
 func isAllowedImageURL(rawURL string) bool {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return false
 	}
-	host := strings.ToLower(u.Hostname())
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return false
+	}
+	host := u.Hostname()
 	if host == "" {
 		return false
 	}
-
-	// Block obviously internal hosts.
-	blockedPrefixes := []string{"127.", "10.", "192.168.", "172.16.", "172.17.", "172.18.",
-		"172.19.", "172.20.", "172.21.", "172.22.", "172.23.", "172.24.", "172.25.",
-		"172.26.", "172.27.", "172.28.", "172.29.", "172.30.", "172.31.", "0."}
-	for _, prefix := range blockedPrefixes {
-		if strings.HasPrefix(host, prefix) {
-			return false
-		}
-	}
-
-	blockedHosts := []string{"localhost", "metadata.google.internal", "::1", "[::1]"}
-	for _, blocked := range blockedHosts {
-		if host == blocked {
-			return false
-		}
-	}
-
-	// Block link-local / cloud metadata IPs.
-	if strings.HasPrefix(host, "169.254.") || strings.HasPrefix(host, "fd") || strings.HasPrefix(host, "fc") {
+	if ip := net.ParseIP(host); ip != nil && blockedIP(ip) {
 		return false
 	}
-
-	return u.Scheme == "http" || u.Scheme == "https"
+	switch strings.ToLower(host) {
+	case "localhost", "metadata.google.internal":
+		return false
+	}
+	return true
 }
 
-// imageDownloadClient is used for fetching external images with an explicit timeout.
-var imageDownloadClient = &http.Client{Timeout: 30 * time.Second}
+// ssrfSafeControl is the net.Dialer Control hook on imageDownloadClient. It runs
+// after DNS resolution with the actual peer address and refuses the connection
+// when the resolved IP is non-public. Because it fires for every dial — including
+// the dial made for each redirect hop — it closes the DNS-rebinding and
+// redirect-to-internal holes that a URL-string allowlist leaves open.
+func ssrfSafeControl(_, address string, _ syscall.RawConn) error {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return fmt.Errorf("ssrf guard: invalid dial address %q: %w", address, err)
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return fmt.Errorf("ssrf guard: non-IP dial address %q", host)
+	}
+	if blockedIP(ip) {
+		return fmt.Errorf("ssrf guard: refusing to connect to %s", ip)
+	}
+	return nil
+}
+
+// imageDownloadClient fetches external images with an explicit timeout and an
+// SSRF guard. The dialer Control hook validates the resolved peer IP at connect
+// time; CheckRedirect bounds the redirect chain and re-screens each hop's URL.
+var imageDownloadClient = &http.Client{
+	Timeout: 30 * time.Second,
+	Transport: &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   10 * time.Second,
+			KeepAlive: 30 * time.Second,
+			Control:   ssrfSafeControl,
+		}).DialContext,
+		TLSHandshakeTimeout: 10 * time.Second,
+		IdleConnTimeout:     90 * time.Second,
+	},
+	CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 5 {
+			return fmt.Errorf("ssrf guard: stopped after %d redirects", len(via))
+		}
+		if !isAllowedImageURL(req.URL.String()) {
+			return fmt.Errorf("ssrf guard: redirect to disallowed URL")
+		}
+		return nil
+	},
+}
 
 // downloadImage fetches image bytes from a URL. Returns data and content-type.
 // Non-2xx responses are treated as errors.

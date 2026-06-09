@@ -10,6 +10,7 @@ func TestIsAllowedImageURL(t *testing.T) {
 		// Valid external URLs
 		{"https://images.example.com/photo.jpg", true},
 		{"http://cdn.shopify.com/products/img.png", true},
+		{"https://[2606:4700:4700::1111]/img.png", true},
 
 		// SSRF targets — must be blocked
 		{"http://localhost:8080/admin", false},
@@ -20,6 +21,7 @@ func TestIsAllowedImageURL(t *testing.T) {
 		{"http://169.254.169.254/latest/meta-data/", false},
 		{"http://metadata.google.internal/computeMetadata/v1/", false},
 		{"http://[::1]/admin", false},
+		{"http://[fd00::1]/internal", false},
 		{"http://0.0.0.0/", false},
 
 		// Malformed
