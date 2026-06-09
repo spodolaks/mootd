@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -584,8 +585,24 @@ func (s *Service) generateOutfitsImpl(ctx context.Context, userID string, weathe
 		return outfits
 	}
 
+	// mootd#67 — read creativity preference if the wired
+	// userProfile satisfies the optional creativityProvider
+	// interface. Failure / missing interface → 0 → generator
+	// keeps its compiled-in default. Read before the cache key is
+	// built so it (bucketed) and the active provider both feed the
+	// key — otherwise a moved slider or a provider switch would
+	// serve stale 24h-cached outfits (#154).
+	var creativity float64
+	if cp, ok := s.userProfile.(creativityProvider); ok {
+		if c, err := cp.GetCreativity(ctx, userID); err != nil {
+			s.logger.Printf("outfit: creativity fetch failed for user %s: %v (using provider default)", userID, err)
+		} else {
+			creativity = c
+		}
+	}
+
 	// Cache lookup.
-	cacheKey := buildCacheKey(userID, items, weather, topArchetypes)
+	cacheKey := buildCacheKey(userID, items, weather, topArchetypes, creativity, s.generator.Name())
 	if s.cache != nil {
 		if cached, ok := s.cache.Get(ctx, cacheKey); ok {
 			// Self-heal: cache entries written before the palette feature lack
@@ -623,19 +640,6 @@ func (s *Service) generateOutfitsImpl(ctx context.Context, userID string, weathe
 		}
 		if backgrounds, err = s.surfaces.ListBackgrounds(ctx); err != nil {
 			s.logger.Printf("outfit: surface: list backgrounds failed: %v", err)
-		}
-	}
-
-	// mootd#67 — read creativity preference if the wired
-	// userProfile satisfies the optional creativityProvider
-	// interface. Failure / missing interface → 0 → generator
-	// keeps its compiled-in default.
-	var creativity float64
-	if cp, ok := s.userProfile.(creativityProvider); ok {
-		if c, err := cp.GetCreativity(ctx, userID); err != nil {
-			s.logger.Printf("outfit: creativity fetch failed for user %s: %v (using provider default)", userID, err)
-		} else {
-			creativity = c
 		}
 	}
 
@@ -1130,9 +1134,26 @@ func formatTopArchetypes(archs []archetype.ScoredArchetype) string {
 
 // buildCacheKey produces a deterministic key for the outfit cache.
 // The key changes when the user's owned wardrobe membership, weather bucket,
-// or top archetypes change — so a fresh wardrobe item or different weather
-// forces re-generation, but tapping "regenerate" twice in identical
-// conditions hits the cache.
+// top archetypes, creativity preference, active generator/provider, or prompt
+// version change — so a fresh wardrobe item, different weather, a moved
+// creativity slider (mootd#67), a provider/model switch, or a prompt bump all
+// force re-generation, but tapping "regenerate" twice in identical conditions
+// hits the cache.
+//
+// creativity is BUCKETED to one decimal (see bucketCreativity) so that
+// imperceptible float churn around the same slider position still hits the
+// cache, while a real slider move lands in a different bucket and re-generates.
+//
+// providerName (s.generator.Name()) is folded in so a backend OUTFIT_PROVIDER /
+// model switch doesn't serve the previous provider's cached outfits under an
+// otherwise-identical key.
+//
+// promptVersion is the package-level PromptVersion constant; bumping it across
+// a deploy (e.g. v3 → v4) invalidates outfits generated under the retired
+// prompt. The per-user A/B prompt-template *variant* is deliberately NOT keyed
+// here — the variant assignment is resolved deep inside buildSystemPrompt via
+// PromptTemplateProvider.BodyForUser and isn't cleanly in scope at key-build
+// time; keying on it is left as a follow-up (see #154 PR notes).
 //
 // Archetype-default fillers (id prefix "ad_") are deliberately EXCLUDED from
 // the key. They are sampled at random per call (Mongo $sample, mootd#72), so
@@ -1142,7 +1163,7 @@ func formatTopArchetypes(archs []archetype.ScoredArchetype) string {
 // LLM. Keying on owned items only means an identical owned wardrobe +
 // weather + archetypes returns the cached batch (fillers included) within
 // the TTL.
-func buildCacheKey(userID string, items []wardrobe.ClothingItem, weather Weather, top []archetype.ScoredArchetype) string {
+func buildCacheKey(userID string, items []wardrobe.ClothingItem, weather Weather, top []archetype.ScoredArchetype, creativity float64, providerName string) string {
 	ids := make([]string, 0, len(items))
 	for _, item := range items {
 		if strings.HasPrefix(item.ID, "ad_") {
@@ -1166,9 +1187,27 @@ func buildCacheKey(userID string, items []wardrobe.ClothingItem, weather Weather
 		tempBucket,
 		condBucket,
 		strings.Join(archParts, "+"),
+		bucketCreativity(creativity),
+		providerName,
+		PromptVersion,
 	}, "|")
 	sum := sha256.Sum256([]byte(raw))
 	return hex.EncodeToString(sum[:])
+}
+
+// bucketCreativity rounds the 0..1 creativity preference to one decimal so the
+// cache key is stable against imperceptible float churn (e.g. 0.5000001 vs
+// 0.5) while still distinguishing the discrete slider positions the UI emits.
+// A value of 0 means "no preference supplied" (generator keeps its default)
+// and buckets to "0.0", distinct from an explicit 0.1.
+func bucketCreativity(creativity float64) string {
+	if creativity < 0 {
+		creativity = 0
+	}
+	if creativity > 1 {
+		creativity = 1
+	}
+	return strconv.FormatFloat(math.Round(creativity*10)/10, 'f', 1, 64)
 }
 
 // bucketTemperature collapses raw temperatures into 5-degree buckets so cache
