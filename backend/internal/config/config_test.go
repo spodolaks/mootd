@@ -6,6 +6,28 @@ import (
 	"testing"
 )
 
+func TestValidateAdminAllowlist(t *testing.T) {
+	tests := []struct {
+		name    string
+		raw     string
+		env     string
+		wantErr error
+	}{
+		{"production empty is rejected", "", "production", ErrAdminAllowlistEmptyInProduction},
+		{"production whitespace/commas only is rejected", " , ,", "production", ErrAdminAllowlistEmptyInProduction},
+		{"production with a CIDR is accepted", "10.0.0.0/8", "production", nil},
+		{"production with multiple entries is accepted", "203.0.113.4/32, 10.0.0.0/8", "production", nil},
+		{"development empty is allowed", "", "development", nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := validateAdminAllowlist(tt.raw, tt.env); !errors.Is(err, tt.wantErr) {
+				t.Fatalf("validateAdminAllowlist(%q, %q) = %v, want %v", tt.raw, tt.env, err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestParseOutfitProviders(t *testing.T) {
 	tests := []struct {
 		name        string
