@@ -11,6 +11,13 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
+// Issuer is the JWT `iss` claim value for all user-facing mootd tokens.
+// ValidateToken rejects any token whose issuer differs, so an admin-side
+// token (iss="mootd-admin") cannot pass user validation even if the signing
+// secrets were ever shared. Distinct issuers + distinct secrets together
+// give a belt-and-braces guarantee. Mirrors admin.Issuer.
+const Issuer = "mootd"
+
 // Claims holds the payload embedded in a mootd JWT.
 type Claims struct {
 	Email string `json:"email"`
@@ -26,7 +33,7 @@ func GenerateToken(userID, email, secret string, expiry time.Duration) (string, 
 			Subject:   userID,
 			IssuedAt:  jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(now.Add(expiry)),
-			Issuer:    "mootd",
+			Issuer:    Issuer,
 		},
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
@@ -64,6 +71,13 @@ func ValidateToken(tokenString, secret string) (*Claims, error) {
 	claims, ok := token.Claims.(*Claims)
 	if !ok || !token.Valid {
 		return nil, fmt.Errorf("invalid token claims")
+	}
+	if claims.Issuer != Issuer {
+		// A foreign-issuer token (e.g. an admin token, or one minted by a
+		// different service that happens to share the secret) must not be
+		// accepted on the user path. Refuse it rather than letting the
+		// ambiguity leak into the request context.
+		return nil, fmt.Errorf("invalid token issuer %q (expected %q)", claims.Issuer, Issuer)
 	}
 	return claims, nil
 }
