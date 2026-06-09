@@ -14,17 +14,21 @@ import (
 
 // Handler handles authentication endpoints.
 type Handler struct {
-	logger    *log.Logger
-	repo      Repository
-	jwtSecret string
+	logger          *log.Logger
+	repo            Repository
+	jwtSecret       string
+	googleClientIDs []string
 }
 
-// NewHandler creates a new auth Handler.
-func NewHandler(logger *log.Logger, repo Repository, jwtSecret string) *Handler {
+// NewHandler creates a new auth Handler. googleClientIDs is the allowlist of
+// Google OAuth client IDs whose tokens /v1/auth/google will accept (audience
+// binding — see verifyGoogleToken).
+func NewHandler(logger *log.Logger, repo Repository, jwtSecret string, googleClientIDs []string) *Handler {
 	return &Handler{
-		logger:    logger,
-		repo:      repo,
-		jwtSecret: jwtSecret,
+		logger:          logger,
+		repo:            repo,
+		jwtSecret:       jwtSecret,
+		googleClientIDs: googleClientIDs,
 	}
 }
 
@@ -125,8 +129,9 @@ func (h *Handler) Google(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 
-	// Verify with Google — do not trust client-supplied profile data.
-	googleUser, err := verifyGoogleToken(ctx, req.AccessToken)
+	// Verify with Google — do not trust client-supplied profile data, and
+	// require the token's audience to be one of mootd's own OAuth client IDs.
+	googleUser, err := verifyGoogleToken(ctx, req.AccessToken, h.googleClientIDs)
 	if err != nil {
 		h.logger.Printf("google auth: token verification failed: %v", err)
 		response.WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid Google token"})
