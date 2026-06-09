@@ -637,11 +637,21 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 	// image blobs are erased through the owning repo's DeleteAllByUser (blobs +
 	// docs) rather than a doc-only DeleteMany. Without this, wardrobe / moodboard
 	// / detection image blobs survived a purge as permanent orphans (#96).
-	privacySvc.WithBlobPurgers(map[string]privacy.BlobPurgeFunc{
+	blobPurgers := map[string]privacy.BlobPurgeFunc{
 		"wardrobe_items": wardrobeRepo.DeleteAllByUser,
 		"moodboards":     moodboardRepo.DeleteAllByUser,
-		"detection_runs": detectionRunRepo.DeleteAllByUser,
-	})
+	}
+	// detection_runs owns GridFS blobs only when its repo initialised. When it
+	// didn't (index-ensure failure at boot — the app deliberately continues
+	// without the archive, see the nil-guard where the wardrobe handler is
+	// wired), leave it out: privacy.Purge then falls back to a doc-only
+	// DeleteMany for the collection instead of invoking DeleteAllByUser on a nil
+	// receiver and panicking mid-purge, which 500'd every account deletion in
+	// that degraded boot mode (#152).
+	if detectionRunRepo != nil {
+		blobPurgers["detection_runs"] = detectionRunRepo.DeleteAllByUser
+	}
+	privacySvc.WithBlobPurgers(blobPurgers)
 
 	// DELETE /v1/user/profile and DELETE /v1/privacy/self now share ONE erasure
 	// orchestrator (privacy.Service.Purge): the full collection set + GridFS
