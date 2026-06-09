@@ -32,7 +32,7 @@ import { SavedBoardView } from '@/src/components/moodboard/SavedBoardView';
 import { CONTAINER_PADDING } from '@/src/components/moodboard/constants';
 import { useTabContentBottomPadding } from '@/app/(main)/_layout';
 
-type ScreenState = 'loading' | 'empty' | 'generating' | 'choosing' | 'saved';
+type ScreenState = 'loading' | 'empty' | 'error' | 'generating' | 'choosing' | 'saved';
 
 const buildItemMap = (items: WardrobeItem[]): Map<string, WardrobeItem> => {
   const map = new Map<string, WardrobeItem>();
@@ -127,11 +127,19 @@ export const MoodBoardScreen: React.FC = () => {
       setItemMap(buildItemMap(items));
       const saved = boards.find(b => b.date === today) ?? null;
       setTodayBoard(saved);
+      // 'empty' only when the load SUCCEEDED and there's genuinely no
+      // saved board for today — otherwise a transient failure would
+      // show "Generate your first mood board" to a user who already has
+      // one, inviting a duplicate (paid) generation (#167).
       setScreenState(saved ? 'saved' : 'empty');
     } catch {
-      setScreenState('empty');
+      // Distinguish a failed load from a genuine empty: surface a
+      // retryable error state instead of the empty CTA (#167). If we
+      // already loaded a board earlier and a later re-focus fails, keep
+      // showing it rather than masking it behind the error (no data loss).
+      setScreenState(todayBoard ? 'saved' : 'error');
     }
-  }, [today]);
+  }, [today, todayBoard]);
 
   useFocusEffect(
     useCallback(() => {
@@ -557,6 +565,29 @@ export const MoodBoardScreen: React.FC = () => {
               }}
               testID="moodboard-generate"
               accessibilityLabel="Generate outfits"
+            />
+          </View>
+        );
+
+      case 'error':
+        // #167 — a failed load is NOT an empty wardrobe. Show a
+        // retryable error (not the "Generate your first mood board"
+        // CTA) so we don't imply data loss or invite a duplicate
+        // generation. Retry re-runs the same load.
+        return (
+          <View style={styles.centered}>
+            <Text style={[styles.emptyText, { color: textColor }]}>
+              Couldn&apos;t load{'\n'}your mood board
+            </Text>
+            <GradientButton
+              label="Retry"
+              icon="sync"
+              onPress={() => {
+                setScreenState('loading');
+                void loadData();
+              }}
+              testID="moodboard-retry"
+              accessibilityLabel="Retry loading your mood board"
             />
           </View>
         );

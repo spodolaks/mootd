@@ -43,6 +43,8 @@ export const CalendarScreen: React.FC = () => {
   // double-downloads on Instagram web.
   const [sharingTo, setSharingTo] = useState<SharePlatform | null>(null);
 
+  const showToast = useUIStore(s => s.showToast);
+
   const backgroundColor = backgrounds.primary[colorScheme];
   const textColor = labels.primary[colorScheme];
   const secondaryText = labels.secondary[colorScheme];
@@ -73,7 +75,14 @@ export const CalendarScreen: React.FC = () => {
           for (const item of items) map.set(item.id, item);
           setItemMap(map);
         } catch {
-          // silently fail — calendar still usable
+          // #167 — surface the failure instead of swallowing it. A
+          // silent catch left every date showing "No outfit saved",
+          // implying data loss. The calendar stays usable; a toast
+          // tells the user the list didn't load and to pull to refresh.
+          // Guard on !cancelled so a stale (blurred) load can't toast.
+          if (!cancelled) {
+            showToast('Couldn’t load your calendar. Pull to refresh.', 'error');
+          }
         } finally {
           if (!cancelled) setIsLoading(false);
         }
@@ -82,7 +91,7 @@ export const CalendarScreen: React.FC = () => {
       return () => {
         cancelled = true;
       };
-    }, [])
+    }, [showToast])
   );
 
   // mootd#50 — pull-to-refresh handler. Same load steps as the
@@ -101,11 +110,14 @@ export const CalendarScreen: React.FC = () => {
       for (const item of items) map.set(item.id, item);
       setItemMap(map);
     } catch {
-      // silently fail — same UX as focus load.
+      // #167 — same non-silent UX as the focus load: tell the user the
+      // refresh failed rather than leaving a stale/empty calendar with
+      // no signal. The pull-to-refresh control is the retry affordance.
+      showToast('Couldn’t refresh your calendar. Try again.', 'error');
     } finally {
       setIsRefreshing(false);
     }
-  }, []);
+  }, [showToast]);
 
   // Index boards by date for quick lookup
   const boardsByDate = useMemo(() => {
@@ -118,8 +130,6 @@ export const CalendarScreen: React.FC = () => {
   }, [boards]);
 
   const selectedBoard = boardsByDate.get(selectedDate) ?? null;
-
-  const showToast = useUIStore(s => s.showToast);
 
   const handleShare = useCallback(
     async (platform: SharePlatform) => {
