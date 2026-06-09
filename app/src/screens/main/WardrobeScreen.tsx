@@ -3,7 +3,7 @@ import { Skeleton } from '@/src/components/ui';
 import { useColorScheme } from '@/src/hooks';
 import { backgrounds, button, fills, grays, labels } from '@/src/theme/colors';
 import { typography } from '@/src/theme/typography';
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -117,6 +117,33 @@ export const WardrobeScreen: React.FC = () => {
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
 
+  // mootd#166 — search + category filtering must span the WHOLE wardrobe,
+  // not just the cursor pages loaded so far. We lazily fetch the full set
+  // (getAllItems walks every page) the first time a query/filter becomes
+  // active and filter client-side over that. The default (no search, "all"
+  // category) view stays on the paginated `wardrobeItems` so we don't
+  // regress infinite scroll or pay a load-all on mount.
+  const [allItems, setAllItems] = useState<WardrobeItem[] | null>(null);
+  // Set when a full-wardrobe walk fails, so the trigger effect stops (no
+  // auto-retry loop) and the empty state shows a clear message instead of a
+  // perpetual spinner. Cleared by loadItems/onRefresh, which re-arms a retry.
+  const [allItemsError, setAllItemsError] = useState(false);
+  // Concurrency guard for getAllItems (it can walk several pages): a ref so
+  // overlapping triggers — e.g. the effect plus a refresh — collapse to one
+  // in-flight walk regardless of state-update timing.
+  const allInFlight = useRef(false);
+  // Guard setState against an unmount mid-fetch and let an in-flight walk
+  // no-op its result if the screen has gone away.
+  const isMounted = useRef(true);
+  useEffect(() => {
+    isMounted.current = true;
+    return () => {
+      isMounted.current = false;
+    };
+  }, []);
+
+  const isFiltering = searchQuery.trim() !== '' || selectedCategory !== 'all';
+
   const backgroundColor = backgrounds.primary[colorScheme];
   const textColor = labels.primary[colorScheme];
   const secondaryTextColor = labels.secondary[colorScheme];
@@ -132,15 +159,21 @@ export const WardrobeScreen: React.FC = () => {
 
   const loadItems = useCallback(async () => {
     setIsLoadingItems(true);
+    // mootd#166 — invalidate the cached full set so the next active
+    // search/filter re-fetches it (picks up items added/removed since) and
+    // re-arms the trigger effect after a prior full-fetch error.
+    setAllItems(null);
+    setAllItemsError(false);
     try {
       const { items, nextCursor: cursor } = await wardrobeRepository.getItems();
+      if (!isMounted.current) return;
       setWardrobeItems(items);
       setNextCursor(cursor);
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to load wardrobe.';
       Alert.alert('Error', msg);
     } finally {
-      setIsLoadingItems(false);
+      if (isMounted.current) setIsLoadingItems(false);
     }
   }, []);
 
@@ -150,15 +183,21 @@ export const WardrobeScreen: React.FC = () => {
   // place and only spins the native pull indicator.
   const onRefresh = useCallback(async () => {
     setIsRefreshing(true);
+    // mootd#166 — same invalidation as loadItems so a pull-to-refresh
+    // while a search/filter is active re-pulls the full set too (and retries
+    // it after a prior failure).
+    setAllItems(null);
+    setAllItemsError(false);
     try {
       const { items, nextCursor: cursor } = await wardrobeRepository.getItems();
+      if (!isMounted.current) return;
       setWardrobeItems(items);
       setNextCursor(cursor);
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to refresh wardrobe.';
       Alert.alert('Error', msg);
     } finally {
-      setIsRefreshing(false);
+      if (isMounted.current) setIsRefreshing(false);
     }
   }, []);
 
@@ -179,12 +218,52 @@ export const WardrobeScreen: React.FC = () => {
     }
   }, [nextCursor, isLoadingMore]);
 
+  // mootd#166 — fetch the complete wardrobe (every cursor page) so search and
+  // category filtering operate over all items, not just loaded pages. The
+  // allInFlight ref collapses overlapping triggers into one walk. On success
+  // `allItems` is set (the trigger effect then sees it non-null and stops);
+  // on failure we record allItemsError so the effect stops too — no
+  // auto-retry loop. The walk's identity is stable (empty deps), so the
+  // trigger effect's deps stay quiet between genuine state transitions.
+  const loadAllItems = useCallback(async () => {
+    if (allInFlight.current) return;
+    allInFlight.current = true;
+    setAllItemsError(false);
+    try {
+      const items = await wardrobeRepository.getAllItems();
+      if (!isMounted.current) return;
+      setAllItems(items);
+    } catch (e) {
+      if (!isMounted.current) return;
+      setAllItemsError(true);
+      const msg = e instanceof Error ? e.message : 'Failed to load wardrobe.';
+      Alert.alert('Error', msg);
+    } finally {
+      allInFlight.current = false;
+    }
+  }, []);
+
+  // Kick off the full fetch the moment a search query or non-"all" category
+  // becomes active and we don't already have (or have failed to fetch) the
+  // full set. Excluding the error case prevents an immediate retry loop; a
+  // retry is re-armed by loadItems/onRefresh clearing allItemsError, which
+  // flips this condition back on.
+  useEffect(() => {
+    if (isFiltering && allItems === null && !allItemsError) {
+      void loadAllItems();
+    }
+  }, [isFiltering, allItems, allItemsError, loadAllItems]);
+
   useFocusEffect(
     useCallback(() => {
       void loadItems();
     }, [loadItems])
   );
 
+  // mootd#166 — derive chips from the full set once it's loaded so the row
+  // isn't truncated to whatever pages happen to be in memory. Falls back to
+  // the loaded pages until the full walk completes.
+  const categorySource = allItems ?? wardrobeItems;
   const categories: CategoryChip[] = [
     { id: 'all', label: 'All' },
     // Group by the item's canonical category. Fall back to the legacy
@@ -192,7 +271,7 @@ export const WardrobeScreen: React.FC = () => {
     // that trait instead of populating the top-level category.
     ...Array.from(
       new Set(
-        wardrobeItems.map(i => i.category || i.traits['macro_category'] || '').filter(Boolean)
+        categorySource.map(i => i.category || i.traits['macro_category'] || '').filter(Boolean)
       )
     ).map(cat => ({ id: cat, label: cat })),
   ];
@@ -300,7 +379,15 @@ export const WardrobeScreen: React.FC = () => {
     [router]
   );
 
-  const filteredItems = wardrobeItems.filter(item => {
+  // mootd#166 — when a search/filter is active, run the predicate over the
+  // FULL wardrobe (allItems) once it's loaded; until then fall back to the
+  // loaded pages so the user sees partial matches rather than an empty grid.
+  // With no search/filter, stay on the paginated list to preserve infinite
+  // scroll. `displaySource` is the same array `filteredItems` filters, so the
+  // empty-state logic can tell a "no matches over the full set" apart from a
+  // "still loading the full set".
+  const displaySource = isFiltering ? (allItems ?? wardrobeItems) : wardrobeItems;
+  const filteredItems = displaySource.filter(item => {
     const matchesSearch = item.label.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesCategory =
       selectedCategory === 'all' ||
@@ -371,16 +458,51 @@ export const WardrobeScreen: React.FC = () => {
         </View>
       );
     }
+    // mootd#166 — a full-wardrobe walk failed while filtering. Don't claim
+    // "no matches" (we never finished searching); tell the user and point at
+    // pull-to-refresh, which re-arms the fetch.
+    if (isFiltering && allItemsError) {
+      return (
+        <View style={styles.centeredState}>
+          <Text style={[styles.emptyText, { color: secondaryTextColor }]}>
+            {'Couldn’t search your full wardrobe.\nPull down to retry.'}
+          </Text>
+        </View>
+      );
+    }
+    // mootd#166 — while a search/filter is active and the full wardrobe hasn't
+    // loaded yet, show a spinner instead of "No items match". A false negative
+    // here is exactly the bug we're fixing: the match may live on a page that
+    // hasn't been walked in yet. Covers the brief pre-fetch tick too (allItems
+    // null, not yet loading) so there's no flash of "No items match".
+    if (isFiltering && allItems === null) {
+      return (
+        <View style={styles.centeredState}>
+          <ActivityIndicator size="small" color={textColor} />
+          <Text style={[styles.emptyText, { color: secondaryTextColor, marginTop: 12 }]}>
+            Searching your wardrobe…
+          </Text>
+        </View>
+      );
+    }
     return (
       <View style={styles.centeredState}>
         <Text style={[styles.emptyText, { color: secondaryTextColor }]}>
-          {wardrobeItems.length === 0
-            ? 'Your wardrobe is empty.\nTap + to add your first item.'
-            : 'No items match your search.'}
+          {isFiltering
+            ? 'No items match your search.'
+            : 'Your wardrobe is empty.\nTap + to add your first item.'}
         </Text>
       </View>
     );
-  }, [isLoadingItems, wardrobeItems.length, secondaryTextColor]);
+  }, [
+    isLoadingItems,
+    wardrobeItems.length,
+    isFiltering,
+    allItems,
+    allItemsError,
+    textColor,
+    secondaryTextColor,
+  ]);
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor }]} edges={['top']}>
@@ -420,7 +542,9 @@ export const WardrobeScreen: React.FC = () => {
         renderItem={renderClothingItem}
         ListEmptyComponent={renderListEmpty}
         ListFooterComponent={
-          isLoadingMore ? (
+          // mootd#166 — the load-more spinner belongs to the paginated
+          // (unfiltered) list only; the filtered view runs over the full set.
+          !isFiltering && isLoadingMore ? (
             <View style={styles.loadingMoreContainer}>
               <ActivityIndicator size="small" color={textColor} />
             </View>
@@ -437,7 +561,10 @@ export const WardrobeScreen: React.FC = () => {
           />
         }
         onEndReached={() => {
-          void loadMore();
+          // mootd#166 — cursor pagination drives the default view only. When
+          // a search/filter is active we're already filtering the full set,
+          // so paging in more cursor pages would be wasted work.
+          if (!isFiltering) void loadMore();
         }}
         onEndReachedThreshold={0.5}
         style={styles.gridContainer}
