@@ -35,20 +35,29 @@ export const ProfileScreen: React.FC = () => {
   const idleBadgeColor = accents.green[colorScheme];
 
   const handleSignOut = () => {
-    const doSignOut = () => {
-      signOut();
+    // #135: await signOut() (which clears auth state + every per-user store)
+    // before navigating, so index.tsx doesn't bounce us back into (main) while
+    // still authenticated.
+    const doSignOut = async () => {
+      await signOut();
       router.replace('/');
     };
 
     if (Platform.OS === 'web') {
       // Alert.alert is a no-op on web – use window.confirm instead
       if (confirm('Sign out of your account?')) {
-        doSignOut();
+        void doSignOut();
       }
     } else {
       Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Sign Out', style: 'destructive', onPress: doSignOut },
+        {
+          text: 'Sign Out',
+          style: 'destructive',
+          onPress: () => {
+            void doSignOut();
+          },
+        },
       ]);
     }
   };

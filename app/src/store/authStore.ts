@@ -6,6 +6,8 @@ import { setAuthToken } from '@/src/data/api/client';
 import * as events from '@/src/lib/events';
 import type { AuthSession, AuthUser, GoogleOAuthParams } from '@/src/domain';
 import { usePreferencesStore } from './preferencesStore';
+import { useWardrobeStore } from './wardrobeStore';
+import { useDetectionJobStore } from './detectionJobStore';
 
 const SECURE_TOKEN_KEY = 'mootd.auth.token';
 const SECURE_REFRESH_KEY = 'mootd.auth.refreshToken';
@@ -252,6 +254,7 @@ export const useAuthStore = create<AuthState>(set => ({
       // Revoke the refresh token server-side first so a lost device can't keep
       // minting new access tokens. We do NOT await this call — network failures
       // must not block local sign-out, and the user expects an instant UI.
+      // Read the token before clearing auth state below, since that wipes it.
       const refreshToken = useAuthStore.getState().session?.refreshToken;
       if (refreshToken) {
         void authRepository.logout(refreshToken).catch(() => {
@@ -259,15 +262,31 @@ export const useAuthStore = create<AuthState>(set => ({
         });
       }
 
+      // #135: flip auth state to signed-out BEFORE the awaited
+      // clearTokenSecurely() below. Previously this ran after the await, so a
+      // fire-and-forget signOut() call site that immediately navigated would
+      // hit index.tsx while isAuthenticated was still true and get bounced
+      // back into (main). Clearing synchronously here guarantees any navigation
+      // observes the signed-out state.
       setAuthToken(null);
-      await clearTokenSecurely().catch(err => {
-        console.warn('[Auth] Failed to clear secure token:', err);
-      });
       set({
         user: null,
         session: null,
         isAuthenticated: false,
         error: null,
+      });
+
+      // #148: wipe every other per-user store so a shared device doesn't leak
+      // user A's data to user B. preferencesStore (persisted: display name,
+      // email, creativity, theme…) resets to defaults; the in-memory
+      // detectionJob + wardrobe wizard stores reset to empty. getState() is
+      // used because this runs outside React.
+      usePreferencesStore.getState().reset();
+      useDetectionJobStore.getState().clear();
+      useWardrobeStore.getState().reset();
+
+      await clearTokenSecurely().catch(err => {
+        console.warn('[Auth] Failed to clear secure token:', err);
       });
     } finally {
       isSigningOut = false;

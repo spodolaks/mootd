@@ -25,6 +25,8 @@ interface DetectionJobState {
   dismissJob: (jobId: string) => void;
   /** Check if any job is currently in progress. */
   hasActiveJob: () => boolean;
+  /** Clear all jobs back to the initial empty state (used on sign-out). */
+  clear: () => void;
 }
 
 let _jobCounter = 0;
@@ -158,4 +160,6 @@ export const useDetectionJobStore = create<DetectionJobState>((set, get) => ({
   hasActiveJob: () => {
     return get().jobs.some(j => j.status === 'detecting');
   },
+
+  clear: () => set({ jobs: [] }),
 }));
