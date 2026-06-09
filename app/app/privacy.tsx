@@ -70,9 +70,14 @@ export default function PrivacyScreen() {
                 [
                   {
                     text: 'OK',
+                    // #135: await signOut() (clears auth state + every per-user
+                    // store) before navigating so index.tsx doesn't bounce the
+                    // user back into (main) while still authenticated.
                     onPress: () => {
-                      signOut();
-                      router.replace('/');
+                      void (async () => {
+                        await signOut();
+                        router.replace('/');
+                      })();
                     },
                   },
                 ]
