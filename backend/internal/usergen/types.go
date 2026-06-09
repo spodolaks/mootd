@@ -89,6 +89,12 @@ const (
 	OutfitVisualWeightsSupporting OutfitVisualWeights = "supporting"
 )
 
+// Defines values for OutfitItemSnapshotResolvedSource.
+const (
+	Filler OutfitItemSnapshotResolvedSource = "filler"
+	Owned  OutfitItemSnapshotResolvedSource = "owned"
+)
+
 // Defines values for OutfitJobStatusStatus.
 const (
 	OutfitJobStatusStatusCompleted  OutfitJobStatusStatus = "completed"
@@ -400,6 +406,12 @@ type MoodboardOutfit struct {
 	Description     string              `json:"description"`
 	Id              *string             `json:"id,omitempty"`
 
+	// ItemSnapshots Resolved per-item metadata for each entry in `items`,
+	// so the client renders without a second wardrobe lookup
+	// (and can resolve archetype-default filler IDs that
+	// aren't in the wardrobe list).
+	ItemSnapshots *[]OutfitItemSnapshotResolved `json:"itemSnapshots,omitempty"`
+
 	// Items Wardrobe item IDs referenced by this outfit.
 	Items []string `json:"items"`
 
@@ -447,6 +459,12 @@ type Outfit struct {
 	Description     string              `json:"description"`
 	Id              *string             `json:"id,omitempty"`
 
+	// ItemSnapshots Resolved per-item metadata for each entry in `items`,
+	// so the client renders without a second wardrobe lookup
+	// (and can resolve archetype-default filler IDs that
+	// aren't in the wardrobe list).
+	ItemSnapshots *[]OutfitItemSnapshotResolved `json:"itemSnapshots,omitempty"`
+
 	// Items Wardrobe item IDs referenced by this outfit.
 	Items []string `json:"items"`
 
@@ -492,6 +510,36 @@ type OutfitItemSnapshot struct {
 	Label       string  `json:"label"`
 	PngImageUrl *string `json:"pngImageUrl,omitempty"`
 }
+
+// OutfitItemSnapshotResolved Resolved per-item metadata returned inline on a freshly
+// generated Outfit (Outfit.itemSnapshots), so the client can
+// render directly off the outfit without a second
+// /v1/wardrobe/items lookup. Distinct from the moodboard
+// OutfitItemSnapshot: it carries `source`, since outfits may
+// reference archetype-default "filler" items that live
+// virtually under `ad_<hex>` IDs and are only resolvable
+// through this snapshot.
+type OutfitItemSnapshotResolved struct {
+	Category    string  `json:"category"`
+	Id          string  `json:"id"`
+	ImageUrl    *string `json:"imageUrl,omitempty"`
+	Label       string  `json:"label"`
+	PngImageUrl *string `json:"pngImageUrl,omitempty"`
+
+	// Source How the client should render the item. `owned` = the
+	// user's own wardrobe item (normal render); `filler` = an
+	// archetype-default suggestion (show the "mark in wardrobe
+	// / not in wardrobe" affordance — fillers are never
+	// auto-added to the closet).
+	Source OutfitItemSnapshotResolvedSource `json:"source"`
+}
+
+// OutfitItemSnapshotResolvedSource How the client should render the item. `owned` = the
+// user's own wardrobe item (normal render); `filler` = an
+// archetype-default suggestion (show the "mark in wardrobe
+// / not in wardrobe" affordance — fillers are never
+// auto-added to the closet).
+type OutfitItemSnapshotResolvedSource string
 
 // OutfitJobStatus Polled state of an async outfit-generation job. Same
 // progression as detect jobs (pending → processing →

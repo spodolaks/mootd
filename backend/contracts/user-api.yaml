@@ -530,6 +530,34 @@ components:
           type: string
           enum: [C, F]
 
+    OutfitItemSnapshotResolved:
+      description: |
+        Resolved per-item metadata returned inline on a freshly
+        generated Outfit (Outfit.itemSnapshots), so the client can
+        render directly off the outfit without a second
+        /v1/wardrobe/items lookup. Distinct from the moodboard
+        OutfitItemSnapshot: it carries `source`, since outfits may
+        reference archetype-default "filler" items that live
+        virtually under `ad_<hex>` IDs and are only resolvable
+        through this snapshot.
+      type: object
+      required: [id, category, label, source]
+      properties:
+        id: { type: string }
+        category: { type: string }
+        label: { type: string }
+        imageUrl: { type: string }
+        pngImageUrl: { type: string }
+        source:
+          type: string
+          enum: [owned, filler]
+          description: |
+            How the client should render the item. `owned` = the
+            user's own wardrobe item (normal render); `filler` = an
+            archetype-default suggestion (show the "mark in wardrobe
+            / not in wardrobe" affordance — fillers are never
+            auto-added to the closet).
+
     Outfit:
       description: |
         A suggested outfit. Items reference wardrobe item IDs.
@@ -545,6 +573,15 @@ components:
           type: array
           items: { type: string }
           description: Wardrobe item IDs referenced by this outfit.
+        itemSnapshots:
+          type: array
+          items:
+            $ref: "#/components/schemas/OutfitItemSnapshotResolved"
+          description: |
+            Resolved per-item metadata for each entry in `items`,
+            so the client renders without a second wardrobe lookup
+            (and can resolve archetype-default filler IDs that
+            aren't in the wardrobe list).
         rationale:
           type: string
           description: One-line stylist explanation tied to archetype/weather.

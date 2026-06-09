@@ -259,9 +259,10 @@ to regenerate `internal/admin/gen/types.go` from it.
 Hand-written types in `internal/admin/{domain,users,overview,traces}.go`
 remain the structs handlers return — the generated package is
 **reference + drift detection** only. `make gen-check` regenerates
-and diffs the output, but it is **not currently wired into CI**, so
-spec/codegen drift is not enforced automatically — run it locally
-after changing a contract. (Wiring it into CI is tracked separately.)
+and diffs the output; it **is wired into CI** (the "Codegen drift
+(make gen-check)" step in `.github/workflows/ci.yml`), so spec/codegen
+drift fails the build automatically — run it locally after changing a
+contract to catch drift before pushing.
 
 When changing an admin endpoint shape:
 1. Edit `mootd-contracts/openapi/admin-api.yaml`, push.
