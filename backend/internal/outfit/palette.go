@@ -13,15 +13,42 @@ import (
 	"sync"
 )
 
+// maxImagePixels bounds the decoded canvas size. image.Decode allocates a
+// pixel buffer sized by the header's declared width*height, so a small
+// compressed file declaring an enormous canvas (a decompression bomb) could
+// exhaust memory and crash the shared backend. 24 MP comfortably covers any
+// real phone photo or background-removed cutout while rejecting pathological
+// inputs (e.g. a ~10 MB PNG declaring 50000x50000 = 2.5 Gpx → multi-GB alloc).
+const maxImagePixels = 24_000_000
+
+// paletteConcurrency caps how many item images are decoded at once in
+// attachPalettes, bounding peak memory under the per-image maxImagePixels cap.
+const paletteConcurrency = 8
+
 // extractDominantColor returns the dominant opaque color of an image as a
 // "#RRGGBB" hex string. It ignores near-transparent pixels so PNG cutouts
 // vote only with garment pixels, not the removed background.
 //
 // Algorithm:
+//   - Reject oversized canvases from the header before decoding (bomb guard).
 //   - Downsample by stride so at most ~4k pixels are examined.
 //   - Quantize each opaque pixel into one of 8^3 = 512 buckets.
 //   - Return the centroid of the most-populated bucket.
 func extractDominantColor(data []byte) (string, error) {
+	// Bound dimensions BEFORE the full decode: DecodeConfig reads only the
+	// header, so we can reject a decompression bomb without allocating its
+	// declared pixel buffer (#142).
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil {
+		return "", fmt.Errorf("decode config: %w", err)
+	}
+	if cfg.Width <= 0 || cfg.Height <= 0 {
+		return "", errors.New("invalid image dimensions")
+	}
+	if int64(cfg.Width)*int64(cfg.Height) > maxImagePixels {
+		return "", fmt.Errorf("image too large: %dx%d exceeds %d px budget", cfg.Width, cfg.Height, maxImagePixels)
+	}
+
 	img, _, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
 		return "", fmt.Errorf("decode: %w", err)
@@ -136,10 +163,17 @@ func (s *Service) attachPalettes(ctx context.Context, outfits []Outfit) []Outfit
 	var wg sync.WaitGroup
 	var fetchFails, decodeFails, extracts int
 	var failMu sync.Mutex
+	// Bound concurrent decodes: each extractDominantColor allocates a pixel
+	// buffer (capped per-image by maxImagePixels), so without a cap a large
+	// outfit set could decode many big images at once. The semaphore keeps
+	// peak memory bounded regardless of how many items are referenced (#142).
+	sem := make(chan struct{}, paletteConcurrency)
 	for id := range needed {
 		wg.Add(1)
 		go func(id string) {
 			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
 			defer func() {
 				if r := recover(); r != nil {
 					s.logger.Printf("outfit: palette extract panic for item %s: %v", id, r)
