@@ -118,7 +118,9 @@ Authenticates via Google OAuth. Verifies the access token with Google's userinfo
 
 **Errors**: `400` missing/invalid body, `401` invalid Google token, `500` save/token error
 
-**JWT claims**: `sub` (user ID), `email`, `iat`, `exp` (+24h), `iss` (`"mootd"`)
+**Tokens**: Login returns a short-lived **access token** (HS256 JWT, 15-minute expiry) plus a long-lived **refresh token** (opaque, 30-day expiry, single-use — rotated on every `/v1/auth/refresh`). Use the access token as `Authorization: Bearer <token>`; when it expires, exchange the refresh token via `POST /v1/auth/refresh` for a new pair.
+
+**Access-token claims**: `sub` (user ID), `email`, `iat`, `exp` (issued-at + 15 min), `iss` (`"mootd"`). Validation rejects any token whose `iss` is not `"mootd"`.
 
 ---
 
@@ -157,6 +159,15 @@ Updates `name` and/or `avatarUrl`. At least one field must be provided.
 **Response 200** — same shape as GET
 
 **Errors**: `400` invalid body / no fields to update, `401` unauthorized, `404` user not found, `500` update error
+
+---
+
+#### `DELETE /v1/user/profile`
+Erases the authenticated user's account and all owned data via the shared cascade (wardrobe items + their images, outfits, moodboards, feedback, and the user document). Equivalent to `DELETE /v1/privacy/self`; both remain wired for compatibility. Idempotent.
+
+**Response**: `204 No Content`
+
+**Errors**: `401` unauthorized, `500` cascade/deletion failure, `503` cascade not configured (dev mode)
 
 ---
 
@@ -246,6 +257,44 @@ Permanently removes an item. Only the authenticated user's items can be deleted.
 
 ---
 
+#### `POST /v1/wardrobe/items/{id}/search`
+Runs an external clothing-catalog lookup against the item's stored photo, filtered by brand. Ownership-checked before the image is read (404 if not found or not owned). Results are not persisted.
+
+**Request**
+```json
+{ "brand": "Nike" }
+```
+
+**Response 200**
+```json
+{
+  "results": [
+    {
+      "id": "prod_123",
+      "title": "Nike Sportswear Tee",
+      "source": "example-retailer",
+      "price": "$29.99",
+      "imageUrl": "https://..."
+    }
+  ]
+}
+```
+
+Returns `{ "results": [] }` (never `null`) when there are no matches.
+
+**Errors**: `400` missing item ID / missing `brand` / invalid body, `401` unauthorized, `404` item or image not found / not owned, `422` external search failed, `500` internal error
+
+---
+
+#### `GET /v1/wardrobe/items/{id}/image`
+Streams the item's stored image bytes (served from GridFS). **Currently public** (item IDs are non-guessable UUIDs, mirroring the moodboard-image route — no `Authorization` header required). Responses set `Cache-Control: public, max-age=31536000, immutable`.
+
+**Response 200**: raw image bytes with the stored `Content-Type`.
+
+**Errors**: `404` image not found, `500` read error
+
+---
+
 ### Outfit Generation
 
 Requires `Authorization: Bearer <jwt>`.
@@ -287,6 +336,7 @@ Index of the remaining surface (detailed shapes live in each domain's `routes.go
 |--------|------|---------|
 | `POST` | `/v1/auth/refresh` | Rotate the access + refresh token pair (refresh is single-use) |
 | `POST` | `/v1/auth/logout` | Invalidate the refresh token (always `204`) |
+| `POST` | `/v1/events` | Batch-ingest analytics events (auth + per-user rate limited; body ≤128 KB / 500 events, `413` over cap). Invalid events don't poison the batch — `200` with per-event `accepted`/`rejected` outcomes |
 | `POST` / `GET` | `/v1/wardrobe/detect-jobs[/{id}]` | Async clothing-detection: submit + poll |
 | `POST` | `/v1/wardrobe/items/from-archetype-default` | Claim an archetype-default ("filler") suggestion into the wardrobe |
 | `POST` | `/v1/wardrobe/archetype-rejections` | Reject a filler suggestion so it isn't offered again |
@@ -302,19 +352,82 @@ Index of the remaining surface (detailed shapes live in each domain's `routes.go
 
 ## Environment Variables
 
+All defaults are defined in `internal/config/config.go` (and a handful read directly in `internal/app/app.go` / `internal/health/handler.go`). Unset values fall back to the listed default; empty strings are treated as unset.
+
+### Core / server
+
 | Variable | Default | Notes |
 |----------|---------|-------|
-| `HTTP_ADDR` | `:8080` | Server listen address |
-| `MONGO_URI` | `mongodb://mootd:mootd_dev@mongo:27017/?authSource=admin` | Change credentials in production |
-| `MONGO_DB` | `mootd` | Database name |
-| `MONGO_CONNECT_TIMEOUT` | `10s` | |
-| `SHUTDOWN_TIMEOUT` | `10s` | Graceful shutdown grace period |
-| `JWT_SECRET` | `dev-secret-change-in-production-min-32-chars!!` | **Must be changed in production** (min 32 chars) |
-| `CORS_ALLOWED_ORIGINS` | `*` | Comma-separated list of allowed origins. **Before deploying to production, set this to an explicit list (e.g. `https://app.example.com,https://admin.example.com`).** When `ENVIRONMENT=production`, the server refuses to start if this is `*` or empty. |
-| `DETECTION_API_BASE_URL` | `http://35.188.207.123:8080` | External clothing detection service |
-| `DETECTION_API_KEY` | *(required)* | API key for detection service — set in `.env` |
+| `ENVIRONMENT` | `development` | Set to `production` to disable dev-only features (mock-login) and enable production boot guards. |
+| `HTTP_ADDR` | `:8080` | Server listen address. |
+| `MONGO_URI` | `mongodb://mootd:mootd_dev@mongo:27017/?authSource=admin` | MongoDB connection string — change credentials in production. |
+| `MONGO_DB` | `mootd` | Database name. |
+| `MONGO_CONNECT_TIMEOUT` | `10s` | MongoDB connect timeout (Go duration string). |
+| `SHUTDOWN_TIMEOUT` | `10s` | Graceful-shutdown grace period (Go duration string). |
+| `REDIS_URL` | `redis://localhost:6379` | Redis connection (outfit cache, rate limiting, async job + spend state). |
+| `TRUSTED_PROXY_CIDRS` | *(loopback)* | Comma-separated CIDRs of reverse-proxy peers allowed to set `X-Forwarded-For`. Unset → loopback only. |
 
-The server warns on startup if `JWT_SECRET` or `DETECTION_API_KEY` are unset. When `ENVIRONMENT=production`, the server also refuses to start if `JWT_SECRET` is unset or `CORS_ALLOWED_ORIGINS` is left as the wildcard default.
+### Auth & access control
+
+| Variable | Default | Notes |
+|----------|---------|-------|
+| `JWT_SECRET` | `dev-secret-change-in-production-min-32-chars!!` | HMAC signing key for user JWTs. **Must be set in production (min 32 chars)** — the server refuses to start with the default in production. |
+| `ADMIN_JWT_SECRET` | `admin-dev-secret-change-in-production-min-32-chars!!` | HMAC signing key for admin-panel JWTs. **Must be set in production AND differ from `JWT_SECRET`** — the server refuses to start if they match. |
+| `GOOGLE_CLIENT_IDS` | *(built-in web client ID)* | Comma-separated allowlist of Google OAuth client IDs accepted by `/v1/auth/google` (audience binding). Set when using a dedicated iOS/Android client. |
+| `CORS_ALLOWED_ORIGINS` | `*` | Comma-separated allowed origins. **Before production, set this to an explicit list (e.g. `https://app.example.com,https://admin.example.com`).** When `ENVIRONMENT=production`, the server refuses to start if this is `*` or empty. |
+| `ADMIN_ALLOWED_IPS` | *(empty)* | Comma-separated CIDR/IP allowlist gating `/admin/v1/*` and `/metrics`. **Required in production** — an empty list fails open, so the server refuses to start without it when `ENVIRONMENT=production`. |
+| `ENABLE_MOCK_LOGIN` | `false` | Set to `true` to enable `POST /v1/auth/mock-login`. Fail-closed: ignored when `ENVIRONMENT=production`. |
+
+### Clothing detection
+
+| Variable | Default | Notes |
+|----------|---------|-------|
+| `DETECTION_BACKEND` | `singleitem` | Detection backend selector: `singleitem`, `flatlay`, or `legacy`. Unknown values fall back to `singleitem` (which itself falls back to legacy if its URL is unset). |
+| `DETECTION_API_BASE_URL` | `http://localhost:8000` | Base URL for the legacy detection service (also used as the fallback backend). |
+| `DETECTION_API_KEY` | *(empty)* | API key for the legacy detection service — set in `.env`. Server warns if unset. |
+| `SINGLEITEM_BASE_URL` | *(empty)* | Base URL for the single-item detection orchestrator (used when `DETECTION_BACKEND=singleitem`). |
+| `SINGLEITEM_API_KEY` | *(empty)* | API key for the single-item orchestrator. |
+| `FLATLAY_BASE_URL` | *(empty)* | Base URL for the third-party flat-lay detection service (used when `DETECTION_BACKEND=flatlay`). |
+| `FLATLAY_API_KEY` | *(empty)* | API key for the flat-lay service. |
+| `BG_REMOVER_BASE_URL` | `http://host.docker.internal:8010` | Background-removal service base URL. |
+| `DETECT_MAX_CONCURRENT` | `8` | Max concurrent in-flight detection jobs. |
+
+### Outfit generation
+
+| Variable | Default | Notes |
+|----------|---------|-------|
+| `OUTFIT_PROVIDER` | `ollama` | Generator backend — a single provider (`ollama`/`claude`/`openai`) or a comma-separated cascade chain (e.g. `claude,openai,ollama`). Unknown entries are dropped. |
+| `OUTFIT_MAX_CONCURRENT` | `8` | Max concurrent in-flight async outfit-generation jobs. |
+| `OUTFIT_CRITIC_ENABLED` | `false` | `true` enables the optional outfit-critic QA gate. |
+| `OUTFIT_PER_ARCHETYPE_PROMPTS` | `false` | `true` enables per-archetype prompt variants. |
+| `ANTHROPIC_BASE_URL` | `https://api.anthropic.com` | Anthropic Messages API endpoint (Claude provider). |
+| `ANTHROPIC_API_KEY` | *(empty)* | Anthropic API key. Required when the provider chain includes `claude`; server warns if missing. |
+| `ANTHROPIC_MODEL` | `claude-sonnet-4-5` | Claude model ID (Claude provider). |
+| `ANTHROPIC_VISION` | `true` | `true`/`false` — send item PNGs to Claude for visual reasoning. |
+| `OPENAI_BASE_URL` | `https://api.openai.com` | OpenAI API endpoint (OpenAI provider / DALL-E backgrounds). |
+| `OPENAI_API_KEY` | *(empty)* | OpenAI API key. Required when the provider chain includes `openai`. |
+| `OLLAMA_BASE_URL` | `http://host.docker.internal:11434` | Local Ollama endpoint (Ollama provider). |
+| `OLLAMA_MODEL` | `qwen3:14b` | Ollama model used for outfit generation. |
+
+### Client health & ops
+
+| Variable | Default | Notes |
+|----------|---------|-------|
+| `MIN_CLIENT_VERSION` | *(empty)* | Minimum RN-app version surfaced by `GET /v1/health`; older clients show a blocking update prompt. |
+| `MAINTENANCE` | `false` | `true` flips the maintenance flag on `GET /v1/health` (soft banner). |
+| `FOUNDER_EMAILS` | *(empty)* | Comma-separated recipients for the admin daily-summary email (requires SMTP configured). |
+| `DAILY_SUMMARY_HOUR_UTC` | `7` | Hour (UTC) the daily-summary email is sent. |
+| `EVAL_GOLDEN_DIR` | *(built-in)* | Overrides the directory of golden eval fixtures for the eval suite. |
+| `SMTP_HOST` | *(empty)* | SMTP server host. When unset, the weekly cost-report / daily-summary email send is disabled (previews still work). |
+| `SMTP_PORT` | *(empty)* | SMTP server port. |
+| `SMTP_USERNAME` | *(empty)* | SMTP auth username. |
+| `SMTP_PASSWORD` | *(empty)* | SMTP auth password. |
+| `SMTP_FROM` | *(empty)* | Sender address. Required (with `SMTP_TO`) for email send to be enabled. |
+| `SMTP_TO` | *(empty)* | Default recipient address for the weekly cost report. |
+
+> **Ops one-shot tools only** (not read by the API server): `cmd/bootstrap-admin` reads `BOOTSTRAP_ADMIN_EMAIL` and `BOOTSTRAP_ADMIN_PASSWORD` (min 12 chars) to seed the first admin account.
+
+The server warns on startup if `JWT_SECRET`, `ADMIN_JWT_SECRET`, `DETECTION_API_KEY`, or a required provider API key are unset. When `ENVIRONMENT=production`, the server refuses to start if `JWT_SECRET`/`ADMIN_JWT_SECRET` are unset (or equal), if `CORS_ALLOWED_ORIGINS` is the wildcard default, or if `ADMIN_ALLOWED_IPS` is empty.
 
 ## Running Locally
 
