@@ -101,7 +101,8 @@ func (s *Service) criticGate(
 		RecentBoards:  recentBoards,
 		Panels:        panels,
 		Backgrounds:   backgrounds,
-		Creativity:    0.5, // mid-tier; eval can tune via OUTFIT_CRITIC_REGEN_CREATIVITY later
+		UseVision:     s.useVision, // mirror the original request — vision must survive regen
+		Creativity:    0.5,         // mid-tier; eval can tune via OUTFIT_CRITIC_REGEN_CREATIVITY later
 	}
 	regenOutfits, _, regenErr := s.generator.Generate(ctx, regenReq)
 	if regenErr != nil {

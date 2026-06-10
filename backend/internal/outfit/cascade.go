@@ -65,7 +65,7 @@ func (c *CascadeGenerator) Name() string {
 }
 
 // Generate iterates the chain. Returns the first successful result;
-// on exhaustion returns ErrAllProvidersFailed wrapping the last
+// on exhaustion returns *AllProvidersFailedError wrapping the last
 // non-shortcircuit error.
 func (c *CascadeGenerator) Generate(ctx context.Context, req GeneratorRequest) ([]Outfit, *Usage, error) {
 	if len(c.chain) == 0 {
@@ -132,7 +132,7 @@ func (c *CascadeGenerator) Generate(ctx context.Context, req GeneratorRequest) (
 	if lastErr != nil {
 		// Return lastUsage (may be nil) so a billed-but-failed attempt
 		// is still recorded in the LLM-call ledger.
-		return nil, lastUsage, ErrAllProvidersFailed(lastErr)
+		return nil, lastUsage, &AllProvidersFailedError{Last: lastErr}
 	}
 	return nil, nil, errors.New("cascade: no provider attempted")
 }
@@ -143,10 +143,32 @@ func (c *CascadeGenerator) HealthSnapshot() map[string]ProviderHealth {
 	return c.health.Snapshot()
 }
 
-// ErrAllProvidersFailed wraps the final error after the entire
-// cascade exhausted. Callers can errors.Is against the wrapped
-// inner error if they care about the original cause.
-type ErrAllProvidersFailed error
+// AllProvidersFailedError wraps the final error after the entire
+// cascade exhausted. Callers can errors.As for *AllProvidersFailedError
+// to detect the exhaustion case, or errors.Is/As against the wrapped
+// inner error (via Unwrap) if they care about the original cause.
+//
+// This is a concrete struct rather than an `error`-typed alias on
+// purpose: an interface-typed alias makes `ErrAllProvidersFailed(x)` a
+// no-op conversion (the wrapper is invisible) and, worse, makes
+// errors.As match *any* error, since every error satisfies the alias.
+type AllProvidersFailedError struct {
+	Last error
+}
+
+func (e *AllProvidersFailedError) Error() string {
+	if e == nil || e.Last == nil {
+		return "cascade: all providers failed"
+	}
+	return "cascade: all providers failed: " + e.Last.Error()
+}
+
+func (e *AllProvidersFailedError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Last
+}
 
 // shouldNotFallback returns true when an error is the kind that
 // retrying on a different provider can't fix.
