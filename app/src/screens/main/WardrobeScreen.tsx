@@ -19,7 +19,7 @@ import {
 import { Image } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
 import { wardrobeRepository } from '@/src/data/repositories';
 import { useWardrobeStore, useDetectionJobStore, useUIStore } from '@/src/store';
@@ -101,7 +101,18 @@ export const WardrobeScreen: React.FC = () => {
   const colorScheme = useColorScheme() ?? 'light';
   const tabBottomPadding = useTabContentBottomPadding();
   const router = useRouter();
-  const { initializeFlow } = useWardrobeStore();
+  const initializeFlow = useWardrobeStore(s => s.initializeFlow);
+  // mootd#164 — number of steps in the detection→review wizard. >0 means a
+  // wizard is already in progress (initializeFlow set it; reset clears it back
+  // to 0 on Done/cancel). We gate completed-job auto-navigation on this being
+  // 0 so we never blow away an in-progress review, and we subscribe to it
+  // (selector) so the completed-job effect re-runs the moment a wizard ends —
+  // picking up any job that completed off-screen while the user was reviewing.
+  const detectionStepCount = useWardrobeStore(s => s.detectionSteps.length);
+  // mootd#164 — true only while the Wardrobe tab is the focused route. The
+  // screen stays mounted in the tab navigator, so without this gate the
+  // completed-job effect would force-navigate even from another tab.
+  const isFocused = useIsFocused();
   const startJob = useDetectionJobStore(s => s.startJob);
   const jobs = useDetectionJobStore(s => s.jobs);
   const consumeCompleted = useDetectionJobStore(s => s.consumeCompleted);
@@ -294,11 +305,27 @@ export const WardrobeScreen: React.FC = () => {
 
   // Watch for completed/failed detection jobs. Completed jobs route to the
   // review flow; failed/timed-out jobs surface an alert with a Retry that
-  // re-runs detection from the stored image URI. Both branches dismiss the
-  // job afterwards so it doesn't re-fire on the next render.
+  // re-runs detection from the stored image URI.
+  //
+  // mootd#164 — this screen stays mounted in the tab navigator, so this effect
+  // fires for jobs that finish while the user is on another tab OR is mid-way
+  // through reviewing a previous detection. Auto-navigating a completed job in
+  // either case is destructive: initializeFlow resets the wizard's items map,
+  // wiping the user's in-progress selections/typed traits, and force-pushes
+  // /detected-item. So we only AUTO-ACT on a completed job when the Wardrobe
+  // tab is focused AND no wizard is already in progress (detectionStepCount ===
+  // 0). Otherwise we leave the job pending and untouched — we do NOT
+  // consume/dismiss it and do NOT initializeFlow — so the existing toast and
+  // the Detection Activity screen remain the entry point ("tap to review").
+  // consumeCompleted/consumeFailed are pure reads (only dismissJob removes a
+  // job), so skipping a job genuinely leaves it available. When focus returns
+  // or the wizard ends, detectionStepCount/isFocused flip and this effect
+  // re-runs to pick the job back up. Skipping is a no-op (no setState), so it
+  // can't loop or set state after unmount.
+  const canAutoNavigateCompleted = isFocused && detectionStepCount === 0;
   useEffect(() => {
     const completed = consumeCompleted();
-    if (completed) {
+    if (completed && canAutoNavigateCompleted) {
       const steps = toDetectionSteps(completed.result!);
       if (steps.length === 0) {
         showToast('No items detected. Try a different photo.', 'error');
@@ -320,6 +347,9 @@ export const WardrobeScreen: React.FC = () => {
       return;
     }
 
+    // A completed job we chose not to auto-navigate is intentionally left
+    // pending (see above). Fall through so an independent failed job is still
+    // surfaced — its handling is unchanged by mootd#164.
     const failed = consumeFailed();
     if (failed) {
       // Dismiss first so the alert's Retry (which enqueues a fresh job) can't
@@ -330,7 +360,17 @@ export const WardrobeScreen: React.FC = () => {
         { text: 'Retry', onPress: () => processImage(failed.imageUri) },
       ]);
     }
-  }, [jobs, consumeCompleted, consumeFailed, dismissJob, initializeFlow, router, showToast, processImage]);
+  }, [
+    jobs,
+    canAutoNavigateCompleted,
+    consumeCompleted,
+    consumeFailed,
+    dismissJob,
+    initializeFlow,
+    router,
+    showToast,
+    processImage,
+  ]);
 
   const handleCameraPress = useCallback(async () => {
     setIsAddModalVisible(false);
