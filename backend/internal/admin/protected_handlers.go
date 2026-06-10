@@ -122,6 +122,12 @@ func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
 // be used to confirm or enumerate a specific address (#140).
 const redactedEmail = "[redacted]"
 
+// redactedLabel is shown in place of user-content labels (wardrobe item
+// labels, etc.) to admins lacking users:pii. Same full-redaction rationale as
+// redactedEmail — the label describes the user's actual clothing, so it's the
+// user's personal content, not metadata (#140).
+const redactedLabel = "[redacted]"
+
 // ListUsers handles GET /admin/v1/users.
 //
 // Cursor pagination, search on email, optional active-in-30d filter.
@@ -484,6 +490,18 @@ func (h *Handler) getUserWardrobe(w http.ResponseWriter, r *http.Request, id str
 		response.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
 		return
 	}
+
+	// PII redaction (#140): a wardrobe item's label + image URLs are the user's
+	// personal content. Admins without users:pii (engineer/readonly) still see
+	// the row's id/category/traits/date — just not the label or the images.
+	if !HasPermissionFromContext(r, PermUsersPII) {
+		for i := range items {
+			items[i].Label = redactedLabel
+			items[i].ImageURL = ""
+			items[i].PngImageURL = ""
+		}
+	}
+
 	response.WriteJSON(w, http.StatusOK, UserWardrobePage{
 		Items:      items,
 		NextCursor: nextCursor,
@@ -517,6 +535,20 @@ func (h *Handler) getUserMoodboards(w http.ResponseWriter, r *http.Request, id s
 		response.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
 		return
 	}
+
+	// PII redaction (#140): the collage image and the saved-outfit payload
+	// (item labels + image URLs, panel/background URLs, name/description) are
+	// the user's personal content. Admins without users:pii (engineer/readonly)
+	// keep the id/date/createdAt scaffolding but not the content. The outfit
+	// payload is an opaque map of nothing-but-content, so it's dropped whole
+	// rather than walked field-by-field.
+	if !HasPermissionFromContext(r, PermUsersPII) {
+		for i := range items {
+			items[i].ImageURL = ""
+			items[i].Outfit = nil
+		}
+	}
+
 	response.WriteJSON(w, http.StatusOK, UserMoodboardsPage{
 		Items:      items,
 		NextCursor: nextCursor,
@@ -551,6 +583,18 @@ func (h *Handler) getUserOutfits(w http.ResponseWriter, r *http.Request, id stri
 		response.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
 		return
 	}
+
+	// PII redaction (#140): the candidate outfits carry the user's item labels
+	// + image URLs (and panel/background URLs) inside an opaque payload. Admins
+	// without users:pii (engineer/readonly) keep the batch id/status/error/dates
+	// for debugging, but the candidate content is dropped whole rather than
+	// walked field-by-field.
+	if !HasPermissionFromContext(r, PermUsersPII) {
+		for i := range batches {
+			batches[i].Candidates = nil
+		}
+	}
+
 	response.WriteJSON(w, http.StatusOK, UserOutfitsPage{
 		Batches:    batches,
 		NextCursor: nextCursor,
@@ -1606,6 +1650,19 @@ func (h *Handler) getDetectionRunDetail(w http.ResponseWriter, r *http.Request, 
 }
 
 func (h *Handler) getDetectionRunInputImage(w http.ResponseWriter, r *http.Request, id string) {
+	// The archived input image is the user's own uploaded photo — PII under
+	// the RBAC model (#140). The route is only gated by traces:read, so
+	// engineer/readonly reach here; require users:pii to actually stream the
+	// raw photo. (The detection-run detail still serves metadata to
+	// traces:read; only the photo bytes are PII-gated.)
+	if !HasPermissionFromContext(r, PermUsersPII) {
+		response.WriteJSON(w, http.StatusForbidden, map[string]any{
+			"error":             "permission denied",
+			"missingPermission": PermUsersPII,
+		})
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 
