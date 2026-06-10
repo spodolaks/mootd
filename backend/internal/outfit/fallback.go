@@ -64,11 +64,13 @@ func buildFallbackOutfits(items []wardrobe.ClothingItem, top []archetype.ScoredA
 			b.ID: "support",
 			f.ID: "support",
 		}
+		used := map[string]bool{t.ID: true, b.ID: true, f.ID: true}
 
 		if len(outerwear) > 0 {
 			o := outerwear[i%len(outerwear)]
 			ids = append(ids, o.ID)
 			layout[o.ID] = "hero"
+			used[o.ID] = true
 		} else {
 			// Promote the top to hero when there is no outerwear.
 			layout[t.ID] = "hero"
@@ -78,6 +80,31 @@ func buildFallbackOutfits(items []wardrobe.ClothingItem, top []archetype.ScoredA
 			a := accessories[i%len(accessories)]
 			ids = append(ids, a.ID)
 			layout[a.ID] = "accent"
+			used[a.ID] = true
+		}
+
+		// ValidateOutfits discards any outfit with fewer than 4 items, so a
+		// wardrobe with no outerwear AND no accessories would otherwise yield
+		// a dead 3-item fallback (top/bottom/footwear only). Pad with a
+		// distinct second top — or bottom — variant to clear the 4-item floor
+		// while preserving the required top/bottom/footwear roles.
+		if len(ids) < 4 {
+			if extra, ok := firstUnused(tops, used); ok {
+				ids = append(ids, extra.ID)
+				layout[extra.ID] = "accent"
+				used[extra.ID] = true
+			} else if extra, ok := firstUnused(bottoms, used); ok {
+				ids = append(ids, extra.ID)
+				layout[extra.ID] = "accent"
+				used[extra.ID] = true
+			}
+		}
+
+		// Degenerate wardrobe (a single top, bottom, and footwear with no
+		// other pieces) genuinely cannot form a 4-item outfit. Skip the slot
+		// rather than emit an outfit the validator will drop anyway.
+		if len(ids) < 4 {
+			continue
 		}
 
 		out = append(out, Outfit{
@@ -90,6 +117,17 @@ func buildFallbackOutfits(items []wardrobe.ClothingItem, top []archetype.ScoredA
 	}
 
 	return out
+}
+
+// firstUnused returns the first item in items whose ID is not already in the
+// used set, reporting false when every candidate is already taken.
+func firstUnused(items []wardrobe.ClothingItem, used map[string]bool) (wardrobe.ClothingItem, bool) {
+	for _, item := range items {
+		if !used[item.ID] {
+			return item, true
+		}
+	}
+	return wardrobe.ClothingItem{}, false
 }
 
 // filterByRole returns items whose category matches the requested role bucket.
