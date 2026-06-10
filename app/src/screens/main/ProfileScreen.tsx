@@ -1,6 +1,7 @@
 import React from 'react';
 import { Alert, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Image } from 'expo-image';
+import Constants from 'expo-constants';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Icon } from '@/src/components';
@@ -9,6 +10,11 @@ import { useAuthStore, usePreferencesStore, useDetectionJobStore } from '@/src/s
 import { accents, backgrounds, grays, labels, separators } from '@/src/theme/colors';
 import { typography } from '@/src/theme/typography';
 import { useTabContentBottomPadding } from '@/app/(main)/_layout';
+
+// App version sourced from app.json (expo config), matching the read in the
+// root layout. Shown on the "About MooTD" row in place of a chevron, since
+// there's no separate About destination to navigate to.
+const APP_VERSION = (Constants?.expoConfig?.version as string | undefined) ?? '0.0.0';
 
 export const ProfileScreen: React.FC = () => {
   const colorScheme = useColorScheme() ?? 'light';
@@ -160,6 +166,9 @@ export const ProfileScreen: React.FC = () => {
             label="About MooTD"
             textColor={textColor}
             dividerColor={dividerColor}
+            value={`v${APP_VERSION}`}
+            valueColor={tertiaryText}
+            showChevron={false}
           />
         </View>
 
@@ -184,6 +193,15 @@ interface MenuItemProps {
   showDivider?: boolean;
   badge?: string | null;
   badgeColor?: string;
+  /** Trailing read-only text (e.g. an app version) shown in place of a chevron. */
+  value?: string;
+  /** Trailing text color for `value`; defaults to `textColor`. */
+  valueColor?: string;
+  /**
+   * Whether to render the trailing chevron. Defaults to true. A row with no
+   * `onPress` destination should pass `false` so it doesn't look tappable.
+   */
+  showChevron?: boolean;
   onPress?: () => void;
 }
 
@@ -195,10 +213,13 @@ const MenuItem: React.FC<MenuItemProps> = ({
   showDivider = false,
   badge,
   badgeColor = '#007AFF',
+  value,
+  valueColor,
+  showChevron = true,
   onPress,
 }) => (
   <>
-    <Pressable style={styles.menuItem} onPress={onPress}>
+    <Pressable style={styles.menuItem} onPress={onPress} disabled={!onPress}>
       <Icon name={icon} size={20} color={textColor} />
       <Text style={[styles.menuItemText, { color: textColor }]}>{label}</Text>
       {badge && (
@@ -206,7 +227,10 @@ const MenuItem: React.FC<MenuItemProps> = ({
           <Text style={styles.badgeText}>{badge}</Text>
         </View>
       )}
-      <Icon name="chevron-right" size={16} color={textColor} />
+      {value ? (
+        <Text style={[styles.menuItemValue, { color: valueColor ?? textColor }]}>{value}</Text>
+      ) : null}
+      {showChevron && <Icon name="chevron-right" size={16} color={textColor} />}
     </Pressable>
     {showDivider && <View style={[styles.divider, { backgroundColor: dividerColor }]} />}
   </>
@@ -283,6 +307,9 @@ const styles = StyleSheet.create({
   menuItemText: {
     ...typography.body.regular,
     flex: 1,
+  },
+  menuItemValue: {
+    ...typography.subheadline.regular,
   },
   divider: {
     height: StyleSheet.hairlineWidth,
