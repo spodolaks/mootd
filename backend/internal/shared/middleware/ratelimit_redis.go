@@ -1,13 +1,27 @@
 package middleware
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/redis/go-redis/v9"
 )
+
+// rateLimitIncrScript atomically increments the counter and, only on the first
+// increment (when the post-INCR value is 1), sets the window TTL via PEXPIRE.
+// Doing both in one EVAL closes the INCR-then-EXPIRE race: a process/Redis
+// hiccup (or two interleaved requests) can no longer leave the key without a
+// TTL, which would otherwise pin the counter forever and permanently
+// rate-limit the user. KEYS[1] = counter key, ARGV[1] = window in
+// milliseconds. Returns the post-increment count.
+var rateLimitIncrScript = redis.NewScript(`
+local n = redis.call("INCR", KEYS[1])
+if n == 1 then
+	redis.call("PEXPIRE", KEYS[1], ARGV[1])
+end
+return n
+`)
 
 // RedisRateLimit returns middleware that limits requests per user (or per IP for
 // unauthenticated requests) using Redis INCR + EXPIRE under the "global" scope.
@@ -23,20 +37,22 @@ func RedisRateLimit(client *redis.Client, maxRequests int, window time.Duration)
 func RedisRateLimitScoped(client *redis.Client, scope string, maxRequests int, window time.Duration) func(http.Handler) http.Handler {
 	// Cache window seconds as string to save an alloc per request.
 	windowSeconds := int(window.Seconds())
+	// PEXPIRE takes milliseconds; precompute once so the per-request hot path
+	// only formats the key.
+	windowMillis := window.Milliseconds()
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			key := rateLimitKey(r)
 			redisKey := fmt.Sprintf("ratelimit:%s:%s", scope, key)
-			ctx := context.Background()
+			ctx := r.Context()
 
-			count, err := client.Incr(ctx, redisKey).Result()
+			// Atomic INCR + (first-increment-only) PEXPIRE via Lua so the
+			// counter always gets a TTL — see rateLimitIncrScript.
+			count, err := rateLimitIncrScript.Run(ctx, client, []string{redisKey}, windowMillis).Int64()
 			if err != nil {
 				// Redis down — allow the request (fail open)
 				next.ServeHTTP(w, r)
 				return
-			}
-			if count == 1 {
-				client.Expire(ctx, redisKey, window)
 			}
 
 			if count > int64(maxRequests) {
