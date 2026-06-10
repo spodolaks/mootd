@@ -116,7 +116,7 @@ services:
       ENVIRONMENT: "${ENVIRONMENT:-development}"
       # Mock-login dev endpoint. Fail-closed default ("false"). Only set to
       # "true" for local development.
-      ENABLE_MOCK_LOGIN: "${ENABLE_MOCK_LOGIN:-true}"
+      ENABLE_MOCK_LOGIN: "${ENABLE_MOCK_LOGIN:-false}"
       # SMTP for the weekly cost report (P4-04 / mootd-admin#32) +
       # the daily founder summary (mootd-admin#99). All-or-nothing:
       # SMTP_HOST + SMTP_FROM + SMTP_TO must all be set for either
