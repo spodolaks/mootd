@@ -1,17 +1,31 @@
 import React from 'react';
-import { View, StyleSheet } from 'react-native';
+import { View, StyleSheet, ActivityIndicator, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useColorScheme } from '@/src/hooks';
-import { Text, GradientButton, Button, LoadingOverlay } from '@/src/components';
+import { Text, GradientButton, Button } from '@/src/components';
 import { ProfilePlaceholder } from '@/src/components/icons/ProfilePlaceholder';
-import { accents, backgrounds, labels } from '@/src/theme/colors';
+import { accents, backgrounds, fills, labels } from '@/src/theme/colors';
+import { radius } from '@/src/theme/radius';
+import { spacing } from '@/src/theme/spacing';
 
 interface BuildWardrobeScreenProps {
   onTakePhoto?: () => void;
   onUploadFromGallery?: () => void;
   onBrowseCatalog?: () => void;
-  /** Show a loading overlay while detection is in progress */
+  /** True while a background detection job this screen started is in flight. */
   isLoading?: boolean;
+  /**
+   * mootd#163 — staged status text for the in-flight detection
+   * ("Uploading photo...", "Detecting clothing items...", …). Shown in the
+   * inline, non-blocking progress card instead of an opaque full-screen
+   * overlay. Null when nothing is running.
+   */
+  detectionStatus?: string | null;
+  /**
+   * mootd#163 — abort the in-flight detection and return to the photo-pick
+   * step. Wired to the Cancel button on the progress card.
+   */
+  onCancelDetection?: () => void;
   /** Error message to display when detection fails */
   error?: string | null;
 }
@@ -21,6 +35,8 @@ export const BuildWardrobeScreen: React.FC<BuildWardrobeScreenProps> = ({
   onUploadFromGallery,
   onBrowseCatalog,
   isLoading = false,
+  detectionStatus = null,
+  onCancelDetection,
   error = null,
 }) => {
   const colorScheme = useColorScheme() ?? 'light';
@@ -28,6 +44,10 @@ export const BuildWardrobeScreen: React.FC<BuildWardrobeScreenProps> = ({
   const backgroundColor = backgrounds.primary[colorScheme];
   const secondaryTextColor = labels.tertiary[colorScheme];
   const errorColor = accents.red[colorScheme];
+  const cardBg = fills.tertiary[colorScheme];
+  const statusTextColor = labels.secondary[colorScheme];
+  const spinnerColor = labels.primary[colorScheme];
+  const cancelColor = accents.blue[colorScheme];
 
   const handleTakePhoto = () => {
     onTakePhoto?.();
@@ -63,8 +83,35 @@ export const BuildWardrobeScreen: React.FC<BuildWardrobeScreenProps> = ({
           </View>
         </View>
 
+        {/* mootd#163 — inline, non-blocking detection progress. Replaces the
+            old full-screen, uncancelable LoadingOverlay: the user sees staged
+            status text and can Cancel at any time to return to this step. */}
+        {isLoading && (
+          <View
+            style={[styles.statusCard, { backgroundColor: cardBg }]}
+            accessibilityRole="progressbar"
+            accessibilityLabel={detectionStatus ?? 'Detecting clothing'}>
+            <View style={styles.statusRow}>
+              <ActivityIndicator size="small" color={spinnerColor} />
+              <Text variant="subheadline" weight="semiBold" style={[styles.statusText, { color: statusTextColor }]}>
+                {detectionStatus ?? 'Detecting clothing…'}
+              </Text>
+            </View>
+            <Pressable
+              onPress={() => onCancelDetection?.()}
+              hitSlop={8}
+              testID="cancel-detection"
+              accessibilityRole="button"
+              accessibilityLabel="Cancel detection and go back">
+              <Text variant="footnote" weight="semiBold" style={{ color: cancelColor }}>
+                Cancel
+              </Text>
+            </Pressable>
+          </View>
+        )}
+
         {/* Error message */}
-        {error && (
+        {error && !isLoading && (
           <View style={styles.errorContainer}>
             <Text variant="footnote" style={[styles.errorText, { color: errorColor }]}>
               {error}
@@ -103,9 +150,6 @@ export const BuildWardrobeScreen: React.FC<BuildWardrobeScreenProps> = ({
           />
         </View>
       </View>
-
-      {/* Loading overlay */}
-      {isLoading && <LoadingOverlay message="Detecting clothing..." />}
     </SafeAreaView>
   );
 };
@@ -155,5 +199,26 @@ const styles = StyleSheet.create({
   },
   errorText: {
     textAlign: 'center',
+  },
+  // mootd#163 — inline detection progress card.
+  statusCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginHorizontal: 16,
+    marginBottom: spacing.sm,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.lg,
+    gap: spacing.md,
+  },
+  statusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    flexShrink: 1,
+  },
+  statusText: {
+    flexShrink: 1,
   },
 });
