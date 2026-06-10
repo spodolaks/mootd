@@ -8,6 +8,7 @@ import {
   moodBoardRepository,
   feedbackRepository,
 } from '@/src/data/repositories';
+import { ApiError } from '@/src/data/api/client';
 import type { Outfit, OutfitItem, SavedMoodBoard, WardrobeItem } from '@/src/domain';
 import { outfitToSnapshot, topArchetypeOf, weatherContextString } from '@/src/domain';
 import React, { useState, useCallback, useRef, useMemo } from 'react';
@@ -55,6 +56,24 @@ const POLL_DEADLINE_MS = 150_000;
 const POLL_BASE_INTERVAL_MS = 2_000;
 const POLL_MAX_INTERVAL_MS = 5_000;
 
+// #169 — the async-generation block falls back to the synchronous
+// (also paid) getOutfits path ONLY when the async endpoint genuinely
+// isn't available: a 404 (route missing on this backend build) or a
+// 503 / SERVICE_UNAVAILABLE-class ApiError (async subsystem down).
+// EVERY other failure — a polling timeout, a `failed` job's
+// result.error, an SSE `error` event, a 401/429/500, a network drop —
+// is a REAL error and must surface via the screen's Alert/Retry path
+// instead of silently kicking off a second ~60s paid generation that
+// hides the original error from the user.
+const isAsyncUnavailable = (err: unknown): boolean =>
+  err instanceof ApiError &&
+  (err.status === 404 || err.status === 503 || err.code === 'SERVICE_UNAVAILABLE');
+
+// Sentinel thrown to unwind the generate flow when the user taps
+// Cancel mid-generation. Caught and swallowed by handleGeneratePress so
+// cancellation never surfaces as a "Generation Failed" alert.
+const GENERATION_CANCELLED = Symbol('generation-cancelled');
+
 export const MoodBoardScreen: React.FC = () => {
   const colorScheme = useColorScheme() ?? 'light';
   const [screenState, setScreenState] = useState<ScreenState>('loading');
@@ -97,6 +116,15 @@ export const MoodBoardScreen: React.FC = () => {
   // the training pipeline can reconstruct the (batch → series-of-actions)
   // trajectory for this user.
   const [currentJobId, setCurrentJobId] = useState<string | undefined>(undefined);
+
+  // #169 — cancellation plumbing for the `generating` state. Each
+  // Generate press bumps generationRunId; an in-flight run captures its
+  // id and bails (no setState) the moment a newer run starts or the
+  // user cancels, so a late-resolving stream/poll/getOutfits can't
+  // stomp the screen or setState after the user has moved on. The poll
+  // loop also checks `cancelled` each tick so it doesn't dangle.
+  const generationRunId = useRef(0);
+  const cancelledRef = useRef(false);
 
   const { weather } = useWeather();
   const tabBottomPadding = useTabContentBottomPadding();
@@ -148,6 +176,14 @@ export const MoodBoardScreen: React.FC = () => {
   );
 
   const handleGeneratePress = async () => {
+    // #169 — start a fresh run: bump the id, clear any prior cancel,
+    // and capture this run's id so every continuation below can detect
+    // whether it's been superseded (newer press) or cancelled.
+    generationRunId.current += 1;
+    const runId = generationRunId.current;
+    cancelledRef.current = false;
+    const isStale = (): boolean => cancelledRef.current || generationRunId.current !== runId;
+
     setScreenState('generating');
     setProgressMessage(null);
     try {
@@ -176,6 +212,12 @@ export const MoodBoardScreen: React.FC = () => {
         if (wardrobeRepository.streamOutfitGeneration) {
           outfits = await wardrobeRepository.streamOutfitGeneration(
             progress => {
+              // Drop progress from a run the user cancelled or
+              // superseded so we don't flicker stale "Drafting…" copy
+              // over the next screen. The underlying fetch can't be
+              // aborted from here (the repo owns the reader), but its
+              // outfits are discarded by the isStale() guards below.
+              if (isStale()) return;
               if (progress.description) {
                 setProgressMessage(progress.description);
               }
@@ -189,11 +231,19 @@ export const MoodBoardScreen: React.FC = () => {
           const startedAt = Date.now();
           let interval = POLL_BASE_INTERVAL_MS;
           do {
+            // #169 — stop polling immediately on cancel/supersede so the
+            // interval never dangles past the user leaving this run.
+            if (isStale()) {
+              throw GENERATION_CANCELLED;
+            }
             if (Date.now() - startedAt > POLL_DEADLINE_MS) {
               throw new Error('Generation timed out. Please try again.');
             }
             await new Promise(resolve => setTimeout(resolve, interval));
             interval = Math.min(interval + 1_000, POLL_MAX_INTERVAL_MS);
+            if (isStale()) {
+              throw GENERATION_CANCELLED;
+            }
             result = await wardrobeRepository.pollOutfitJob(jobId);
           } while (result.status === 'pending' || result.status === 'processing');
           if (result.status === 'failed') {
@@ -201,17 +251,38 @@ export const MoodBoardScreen: React.FC = () => {
           }
           outfits = result.outfits ?? [];
         }
-      } catch {
-        // Async not available -- fall back to sync
+      } catch (asyncErr) {
+        // #169 — propagate a cancellation untouched; the outer catch
+        // swallows it so Cancel never shows a failure alert.
+        if (asyncErr === GENERATION_CANCELLED) throw asyncErr;
+        // If the user cancelled/superseded while the async call was in
+        // flight, don't kick off a (paid) sync fallback for a run they've
+        // already left — unwind as a cancellation instead.
+        if (isStale()) throw GENERATION_CANCELLED;
+        // Fall back to the synchronous (also paid) path ONLY when the
+        // async endpoint is genuinely unavailable (404 / 503 /
+        // SERVICE_UNAVAILABLE). A real failure — timeout, a `failed`
+        // job's error, an SSE `error` event, 401/429/500, a network
+        // drop — must NOT silently trigger a second generation; re-throw
+        // so the user sees the actual error via Alert/Retry below (#169).
+        if (!isAsyncUnavailable(asyncErr)) throw asyncErr;
         console.log('[MoodBoard] Async generation unavailable, falling back to sync');
         outfits = await wardrobeRepository.getOutfits(weatherParams);
       }
+
+      // The async/sync block above contains awaits; if the user
+      // cancelled or started a newer run while they were in flight, bail
+      // before touching any screen state (#169).
+      if (isStale()) return;
 
       // Also refresh wardrobe items for the collage. Full set
       // (paginated walk) so generated outfits referencing items
       // past page 1 still resolve to real images instead of
       // "Add top" placeholders.
       const items = await wardrobeRepository.getAllItems();
+
+      // getAllItems is also awaited — re-check before any setState (#169).
+      if (isStale()) return;
 
       if (outfits.length === 0) {
         Alert.alert('No outfits generated', 'Try adding more items to your wardrobe.');
@@ -236,6 +307,13 @@ export const MoodBoardScreen: React.FC = () => {
       setActiveIndex(0);
       setScreenState('choosing');
     } catch (e) {
+      // #169 — a user-initiated Cancel unwinds via GENERATION_CANCELLED.
+      // handleCancelGeneration already reset screenState, so swallow it
+      // silently rather than showing a "Generation Failed" alert.
+      if (e === GENERATION_CANCELLED) return;
+      // Defensive: if a newer run / cancel landed, don't surface this
+      // (now stale) error over whatever the current run is showing.
+      if (isStale()) return;
       Alert.alert(
         'Generation Failed',
         e instanceof Error ? e.message : 'Failed to generate outfits.',
@@ -255,6 +333,20 @@ export const MoodBoardScreen: React.FC = () => {
       );
     }
   };
+
+  // #169 — Cancel the in-flight generation from the `generating` state.
+  // Bumping the run id + setting cancelledRef makes every continuation in
+  // handleGeneratePress bail without setState (and breaks the poll loop on
+  // its next tick), so there's no dangling poll and no setState-after the
+  // user has left this run. We can't abort the underlying fetch/stream
+  // (the repository owns it and takes no AbortSignal), but its result is
+  // discarded by the isStale() guards. Return to the prior screen.
+  const handleCancelGeneration = useCallback(() => {
+    cancelledRef.current = true;
+    generationRunId.current += 1;
+    setProgressMessage(null);
+    setScreenState(todayBoard ? 'saved' : 'empty');
+  }, [todayBoard]);
 
   const handleSelectOutfit = useCallback(
     async (outfit: Outfit) => {
@@ -602,6 +694,18 @@ export const MoodBoardScreen: React.FC = () => {
                   the backend reports no progress (older builds). */}
               {progressMessage ?? 'Generating outfits...'}
             </Text>
+            {/* #169 — let the user back out of a long generation instead
+                of being stuck on a spinner. Stops the in-flight
+                generation/poll and returns to the prior screen. */}
+            <Pressable
+              style={[styles.cancelGenerating, { borderColor: labels.tertiary[colorScheme] }]}
+              onPress={handleCancelGeneration}
+              accessibilityRole="button"
+              accessibilityLabel="Cancel outfit generation"
+              accessibilityHint="Stops generating and returns to the previous screen"
+              testID="moodboard-cancel-generating">
+              <Text style={[styles.cancelGeneratingLabel, { color: textColor }]}>Cancel</Text>
+            </Pressable>
           </View>
         );
 
@@ -837,6 +941,19 @@ const styles = StyleSheet.create({
   generatingText: {
     ...typography.subheadline.regular,
     textAlign: 'center',
+  },
+  // #169 — outline Cancel affordance shown beneath the generating
+  // spinner. Mirrors the secondary (outline) action used by the filler
+  // sheet so it reads as a low-emphasis escape hatch, not a CTA.
+  cancelGenerating: {
+    paddingVertical: 10,
+    paddingHorizontal: 28,
+    borderWidth: 1,
+    borderRadius: radius.md,
+    alignItems: 'center',
+  },
+  cancelGeneratingLabel: {
+    ...typography.body.semiBold,
   },
 
   // Choosing
