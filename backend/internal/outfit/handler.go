@@ -282,6 +282,22 @@ func (h *Handler) handleSSEStream(w http.ResponseWriter, r *http.Request, userID
 		response.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "streaming unavailable"})
 		return
 	}
+
+	// Bound concurrent expensive generations (#109). The SSE path runs
+	// the LLM call synchronously inside this request, so it must take a
+	// slot too — otherwise N streaming clients fan out N uncapped paid
+	// generations while OUTFIT_MAX_CONCURRENT only bounds the JSON path.
+	// Acquire before writing the 200 + SSE headers so a rejected request
+	// can still return a 503 (mirrors the JSON path); release exactly
+	// once when the synchronous generation below returns (success, error,
+	// or client disconnect), via defer.
+	if !h.acquireGenSlot() {
+		w.Header().Set("Retry-After", "10")
+		response.WriteJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "server busy generating outfits, please retry shortly"})
+		return
+	}
+	defer h.releaseGenSlot()
+
 	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
