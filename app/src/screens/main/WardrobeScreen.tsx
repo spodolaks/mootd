@@ -310,7 +310,11 @@ export const WardrobeScreen: React.FC = () => {
         `Detected ${steps.length} item${steps.length === 1 ? '' : 's'} — tap to review`,
         'success'
       );
-      initializeFlow(steps);
+      // mootd#161 — this is an in-app add from the Wardrobe tab, not
+      // onboarding. Mark the origin so trait-selection's Done handler skips
+      // the onboarding tail (permissions pitch + fake "Generating" screen)
+      // and returns the user straight to their wardrobe.
+      initializeFlow(steps, 'add');
       dismissJob(completed.id);
       router.push('/detected-item');
       return;

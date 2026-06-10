@@ -15,6 +15,7 @@ export {
   type Trait,
   type DetectionStep,
   type DetectedItemOption,
+  type FlowOrigin,
 } from './wardrobeStore';
 export {
   useDetectionJobStore,

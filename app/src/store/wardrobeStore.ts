@@ -31,6 +31,12 @@ export interface DetectionStep {
   similarItems: DetectedItemOption[];
 }
 
+// Where the detection → review wizard was started from. Onboarding (the
+// build-wardrobe screen) finishes with the "get notified" permissions pitch
+// and a completion screen; an in-app add from the Wardrobe tab should skip
+// that onboarding tail and drop straight back into the wardrobe (mootd#161).
+export type FlowOrigin = 'onboarding' | 'add';
+
 interface WardrobeState {
   // Detection flow configuration
   detectionSteps: DetectionStep[];
@@ -38,9 +44,11 @@ interface WardrobeState {
   currentStepIndex: number;
   // Items stored by step index - persists when navigating back/forth
   items: Record<number, WardrobeItem>;
+  // Where this wizard run was started (drives the Done-handler branch).
+  flowOrigin: FlowOrigin;
 
   // Actions
-  initializeFlow: (steps: DetectionStep[]) => void;
+  initializeFlow: (steps: DetectionStep[], origin?: FlowOrigin) => void;
   setItemForStep: (stepIndex: number, item: WardrobeItem) => void;
   setTraitValue: (traitId: string, value: string) => void;
   nextStep: () => void;
@@ -243,12 +251,16 @@ export const useWardrobeStore = create<WardrobeState>((set, get) => ({
   detectionSteps: [],
   currentStepIndex: 0,
   items: {},
+  // Default to 'onboarding' so any caller that doesn't specify keeps the
+  // historical (full onboarding tail) behavior.
+  flowOrigin: 'onboarding',
 
-  initializeFlow: steps =>
+  initializeFlow: (steps, origin = 'onboarding') =>
     set({
       detectionSteps: steps,
       currentStepIndex: 0,
       items: {},
+      flowOrigin: origin,
     }),
 
   setItemForStep: (stepIndex, item) =>
@@ -319,5 +331,6 @@ export const useWardrobeStore = create<WardrobeState>((set, get) => ({
       detectionSteps: [],
       currentStepIndex: 0,
       items: {},
+      flowOrigin: 'onboarding',
     }),
 }));
