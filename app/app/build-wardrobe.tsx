@@ -55,7 +55,9 @@ export default function BuildWardrobe() {
           setError('No clothing items were detected. Try a different photo.');
           return;
         }
-        initializeFlow(steps);
+        // mootd#161 — mark this as the onboarding flow so trait-selection's
+        // Done handler keeps the permissions pitch + completion screen.
+        initializeFlow(steps, 'onboarding');
         router.push('/detected-item');
       } catch (e) {
         const message = e instanceof Error ? e.message : 'Something went wrong during detection.';
