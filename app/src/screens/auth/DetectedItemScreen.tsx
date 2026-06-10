@@ -78,6 +78,10 @@ export const DetectedItemScreen: React.FC<DetectedItemScreenProps> = ({
   const [brand, setBrand] = useState('');
   const [searchProducts, setSearchProducts] = useState<ClothingSearchProduct[] | null>(null);
   const [isSearching, setIsSearching] = useState(false);
+  // Distinguishes a failed search (network/error) from a successful search
+  // that returned zero results. Without this the catch coerced errors into
+  // an empty array, silently showing "no results" for a real failure.
+  const [searchError, setSearchError] = useState(false);
   const [selectedProductId, setSelectedProductId] = useState<string | null>(null);
 
   const totalItems = steps.length;
@@ -102,6 +106,7 @@ export const DetectedItemScreen: React.FC<DetectedItemScreenProps> = ({
     } else {
       setCurrentStep(prev => prev - 1);
       setSearchProducts(null);
+      setSearchError(false);
       setSelectedProductId(null);
       setBrand('');
     }
@@ -121,6 +126,7 @@ export const DetectedItemScreen: React.FC<DetectedItemScreenProps> = ({
     } else {
       setCurrentStep(prev => prev + 1);
       setSearchProducts(null);
+      setSearchError(false);
       setSelectedProductId(null);
       setBrand('');
     }
@@ -155,11 +161,15 @@ export const DetectedItemScreen: React.FC<DetectedItemScreenProps> = ({
 
     setIsSearching(true);
     setSearchProducts(null);
+    setSearchError(false);
     try {
       const results = await onBrandSearch(itemId, trimmed);
       setSearchProducts(results);
     } catch {
-      setSearchProducts([]);
+      // Keep the error distinct from a zero-result success so the UI can show
+      // "Search failed — try again." instead of silently rendering nothing.
+      setSearchProducts(null);
+      setSearchError(true);
     } finally {
       setIsSearching(false);
     }
@@ -192,7 +202,10 @@ export const DetectedItemScreen: React.FC<DetectedItemScreenProps> = ({
           value={brand}
           onChangeText={text => {
             setBrand(text);
-            if (!text.trim()) setSearchProducts(null);
+            if (!text.trim()) {
+              setSearchProducts(null);
+              setSearchError(false);
+            }
           }}
           onBlur={() => {
             void handleBrandSearch();
@@ -218,15 +231,17 @@ export const DetectedItemScreen: React.FC<DetectedItemScreenProps> = ({
             </Text>
           </View>
 
-          {/* Search results label */}
-          {(isSearching || (searchProducts !== null && searchProducts.length > 0)) && (
+          {/* Search status label: searching / error / result count (incl. zero) */}
+          {(isSearching || searchError || searchProducts !== null) && (
             <Text
               variant="subheadline"
               weight="semiBold"
               style={[styles.searchResultsLabel, { color: secondaryTextColor }]}>
               {isSearching
                 ? 'Searching…'
-                : `${searchProducts!.length} result${searchProducts!.length !== 1 ? 's' : ''} for "${brand.trim()}"`}
+                : searchError
+                  ? 'Search failed — try again.'
+                  : `${searchProducts!.length} result${searchProducts!.length !== 1 ? 's' : ''} for "${brand.trim()}"`}
             </Text>
           )}
 

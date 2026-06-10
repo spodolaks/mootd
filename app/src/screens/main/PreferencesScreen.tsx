@@ -15,6 +15,7 @@ import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
+import * as WebBrowser from 'expo-web-browser';
 
 import { Icon, SegmentedControl, SettingsRow, SettingsSection } from '@/src/components';
 import { apiClient } from '@/src/data/api/client';
@@ -23,6 +24,14 @@ import { usePreferencesStore } from '@/src/store/preferencesStore';
 import { useAuthStore } from '@/src/store';
 import { accents, backgrounds, grays, labels, separators } from '@/src/theme/colors';
 import { typography } from '@/src/theme/typography';
+
+// ─── Legal links ─────────────────────────────────────────────────────────────
+// Public legal documents opened in an in-app browser (expo-web-browser).
+// No production domain is configured in app.json yet, so these are
+// placeholders under the project slug — swap for the real URLs once the
+// marketing site is live.
+const PRIVACY_POLICY_URL = 'https://mootd.app/legal/privacy';
+const TERMS_OF_SERVICE_URL = 'https://mootd.app/legal/terms';
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
@@ -79,9 +88,17 @@ export const PreferencesScreen: React.FC = () => {
   const danger = accents.red[colorScheme];
 
   // ─── Handlers ──────────────────────────────────────────────────────────────
+  // Display name — optimistic local update + best-effort backend sync,
+  // mirroring the creativity / gender syncs below. The backend stores the
+  // display name on the user document's `name` field (PUT /v1/user/profile
+  // → UpdateProfileRequest.Name); a network failure logs and the next save
+  // retries.
   const handleSaveName = useCallback(() => {
-    prefs.setDisplayName(draftName.trim());
-    // TODO: PUT /v1/user/profile on backend
+    const trimmed = draftName.trim();
+    prefs.setDisplayName(trimmed);
+    void apiClient.put('/v1/user/profile', { name: trimmed }).catch((err: unknown) => {
+      console.warn('[Preferences] display name sync failed:', err);
+    });
   }, [draftName, prefs]);
 
   // mootd#67 — creativity slider. Five-step segmented control
@@ -106,6 +123,16 @@ export const PreferencesScreen: React.FC = () => {
     setGender(value);
     void apiClient.put('/v1/user/profile', { gender: value }).catch((err: unknown) => {
       console.warn('[Preferences] gender sync failed:', err);
+    });
+  }, []);
+
+  // Open a legal document in the in-app browser. expo-web-browser keeps the
+  // user inside the app (vs Linking.openURL kicking out to Safari/Chrome);
+  // a failure (e.g. unavailable on an odd platform) is swallowed so a dead
+  // tap is no worse than the previous no-op.
+  const openLegalUrl = useCallback((url: string) => {
+    void WebBrowser.openBrowserAsync(url).catch((err: unknown) => {
+      console.warn('[Preferences] failed to open legal URL:', err);
     });
   }, []);
 
@@ -323,9 +350,7 @@ export const PreferencesScreen: React.FC = () => {
             mode="navigation"
             icon="privacy"
             label="Privacy Policy"
-            onPress={() => {
-              /* TODO: open URL */
-            }}
+            onPress={() => openLegalUrl(PRIVACY_POLICY_URL)}
             textColor={text}
             chevronColor={tertiary}
             dividerColor={divider}
@@ -335,9 +360,7 @@ export const PreferencesScreen: React.FC = () => {
             mode="navigation"
             icon="file"
             label="Terms of Service"
-            onPress={() => {
-              /* TODO: open URL */
-            }}
+            onPress={() => openLegalUrl(TERMS_OF_SERVICE_URL)}
             textColor={text}
             chevronColor={tertiary}
             dividerColor={divider}
