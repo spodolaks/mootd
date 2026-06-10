@@ -62,6 +62,17 @@ func EnsureIndexes(ctx context.Context, client *mongo.Client, dbName string, log
 				Options: options.Index().SetUnique(true),
 			},
 		},
+		// Refresh-token lookups (POST /v1/auth/refresh, logout) filter users by
+		// refreshTokenHash; without this index every refresh is a COLLSCAN.
+		// Sparse so it only covers logged-in users — logged-out users have the
+		// field $unset, so they stay out of the index.
+		{
+			collection: "users",
+			model: mongo.IndexModel{
+				Keys:    bson.D{{Key: "refreshTokenHash", Value: 1}},
+				Options: options.Index().SetSparse(true),
+			},
+		},
 		// Generic items pool
 		{
 			collection: "generic_items",
