@@ -1,7 +1,7 @@
 import { Icon, Text } from '@/src/components';
 import { useColorScheme } from '@/src/hooks';
 import { backgrounds, button, fills, grays, labels } from '@/src/theme/colors';
-import { typography } from '@/src/theme/typography';
+import { typography, fontFamilies } from '@/src/theme/typography';
 import { spacing } from '@/src/theme/spacing';
 import { radius } from '@/src/theme/radius';
 import React, { useState, useCallback, useMemo } from 'react';
@@ -221,9 +221,9 @@ export const CalendarScreen: React.FC = () => {
               textDisabledColor: tertiaryText,
               monthTextColor: textColor,
               arrowColor: textColor,
-              textMonthFontFamily: 'MontserratAlternates-SemiBold',
-              textDayHeaderFontFamily: 'MontserratAlternates-Regular',
-              textDayFontFamily: 'MontserratAlternates-Regular',
+              textMonthFontFamily: fontFamilies.montserrat.semiBold,
+              textDayHeaderFontFamily: fontFamilies.montserrat.regular,
+              textDayFontFamily: fontFamilies.montserrat.regular,
               textDayFontSize: 17,
               textMonthFontSize: 17,
               textDayHeaderFontSize: 13,
