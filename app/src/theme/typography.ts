@@ -1,10 +1,14 @@
 import { TextStyle } from 'react-native';
 
-// Font families from Figma
+// Brand typeface: standard Montserrat (the geometric sans), loaded via
+// @expo-google-fonts/montserrat in app/_layout.tsx. Replaces the prior
+// Montserrat Alternates variant, whose decorative letterforms were
+// off-brand. The family-name keys below must match the names registered
+// with useFonts().
 export const fontFamilies = {
   montserrat: {
-    regular: 'MontserratAlternates-Regular',
-    semiBold: 'MontserratAlternates-SemiBold',
+    regular: 'Montserrat-Regular',
+    semiBold: 'Montserrat-SemiBold',
   },
 } as const;
 

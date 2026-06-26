@@ -1,5 +1,6 @@
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { useFonts } from 'expo-font';
+import { Montserrat_400Regular, Montserrat_600SemiBold } from '@expo-google-fonts/montserrat';
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
@@ -269,17 +270,16 @@ export default function RootLayout() {
   const restoreSession = useAuthStore(state => state.restoreSession);
   const sessionRestored = useAuthStore(state => state.sessionRestored);
 
-  // On web the TTF files are mobile-specific binaries that Chrome's OTS font
-  // sanitizer rejects. Skip loading them on web and fall back to the system
-  // sans-serif stack so the app is still fully functional for web testing.
-  const [fontsLoaded] = useFonts(
-    Platform.OS === 'web'
-      ? {}
-      : {
-          'MontserratAlternates-Regular': require('../assets/fonts/MontserratAlternates-Regular.ttf'),
-          'MontserratAlternates-SemiBold': require('../assets/fonts/MontserratAlternates-SemiBold.ttf'),
-        }
-  );
+  // Brand typeface: standard Montserrat (issue: typography off-brand —
+  // align with brand direction). Sourced from @expo-google-fonts/montserrat
+  // so we get OTS-clean static 400/600 TTFs that load on web as well as
+  // native — unlike the prior locally-bundled Montserrat Alternates files,
+  // which Chrome's font sanitizer rejected (so the web demo fell back to the
+  // system sans and never showed the brand font).
+  const [fontsLoaded] = useFonts({
+    'Montserrat-Regular': Montserrat_400Regular,
+    'Montserrat-SemiBold': Montserrat_600SemiBold,
+  });
 
   useEffect(() => {
     void restoreSession();
