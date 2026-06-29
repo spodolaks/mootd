@@ -92,6 +92,16 @@ func TestGateByArchetypeFit_ZeroProfileReturnsUnchanged(t *testing.T) {
 	}
 }
 
+// With no profile signal there's nothing to gate against, so the batch is
+// returned unchanged (cold-start safety).
+func TestGateByArchetypeFit_EmptyProfileReturnsUnchanged(t *testing.T) {
+	outfits := []Outfit{
+		mkOutfit("a", map[string]float64{"ruler": 0.9}),
+		mkOutfit("b", map[string]float64{"rebel": 0.8}),
+	}
+
+	got := gateByArchetypeFit(outfits, archetype.Scores{})
+
 	if len(got) != len(outfits) {
 		t.Fatalf("empty profile should not gate: got %d, want %d", len(got), len(outfits))
 	}
