@@ -72,15 +72,25 @@ func TestGateByArchetypeFit_FloorTopsUpWithBestOfRest(t *testing.T) {
 	}
 }
 
-// With no profile signal there's nothing to gate against, so the batch is
-// returned unchanged (cold-start safety).
-func TestGateByArchetypeFit_EmptyProfileReturnsUnchanged(t *testing.T) {
+// With a non-empty but all-zero profile (no scoring signal), gating should be a no-op.
+func TestGateByArchetypeFit_ZeroProfileReturnsUnchanged(t *testing.T) {
 	outfits := []Outfit{
 		mkOutfit("a", map[string]float64{"ruler": 0.9}),
 		mkOutfit("b", map[string]float64{"rebel": 0.8}),
 	}
 
-	got := gateByArchetypeFit(outfits, archetype.Scores{})
+	profile := archetype.Scores{"ruler": 0.0, "rebel": 0.0}
+	got := gateByArchetypeFit(outfits, profile)
+
+	if len(got) != len(outfits) {
+		t.Fatalf("zero-signal profile should not gate: got %d, want %d", len(got), len(outfits))
+	}
+	for i := range outfits {
+		if got[i].Name != outfits[i].Name {
+			t.Fatalf("zero-signal profile should preserve order: got[%d]=%q, want %q", i, got[i].Name, outfits[i].Name)
+		}
+	}
+}
 
 	if len(got) != len(outfits) {
 		t.Fatalf("empty profile should not gate: got %d, want %d", len(got), len(outfits))
