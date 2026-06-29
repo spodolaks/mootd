@@ -108,6 +108,15 @@ export const WardrobeScreen: React.FC = () => {
   const consumeFailed = useDetectionJobStore(s => s.consumeFailed);
   const dismissJob = useDetectionJobStore(s => s.dismissJob);
   const showToast = useUIStore(s => s.showToast);
+
+  // mootd#212 — detection runs in the background (processImage → startJob), so
+  // the user keeps browsing while it works. These derive the in-progress jobs
+  // that drive the non-blocking banner below. Jobs are prepended, so [0] is the
+  // newest; we surface its live statusText and a count when more than one runs.
+  const activeDetectionJobs = jobs.filter(j => j.status === 'detecting');
+  const activeDetectionJob = activeDetectionJobs[0] ?? null;
+  const activeDetectionCount = activeDetectionJobs.length;
+
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [isAddModalVisible, setIsAddModalVisible] = useState(false);
@@ -538,6 +547,24 @@ export const WardrobeScreen: React.FC = () => {
         {categories.map(renderCategoryChip)}
       </ScrollView>
 
+      {/* mootd#212 — non-blocking detection banner. Surfaces the job store's
+          live statusText so there's a persistent signal after image select
+          while detection runs in the background. The user can still scroll and
+          use the screen; it clears automatically once the job is consumed
+          (completed/failed) by the effect above. */}
+      {activeDetectionJob && (
+        <View
+          style={[styles.detectionBanner, { backgroundColor: searchBgColor }]}
+          accessibilityLiveRegion="polite"
+          testID="wardrobe-detection-banner">
+          <ActivityIndicator size="small" color={textColor} />
+          <Text style={[styles.detectionBannerText, { color: textColor }]} numberOfLines={1}>
+            {activeDetectionJob.statusText}
+            {activeDetectionCount > 1 ? `  (${activeDetectionCount})` : ''}
+          </Text>
+        </View>
+      )}
+
       {/* Clothing Grid — F4 virtualisation tuning for large wardrobes. */}
       <FlatList
         data={filteredItems}
@@ -712,6 +739,23 @@ const styles = StyleSheet.create({
   loadingMoreContainer: {
     paddingVertical: 16,
     alignItems: 'center',
+  },
+  // mootd#212 — non-blocking detection progress banner. Sits between the
+  // category filter and the grid; matches the search bar's radius/inset so it
+  // reads as part of the same header stack.
+  detectionBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginHorizontal: 16,
+    marginBottom: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 16,
+  },
+  detectionBannerText: {
+    flex: 1,
+    ...typography.subheadline.regular,
   },
   centeredState: {
     flex: 1,
