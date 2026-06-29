@@ -1052,6 +1052,18 @@ func gateByArchetypeFit(outfits []Outfit, profile archetype.Scores) []Outfit {
 		return outfits
 	}
 
+	// Stabilize tie ordering and treat an all-zero profile as "no signal" to avoid
+	// non-deterministic gating on cold/low-signal profiles.
+	sort.SliceStable(userTop, func(i, j int) bool {
+		if userTop[i].Score == userTop[j].Score {
+			return userTop[i].Name < userTop[j].Name
+		}
+		return userTop[i].Score > userTop[j].Score
+	})
+	if userTop[0].Score <= 0 {
+		return outfits
+	}
+
 	onBrand := make(map[string]bool, len(userTop))
 	for _, a := range userTop {
 		onBrand[a.Name] = true
