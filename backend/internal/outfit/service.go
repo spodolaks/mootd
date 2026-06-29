@@ -1017,8 +1017,78 @@ func (s *Service) ValidateOutfits(outfits []Outfit, items []wardrobe.ClothingIte
 		filtered = append(filtered, o)
 	}
 
-	_ = profileScores // reserved for future ranking against the user profile
-	return filtered
+	// mootd#214 — gate the validated batch by the user's detected archetype:
+	// surface on-archetype looks first and drop clearly off-archetype ones,
+	// while keeping a floor so the moodboard is never left empty.
+	return gateByArchetypeFit(filtered, profileScores)
+}
+
+// Archetype gating knobs (mootd#214).
+const (
+	// archetypeGateTopK — how many of the user's strongest archetypes count
+	// as "on-brand". An outfit whose dominant archetype falls in this set is
+	// treated as aligned.
+	archetypeGateTopK = 3
+	// archetypeGateFloor — the minimum number of outfits gateByArchetypeFit
+	// will return when that many exist. If too few are on-archetype we top up
+	// with the best of the rest rather than ship a sparse/empty moodboard;
+	// the caller's deterministic fallback backstops the remainder.
+	archetypeGateFloor = 3
+)
+
+// gateByArchetypeFit ranks validated outfits by how well they align with the
+// user's detected archetype profile and drops the off-archetype ones — the
+// "hybrid" gate from mootd#214 (rank + bounded filter). An outfit is on-brand
+// when its dominant archetype is among the user's top archetypes; aligned
+// outfits are returned best-first. To avoid an empty/sparse result when a batch
+// skews off-archetype, it always returns at least archetypeGateFloor outfits
+// (when that many exist) by topping up with the best of the rest.
+//
+// With an empty profile (cold start, no scoring signal) there's nothing to gate
+// against, so the batch is returned unchanged.
+func gateByArchetypeFit(outfits []Outfit, profile archetype.Scores) []Outfit {
+	userTop := archetype.TopN(profile, archetypeGateTopK)
+	if len(outfits) == 0 || len(userTop) == 0 {
+		return outfits
+	}
+
+	onBrand := make(map[string]bool, len(userTop))
+	for _, a := range userTop {
+		onBrand[a.Name] = true
+	}
+
+	// Weighted alignment against the user's top archetypes — same shape as
+	// fallback.go's rankByArchetype so ordering stays consistent across paths.
+	alignment := func(o Outfit) float64 {
+		var total float64
+		for _, a := range userTop {
+			total += o.ArchetypeScores[a.Name] * a.Score
+		}
+		return total
+	}
+
+	aligned := make([]Outfit, 0, len(outfits))
+	rest := make([]Outfit, 0, len(outfits))
+	for _, o := range outfits {
+		dominant := ""
+		if top := archetype.TopN(o.ArchetypeScores, 1); len(top) > 0 {
+			dominant = top[0].Name
+		}
+		if onBrand[dominant] {
+			aligned = append(aligned, o)
+		} else {
+			rest = append(rest, o)
+		}
+	}
+
+	sort.SliceStable(aligned, func(i, j int) bool { return alignment(aligned[i]) > alignment(aligned[j]) })
+	sort.SliceStable(rest, func(i, j int) bool { return alignment(rest[i]) > alignment(rest[j]) })
+
+	gated := aligned
+	for i := 0; len(gated) < archetypeGateFloor && i < len(rest); i++ {
+		gated = append(gated, rest[i])
+	}
+	return gated
 }
 
 // itemsToTraits converts wardrobe items to archetype scoring input.
