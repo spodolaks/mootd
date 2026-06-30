@@ -14,6 +14,7 @@ import {
   View,
 } from 'react-native';
 import { Skeleton } from '@/src/components/ui';
+import { Collage } from '@/src/components/moodboard/Collage';
 import { Image } from 'expo-image';
 import { Calendar, DateData } from 'react-native-calendars';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -253,78 +254,85 @@ export const CalendarScreen: React.FC = () => {
               {selectedBoard.outfit.description}
             </Text>
 
-            {/* Rendered moodboard hero — present only on saves made after the
-                client-side capture feature shipped. Older rows fall through
-                to the item-thumbnail row below, unchanged. */}
+            {/* mootd#216 — render the full composed moodboard for every entry.
+                Built live from the saved outfit + wardrobe item map (same as
+                SavedBoardView), so the visual shows even on legacy rows that
+                predate the captured-PNG feature or where capture failed. */}
+            <View style={styles.collageHero}>
+              <Collage
+                itemIds={selectedBoard.outfit.items}
+                itemMap={itemMap}
+                snapshots={selectedBoard.outfit.snapshots}
+                layoutRoles={selectedBoard.outfit.layoutRoles}
+                visualWeights={selectedBoard.outfit.visualWeights}
+                colorScheme={colorScheme}
+                panelUrl={selectedBoard.outfit.panelUrl}
+                backgroundUrl={selectedBoard.outfit.backgroundUrl}
+                archetypeScores={selectedBoard.outfit.archetypeScores}
+                palette={selectedBoard.outfit.palette}
+              />
+            </View>
+
+            {/* Share row — surfaces only when a captured PNG exists to share.
+                Sharing downloads the saved render; the live collage above is
+                shown regardless. */}
             {selectedBoard.imageUrl ? (
-              <>
-                <Image
-                  source={{ uri: toAbsoluteUrl(selectedBoard.imageUrl) }}
-                  style={styles.heroImage}
-                  contentFit="cover"
-                  cachePolicy="memory-disk"
-                  accessibilityLabel="Saved moodboard collage"
-                />
-                {/* Share row — surfaces only when we actually have a render
-                    to share. Legacy rows without a collage image keep the
-                    existing thumbnail-only layout. */}
-                <View style={styles.shareRow}>
-                  <Text variant="footnote" style={{ color: tertiaryText }}>
-                    Share
-                  </Text>
-                  {/* #24 — while a share is in-flight (sharingTo set),
-                      disable BOTH buttons so a double-tap on Instagram
-                      web doesn't trigger two downloads. Active button
-                      shows a spinner in place of the icon so the user
-                      has unambiguous feedback. */}
-                  <Pressable
-                    onPress={() => {
-                      void handleShare('instagram');
-                    }}
-                    disabled={sharingTo !== null}
-                    style={[
-                      styles.shareBtn,
-                      { backgroundColor: fills.tertiary[colorScheme] },
-                      sharingTo !== null && { opacity: 0.5 },
-                    ]}
-                    hitSlop={8}
-                    accessibilityRole="button"
-                    accessibilityLabel="Share to Instagram"
-                    accessibilityState={{
-                      disabled: sharingTo !== null,
-                      busy: sharingTo === 'instagram',
-                    }}>
-                    {sharingTo === 'instagram' ? (
-                      <ActivityIndicator size="small" color={textColor} />
-                    ) : (
-                      <Icon name="instagram" size={20} color={textColor} />
-                    )}
-                  </Pressable>
-                  <Pressable
-                    onPress={() => {
-                      void handleShare('facebook');
-                    }}
-                    disabled={sharingTo !== null}
-                    style={[
-                      styles.shareBtn,
-                      { backgroundColor: fills.tertiary[colorScheme] },
-                      sharingTo !== null && { opacity: 0.5 },
-                    ]}
-                    hitSlop={8}
-                    accessibilityRole="button"
-                    accessibilityLabel="Share to Facebook"
-                    accessibilityState={{
-                      disabled: sharingTo !== null,
-                      busy: sharingTo === 'facebook',
-                    }}>
-                    {sharingTo === 'facebook' ? (
-                      <ActivityIndicator size="small" color={textColor} />
-                    ) : (
-                      <Icon name="facebook" size={20} color={textColor} />
-                    )}
-                  </Pressable>
-                </View>
-              </>
+              <View style={styles.shareRow}>
+                <Text variant="footnote" style={{ color: tertiaryText }}>
+                  Share
+                </Text>
+                {/* #24 — while a share is in-flight (sharingTo set),
+                    disable BOTH buttons so a double-tap on Instagram
+                    web doesn't trigger two downloads. Active button
+                    shows a spinner in place of the icon so the user
+                    has unambiguous feedback. */}
+                <Pressable
+                  onPress={() => {
+                    void handleShare('instagram');
+                  }}
+                  disabled={sharingTo !== null}
+                  style={[
+                    styles.shareBtn,
+                    { backgroundColor: fills.tertiary[colorScheme] },
+                    sharingTo !== null && { opacity: 0.5 },
+                  ]}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel="Share to Instagram"
+                  accessibilityState={{
+                    disabled: sharingTo !== null,
+                    busy: sharingTo === 'instagram',
+                  }}>
+                  {sharingTo === 'instagram' ? (
+                    <ActivityIndicator size="small" color={textColor} />
+                  ) : (
+                    <Icon name="instagram" size={20} color={textColor} />
+                  )}
+                </Pressable>
+                <Pressable
+                  onPress={() => {
+                    void handleShare('facebook');
+                  }}
+                  disabled={sharingTo !== null}
+                  style={[
+                    styles.shareBtn,
+                    { backgroundColor: fills.tertiary[colorScheme] },
+                    sharingTo !== null && { opacity: 0.5 },
+                  ]}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel="Share to Facebook"
+                  accessibilityState={{
+                    disabled: sharingTo !== null,
+                    busy: sharingTo === 'facebook',
+                  }}>
+                  {sharingTo === 'facebook' ? (
+                    <ActivityIndicator size="small" color={textColor} />
+                  ) : (
+                    <Icon name="facebook" size={20} color={textColor} />
+                  )}
+                </Pressable>
+              </View>
             ) : null}
 
             {/* Item thumbnails */}
@@ -454,11 +462,10 @@ const styles = StyleSheet.create({
   outfitDescription: {
     lineHeight: 20,
   },
-  heroImage: {
-    width: '100%',
-    aspectRatio: 1,
-    borderRadius: radius.lg,
+  collageHero: {
     marginTop: spacing.sm,
+    borderRadius: radius.lg,
+    overflow: 'hidden',
   },
   shareRow: {
     flexDirection: 'row',
