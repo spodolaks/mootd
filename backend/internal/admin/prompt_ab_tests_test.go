@@ -39,11 +39,16 @@ func TestUserBucketPct_RangeAllValid(t *testing.T) {
 	}
 }
 
-func TestUserBucketPct_EmptyUserAlwaysProduction(t *testing.T) {
-	// Anonymous calls bucket 0 → IsCandidateUser returns
-	// false for any non-zero trafficPct.
-	if UserBucketPct("", "x") != 0 {
-		t.Error("empty user should bucket 0")
+func TestIsCandidateUser_EmptyUserAlwaysProduction(t *testing.T) {
+	// The guarantee that matters is the routing DECISION, not the
+	// bucket value: bucket 0 is still < every valid TrafficPct, so a
+	// bucket-only assertion passed while anonymous/eval traffic was
+	// routed to the candidate arm 100% of the time (#156).
+	for _, pct := range []int{1, 50, 99} {
+		test := &ABTest{TemplateName: "x", TrafficPct: pct, Status: ABTestActive}
+		if IsCandidateUser("", test) {
+			t.Errorf("trafficPct=%d: empty userID routed to candidate; anonymous/system/eval calls must always serve production", pct)
+		}
 	}
 }
 

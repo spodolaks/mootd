@@ -451,8 +451,13 @@ func (h *Handler) getUserDetail(w http.ResponseWriter, r *http.Request, id strin
 		return
 	}
 
-	// PII redaction hook — same pattern as ListUsers; phase-0 every
-	// admin has full PII so nothing redacted yet.
+	// PII redaction (#140/#149): same rule as ListUsers — the detail
+	// endpoint must not hand out the email the list endpoint just
+	// redacted. Without users:pii the caller still gets the activity
+	// + spend series for debugging, just not the address.
+	if !HasPermissionFromContext(r, PermUsersPII) {
+		detail.Summary.Email = redactedEmail
+	}
 
 	response.WriteJSON(w, http.StatusOK, detail)
 }
@@ -464,6 +469,18 @@ func (h *Handler) getUserDetail(w http.ResponseWriter, r *http.Request, id strin
 func (h *Handler) getUserWardrobe(w http.ResponseWriter, r *http.Request, id string) {
 	if id == "" {
 		response.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "missing user id"})
+		return
+	}
+
+	// Wardrobe contents are the user's clothing photos + labels — PII
+	// under the RBAC model (#149). users:read keeps the counts on the
+	// detail endpoint; browsing the actual items requires users:pii,
+	// the same gate the reveal-and-audit flow keys off.
+	if !HasPermissionFromContext(r, PermUsersPII) {
+		response.WriteJSON(w, http.StatusForbidden, map[string]any{
+			"error":             "permission denied",
+			"missingPermission": PermUsersPII,
+		})
 		return
 	}
 
@@ -500,6 +517,16 @@ func (h *Handler) getUserMoodboards(w http.ResponseWriter, r *http.Request, id s
 		return
 	}
 
+	// Moodboards embed the user's outfit content + imagery — PII,
+	// same gate as wardrobe browsing (#149).
+	if !HasPermissionFromContext(r, PermUsersPII) {
+		response.WriteJSON(w, http.StatusForbidden, map[string]any{
+			"error":             "permission denied",
+			"missingPermission": PermUsersPII,
+		})
+		return
+	}
+
 	cursor := r.URL.Query().Get("cursor")
 	limit := 25
 	if l := r.URL.Query().Get("limit"); l != "" {
@@ -531,6 +558,16 @@ func (h *Handler) getUserMoodboards(w http.ResponseWriter, r *http.Request, id s
 func (h *Handler) getUserOutfits(w http.ResponseWriter, r *http.Request, id string) {
 	if id == "" {
 		response.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "missing user id"})
+		return
+	}
+
+	// Outfit batches carry the candidates built from the user's
+	// wardrobe — user content, same gate as wardrobe browsing (#149).
+	if !HasPermissionFromContext(r, PermUsersPII) {
+		response.WriteJSON(w, http.StatusForbidden, map[string]any{
+			"error":             "permission denied",
+			"missingPermission": PermUsersPII,
+		})
 		return
 	}
 
@@ -1478,13 +1515,14 @@ func (h *Handler) exportTracesCSV(w http.ResponseWriter, r *http.Request, q Trac
 				"rowCount":  rowCount,
 				"truncated": rowCount == maxExportRows,
 				"filter": map[string]any{
-					"userId":  q.UserID,
-					"model":   q.Model,
-					"feature": q.Feature,
-					"status":  q.Status,
-					"minCost": q.MinCostUSD,
-					"from":    timeStr(q.From),
-					"to":      timeStr(q.To),
+					"userId":        q.UserID,
+					"model":         q.Model,
+					"feature":       q.Feature,
+					"status":        q.Status,
+					"promptVariant": q.PromptVariant,
+					"minCost":       q.MinCostUSD,
+					"from":          timeStr(q.From),
+					"to":            timeStr(q.To),
 				},
 			},
 		})
@@ -1496,13 +1534,14 @@ func (h *Handler) exportTracesCSV(w http.ResponseWriter, r *http.Request, q Trac
 // only apply to the JSON list path and the caller stitches them in.
 func parseTracesQuery(v url.Values) TracesQuery {
 	return TracesQuery{
-		UserID:     v.Get("userId"),
-		Model:      v.Get("model"),
-		Feature:    v.Get("feature"),
-		Status:     v.Get("status"),
-		MinCostUSD: parseFloat0(v.Get("minCost")),
-		From:       parseTimePtr(v.Get("from")),
-		To:         parseTimePtr(v.Get("to")),
+		UserID:        v.Get("userId"),
+		Model:         v.Get("model"),
+		Feature:       v.Get("feature"),
+		Status:        v.Get("status"),
+		PromptVariant: v.Get("promptVariant"),
+		MinCostUSD:    parseFloat0(v.Get("minCost")),
+		From:          parseTimePtr(v.Get("from")),
+		To:            parseTimePtr(v.Get("to")),
 	}
 }
 
@@ -1589,8 +1628,11 @@ func (h *Handler) getDetectionRunDetail(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
-	// Best-effort email join + input-image URL stitching.
-	if h.overviewRepo != nil && run.UserID != "" {
+	// Best-effort email join + input-image URL stitching. The email
+	// join is gated on users:pii (#140/#149) — traces:read alone
+	// (this route's gate, held by engineer/readonly) must not expose
+	// the customer email. Same rule as GetTrace.
+	if h.overviewRepo != nil && run.UserID != "" && HasPermissionFromContext(r, PermUsersPII) {
 		if emails, err := h.overviewRepo.EmailsForUserIDs(ctx, []string{run.UserID}); err == nil {
 			if e, ok := emails[run.UserID]; ok {
 				run.UserEmail = e
@@ -1606,6 +1648,19 @@ func (h *Handler) getDetectionRunDetail(w http.ResponseWriter, r *http.Request, 
 }
 
 func (h *Handler) getDetectionRunInputImage(w http.ResponseWriter, r *http.Request, id string) {
+	// The input image is the user's original uploaded photo — PII
+	// under the RBAC model, same as wardrobe content (#149). The
+	// route floor stays traces:read so the run metadata + diffs are
+	// debuggable by engineer/readonly; the photo itself needs
+	// users:pii.
+	if !HasPermissionFromContext(r, PermUsersPII) {
+		response.WriteJSON(w, http.StatusForbidden, map[string]any{
+			"error":             "permission denied",
+			"missingPermission": PermUsersPII,
+		})
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 

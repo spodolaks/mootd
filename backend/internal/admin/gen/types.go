@@ -988,7 +988,11 @@ type LLMCallDetail struct {
 
 	// PromptHash sha256 of `systemPrompt + "\n" + userMessage`. Useful for
 	// "show every call that used this prompt" queries.
-	PromptHash    *string               `json:"promptHash,omitempty"`
+	PromptHash *string `json:"promptHash,omitempty"`
+
+	// PromptVariant A/B candidate arm(s) served for this call, e.g.
+	// "outfit_system_base@v5". Empty = production arm (#154).
+	PromptVariant *string               `json:"promptVariant,omitempty"`
 	PromptVersion *string               `json:"promptVersion,omitempty"`
 	Provider      LLMCallDetailProvider `json:"provider"`
 
@@ -1034,11 +1038,17 @@ type LLMCallSnapshot struct {
 	DurationMs       int64     `json:"durationMs"`
 
 	// Feature e.g. "outfit_generate", "detection_submit"
-	Feature  string                  `json:"feature"`
-	Id       string                  `json:"id"`
-	Model    string                  `json:"model"`
-	Provider LLMCallSnapshotProvider `json:"provider"`
-	Status   LLMCallSnapshotStatus   `json:"status"`
+	Feature string `json:"feature"`
+	Id      string `json:"id"`
+	Model   string `json:"model"`
+
+	// PromptVariant A/B candidate arm(s) the user was served for this call,
+	// e.g. "outfit_system_base@v5" (comma-joined when more than
+	// one test is active). Absent/empty = production arm. Filter
+	// /traces?promptVariant=… to isolate an A/B cohort (#154).
+	PromptVariant *string                 `json:"promptVariant,omitempty"`
+	Provider      LLMCallSnapshotProvider `json:"provider"`
+	Status        LLMCallSnapshotStatus   `json:"status"`
 
 	// UserEmail Optional — present when the backend resolves the user
 	// in-flight. Frontend masks before display unless the
@@ -2290,7 +2300,12 @@ type AdminListTracesParams struct {
 	Model   *string                      `form:"model,omitempty" json:"model,omitempty"`
 	Feature *string                      `form:"feature,omitempty" json:"feature,omitempty"`
 	Status  *AdminListTracesParamsStatus `form:"status,omitempty" json:"status,omitempty"`
-	MinCost *float64                     `form:"minCost,omitempty" json:"minCost,omitempty"`
+
+	// PromptVariant Exact-match filter on the A/B candidate-arm descriptor
+	// (e.g. "outfit_system_base@v5"). Isolates the candidate
+	// cohort of a prompt A/B test for before/after comparison (#154).
+	PromptVariant *string  `form:"promptVariant,omitempty" json:"promptVariant,omitempty"`
+	MinCost       *float64 `form:"minCost,omitempty" json:"minCost,omitempty"`
 
 	// From Inclusive lower bound on createdAt (RFC-3339).
 	From *time.Time `form:"from,omitempty" json:"from,omitempty"`
@@ -2320,9 +2335,14 @@ type AdminTracesSummaryParams struct {
 	Model   *string                         `form:"model,omitempty" json:"model,omitempty"`
 	Feature *string                         `form:"feature,omitempty" json:"feature,omitempty"`
 	Status  *AdminTracesSummaryParamsStatus `form:"status,omitempty" json:"status,omitempty"`
-	MinCost *float64                        `form:"minCost,omitempty" json:"minCost,omitempty"`
-	From    *time.Time                      `form:"from,omitempty" json:"from,omitempty"`
-	To      *time.Time                      `form:"to,omitempty" json:"to,omitempty"`
+
+	// PromptVariant Exact-match filter on the A/B candidate-arm descriptor
+	// (e.g. "outfit_system_base@v5"). Isolates the candidate
+	// cohort of a prompt A/B test for before/after comparison (#154).
+	PromptVariant *string    `form:"promptVariant,omitempty" json:"promptVariant,omitempty"`
+	MinCost       *float64   `form:"minCost,omitempty" json:"minCost,omitempty"`
+	From          *time.Time `form:"from,omitempty" json:"from,omitempty"`
+	To            *time.Time `form:"to,omitempty" json:"to,omitempty"`
 }
 
 // AdminTracesSummaryParamsStatus defines parameters for AdminTracesSummary.

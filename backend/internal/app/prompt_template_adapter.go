@@ -82,5 +82,22 @@ func itoaShort(n int) string {
 	return string(buf[i:])
 }
 
-// Compile-time assertion the adapter satisfies the interface.
+// CandidateVersionForUser implements outfit.PromptVariantReporter: it
+// returns the A/B candidate version served to userID for template name,
+// or 0 for the production arm / no active test. Same deterministic
+// bucketing as BodyForUser, so the arm stamped on the llm_calls ledger
+// always matches the body the user actually received.
+func (p *promptTemplateAdapter) CandidateVersionForUser(name, userID string) int {
+	if p == nil || p.abCache == nil {
+		return 0
+	}
+	test := p.abCache.ActiveForTemplate(context.Background(), name)
+	if admin.IsCandidateUser(userID, test) {
+		return test.CandidateVersion
+	}
+	return 0
+}
+
+// Compile-time assertions the adapter satisfies both provider interfaces.
 var _ outfit.PromptTemplateProvider = (*promptTemplateAdapter)(nil)
+var _ outfit.PromptVariantReporter = (*promptTemplateAdapter)(nil)

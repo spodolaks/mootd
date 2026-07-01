@@ -50,7 +50,7 @@ func (g *ClaudeGenerator) Critique(ctx context.Context, req CritiqueRequest) (Cr
 		model = CriticModelDefault
 	}
 
-	system := buildCriticSystemPrompt(req.TopArchetype, req.Weather)
+	system := buildCriticSystemPrompt(req.UserID, req.TopArchetype, req.Weather)
 	user := buildCriticUserMessage(req.Outfits)
 	tool := buildCriticTool(req.Outfits)
 
@@ -98,38 +98,43 @@ func (g *ClaudeGenerator) Critique(ctx context.Context, req CritiqueRequest) (Cr
 // concrete rubrics. The 5-as-borderline rule mirrors
 // LowScoreThreshold so the model's behaviour and the service's
 // regeneration trigger stay aligned.
-func buildCriticSystemPrompt(topArchetype string, weather Weather) string {
-	var sb strings.Builder
-	sb.WriteString("You are a stylist QA reviewer. You are given outfit proposals built from a user's wardrobe and asked to score each one 1-10 on whether it works for the user's archetype and current weather.\n\n")
-	sb.WriteString("Scoring rubric:\n")
-	sb.WriteString(" - 9-10 : exemplary — strong archetype fit, palette coherent, weather-appropriate.\n")
-	sb.WriteString(" - 7-8  : solid — minor friction but the outfit works.\n")
-	sb.WriteString(" - 5-6  : borderline — wearable but feels generic, off-archetype, or weather-mismatched.\n")
-	sb.WriteString(" - 1-4  : bad — should be regenerated. Wrong register, conflicting palette, ignores weather, or bizarre pairing.\n\n")
-	sb.WriteString("Use the full 1-10 range. Don't rate everything 7. Be honest — the service regenerates anything you score below 5.\n\n")
+//
+// The rubric is admin-editable via the "outfit_critic_system" template
+// (make-all-editable): {{archetypeLine}} and {{weatherLine}} are
+// substituted with the user's top archetype + current weather (each
+// newline-terminated, or empty when absent). userID routes A/B variants
+// consistently for this user; with no promoted version it falls back to
+// defaultCriticSystemPrompt, byte-identical to the pre-template output.
+func buildCriticSystemPrompt(userID, topArchetype string, weather Weather) string {
+	archetypeLine := ""
 	if topArchetype != "" {
-		sb.WriteString("User's top archetype: ")
-		sb.WriteString(topArchetype)
-		sb.WriteString(".\n")
+		archetypeLine = "User's top archetype: " + topArchetype + ".\n"
 	}
+
+	weatherLine := ""
 	if weather.Temperature != "" || weather.Condition != "" {
-		sb.WriteString("Current weather: ")
+		var wb strings.Builder
+		wb.WriteString("Current weather: ")
 		if weather.Temperature != "" {
-			sb.WriteString(weather.Temperature)
+			wb.WriteString(weather.Temperature)
 			if weather.Unit != "" {
-				sb.WriteString(weather.Unit)
+				wb.WriteString(weather.Unit)
 			}
 		}
 		if weather.Condition != "" {
 			if weather.Temperature != "" {
-				sb.WriteString(", ")
+				wb.WriteString(", ")
 			}
-			sb.WriteString(weather.Condition)
+			wb.WriteString(weather.Condition)
 		}
-		sb.WriteString(".\n")
+		wb.WriteString(".\n")
+		weatherLine = wb.String()
 	}
-	sb.WriteString("\nReturn one score per outfit via the rate_outfits tool.")
-	return sb.String()
+
+	body := templateBody("outfit_critic_system", userID, defaultCriticSystemPrompt)
+	body = strings.ReplaceAll(body, "{{archetypeLine}}", archetypeLine)
+	body = strings.ReplaceAll(body, "{{weatherLine}}", weatherLine)
+	return body
 }
 
 // buildCriticUserMessage formats the proposed outfits as a

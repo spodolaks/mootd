@@ -371,6 +371,13 @@ components:
         status:
           type: string
           enum: [success, error, timeout]
+        promptVariant:
+          type: string
+          description: |
+            A/B candidate arm(s) the user was served for this call,
+            e.g. "outfit_system_base@v5" (comma-joined when more than
+            one test is active). Absent/empty = production arm. Filter
+            /traces?promptVariant=… to isolate an A/B cohort (#154).
         cacheReadTokens:
           type: integer
           format: int64
@@ -1768,6 +1775,11 @@ components:
           description: Truncated error message; populated only when status != success.
         promptVersion:
           type: string
+        promptVariant:
+          type: string
+          description: |
+            A/B candidate arm(s) served for this call, e.g.
+            "outfit_system_base@v5". Empty = production arm (#154).
         promptHash:
           type: string
           description: |
@@ -3632,6 +3644,13 @@ paths:
           schema:
             type: string
             enum: [success, error, timeout]
+        - name: promptVariant
+          in: query
+          description: |
+            Exact-match filter on the A/B candidate-arm descriptor
+            (e.g. "outfit_system_base@v5"). Isolates the candidate
+            cohort of a prompt A/B test for before/after comparison (#154).
+          schema: { type: string }
         - name: minCost
           in: query
           schema:
@@ -3739,6 +3758,13 @@ paths:
           schema:
             type: string
             enum: [success, error, timeout]
+        - name: promptVariant
+          in: query
+          description: |
+            Exact-match filter on the A/B candidate-arm descriptor
+            (e.g. "outfit_system_base@v5"). Isolates the candidate
+            cohort of a prompt A/B test for before/after comparison (#154).
+          schema: { type: string }
         - name: minCost
           in: query
           schema:

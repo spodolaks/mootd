@@ -47,7 +47,7 @@ func (g *OpenAIGenerator) Generate(ctx context.Context, req GeneratorRequest) ([
 	}
 
 	systemPrompt := buildSystemPrompt(req.UserID, req.Weather, req.RecentBoards, req.TopArchetypes, req.Panels, req.Backgrounds)
-	userMessage := BuildUserMessage(req.Items)
+	userMessage := BuildUserMessageForUser(req.UserID, req.Items)
 
 	// mootd#67 — translate user creativity preference to
 	// temperature when supplied; otherwise keep the historical

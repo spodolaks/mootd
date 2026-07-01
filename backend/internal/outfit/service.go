@@ -333,6 +333,7 @@ type LLMRecorderObservation struct {
 	CacheReadTokens  int
 	CacheWriteTokens int
 	PromptVersion    string
+	PromptVariant    string // A/B candidate arm(s) served, e.g. "outfit_system_base@v5"; empty = production
 	RawResponse      string // P1-11 archival: model's text/tool-use payload
 	StartedAt        time.Time
 	EndedAt          time.Time
@@ -741,6 +742,7 @@ func (s *Service) generateOutfitsImpl(ctx context.Context, userID string, weathe
 			CacheReadTokens:  usage.CacheReadTokens,
 			CacheWriteTokens: usage.CacheWriteTokens,
 			PromptVersion:    usage.PromptVersion,
+			PromptVariant:    activePromptVariant(userID),
 			RawResponse:      usage.RawResponse,
 			StartedAt:        startedAt,
 			EndedAt:          endedAt,

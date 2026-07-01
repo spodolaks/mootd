@@ -267,9 +267,12 @@ func (c *CachedABTests) Invalidate() {
 // value.
 func UserBucketPct(userID, templateName string) int {
 	if userID == "" {
-		// Anonymous / system calls: bucket 0 → always production.
-		// Routing the unauthenticated minority to the candidate
-		// would skew the test arm with non-comparable traffic.
+		// Anonymous / system calls have no stable identity to hash.
+		// The always-serve-production rule for them lives in
+		// IsCandidateUser — a bucket value can't express it, because
+		// 0 still satisfies `bucket < TrafficPct` for every valid
+		// TrafficPct (1-99). See #156: relying on bucket 0 here
+		// routed all anonymous/eval traffic to the candidate arm.
 		return 0
 	}
 	h := sha256.Sum256([]byte(userID + ":" + templateName))
@@ -279,8 +282,19 @@ func UserBucketPct(userID, templateName string) int {
 
 // IsCandidateUser is the per-call decision: true → serve
 // candidate, false → serve production.
+//
+// Anonymous / system / eval-harness calls (empty userID) always
+// serve production: routing them to the candidate would skew the
+// test arm with non-comparable traffic and make eval scores
+// incomparable across runs (outfit/prompts.go relies on this for
+// BuildSystemPromptForEval). Guarded here on the decision, not in
+// UserBucketPct, because bucket 0 is still < every valid
+// TrafficPct (#156).
 func IsCandidateUser(userID string, t *ABTest) bool {
 	if t == nil || t.Status != ABTestActive {
+		return false
+	}
+	if userID == "" {
 		return false
 	}
 	return UserBucketPct(userID, t.TemplateName) < t.TrafficPct
