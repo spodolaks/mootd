@@ -245,10 +245,13 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 	// outfit-gen call; the buildSystemPrompt path checks the
 	// global at request time so late-binding here is safe.
 	if templatesRepo, err := admin.NewPromptTemplatesMongoRepository(context.Background(), a.MongoClient, a.MongoDB); err == nil {
-		fallbacks := map[string]string{
-			"outfit_system_base": outfit.DefaultSystemBaseTemplate(),
-			"outfit_safety":      outfit.DefaultSafetyTemplate(),
-		}
+		// Every admin-editable outfit/moodboard prompt block — the two
+		// original ones plus every block externalised for "make all
+		// editable" — comes from outfit.DefaultTemplates(). Single registry:
+		// SeedPromptTemplates seeds each key and the cache only refreshes
+		// keys present here, so a block is editable end-to-end only once
+		// it's in that map.
+		fallbacks := outfit.DefaultTemplates()
 		if err := admin.SeedPromptTemplates(context.Background(), templatesRepo, fallbacks, a.Logger); err != nil {
 			a.Logger.Printf("admin: prompt template seed failed: %v (falling back to hardcoded constants)", err)
 		} else {
@@ -265,7 +268,7 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 			}
 			outfit.SetPromptTemplateProvider(newPromptTemplateAdapter(cache, abCache, templatesRepo))
 			adminHandler.WithPromptTemplates(templatesRepo, cache)
-			a.Logger.Print("admin: prompt templates wired (outfit_system_base + outfit_safety seeded)")
+			a.Logger.Printf("admin: prompt templates wired (%d outfit/moodboard blocks seeded)", len(fallbacks))
 
 			// mootd#65 — per-archetype prompt routing flag. When on,
 			// buildSystemPrompt prefers a template named

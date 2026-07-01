@@ -119,6 +119,51 @@ func getSafetyTemplate(userID string) string {
 	return defaultSafetyPrompt
 }
 
+// templateBody returns the admin-managed body for prompt template
+// `name` (production version, or the A/B candidate when userID is
+// in-cohort), falling back to the hardcoded `fallback` constant when
+// no provider is wired or no version has been promoted. Every
+// externalised outfit/moodboard prompt block below getSystemBaseTemplate
+// / getSafetyTemplate resolves through this one helper — same fallback +
+// A/B-routing contract, minus the per-archetype special-case.
+func templateBody(name, userID, fallback string) string {
+	if promptTemplates != nil {
+		if body := promptTemplates.BodyForUser(name, userID); body != "" {
+			return body
+		}
+	}
+	return fallback
+}
+
+// DefaultTemplates returns every admin-editable outfit/moodboard prompt
+// block keyed by template name, with its hardcoded fallback body. app.go
+// seeds these into the prompt_templates collection and hands the same map
+// to the cache (which only refreshes keys it already knows), so a block is
+// editable end-to-end only once it appears here.
+//
+// To make a new part of the prompt editable: (1) add its default constant
+// to this map, and (2) swap the inline string at its render site for a
+// templateBody("<key>", userID, <constant>) call — substituting any live
+// data via {{placeholders}} the way the safety block does with
+// {{userDataOpen}}/{{userDataClose}}. The generic /admin/v1/prompts CRUD,
+// versioning, promotion, A/B testing and audit all key off the name string
+// and pick it up automatically.
+func DefaultTemplates() map[string]string {
+	return map[string]string{
+		"outfit_system_base":          baseSystemPrompt,
+		"outfit_safety":               defaultSafetyPrompt,
+		"outfit_surfaces_instruction": defaultSurfacesInstruction,
+		"outfit_archetype_context":    defaultArchetypeContext,
+		"outfit_weather_line":         defaultWeatherLine,
+		"outfit_recent_worn":          defaultRecentWornInstruction,
+		"outfit_recent_chosen":        defaultRecentChosenInstruction,
+		"outfit_example_output":       defaultExampleOutput,
+		"outfit_user_instruction":     defaultUserInstruction,
+		"outfit_filler_rule":          defaultFillerRule,
+		"outfit_critic_system":        defaultCriticSystemPrompt,
+	}
+}
+
 // defaultSafetyPrompt is the hardcoded fallback for the
 // "outfit_safety" template. Mirrors the inline string the
 // builder used pre-migration. {{userDataOpen}} +
@@ -266,6 +311,98 @@ VISUAL WEIGHTS — mark the signature piece:
 OUTPUT:
 - Each outfit needs: name (2-4 words), description (per rules above), rationale (per rules above), items (array of IDs), layoutRoles (mapping each item ID to "hero", "support", or "accent"), visualWeights (mapping at least the signature item to "statement"; others to "supporting" or "minor" or omitted), and optional suggestions for missing items.`
 
+// ── Externalised prompt blocks (make-all-editable) ─────────────────────
+// Each constant is the hardcoded fallback for one admin-editable template
+// (see DefaultTemplates). buildSystemPrompt / BuildUserMessageForUser /
+// buildCriticSystemPrompt resolve them through templateBody, so an
+// unedited system is byte-identical to the pre-externalisation output.
+// {{placeholders}} mark where Go injects live data (archetype lines,
+// weather, filler quota); the surrounding prose is the editable part.
+
+// defaultSurfacesInstruction — the paragraph telling the model to pick a
+// panelId + backgroundId. The panel/background menus are live data
+// appended by buildSystemPrompt after this instruction.
+const defaultSurfacesInstruction = `SURFACES — each outfit MUST include a panelId (the textured surface the flat-lay sits on) and a backgroundId (the ambient environment around the panel). Pick the option whose description, mood, and archetype affinity best matches the outfit's vibe. IDs must be taken verbatim from the lists below.`
+
+// defaultArchetypeContext — framing around the per-archetype signal
+// lines. {{archetypeLines}} expands to the color/material/trait lines
+// built from archetype.Profiles for the user's top archetypes.
+const defaultArchetypeContext = `USER STYLE ARCHETYPE:
+{{archetypeLines}}Lean into these aesthetics when picking combinations.
+`
+
+// defaultWeatherLine — one-line weather guidance. {{temperature}},
+// {{unit}} and {{condition}} are substituted from the (sanitised)
+// forecast at render time.
+const defaultWeatherLine = `WEATHER: {{temperature}}°{{unit}} and {{condition}} — choose items appropriate for this weather.`
+
+// defaultRecentWornInstruction — heading for the anti-repeat list of
+// recently saved boards (the list itself is live user data).
+const defaultRecentWornInstruction = `RECENTLY WORN (avoid repeating the exact combination):`
+
+// defaultRecentChosenInstruction — heading for the positive few-shot
+// block built from the user's saved boards (the examples are live data).
+const defaultRecentChosenInstruction = `RECENTLY CHOSEN — the user saved these. Lean into the same stylistic register (item interplay, specificity of language, archetype nods). Do NOT copy them; generate fresh outfits that feel authored by the same person.`
+
+// defaultExampleOutput — the worked few-shot example anchoring the
+// response shape. Uses placeholder item IDs the model must not reuse.
+const defaultExampleOutput = `EXAMPLE OUTPUT (uses placeholder IDs — do NOT reuse them; notice description and rationale are specific, short, and free of banned words):
+{
+  "outfits": [
+    {
+      "name": "Charcoal Quiet Authority",
+      "description": "Structured wool jacket sharpens the tonal trouser.",
+      "rationale": "The matte watch keeps the silhouette quiet where the wool wants to shout.",
+      "items": ["item_top_a", "item_bottom_a", "item_shoes_a", "item_outer_a", "item_acc_a"],
+      "layoutRoles": {
+        "item_outer_a": "hero",
+        "item_top_a": "support",
+        "item_bottom_a": "support",
+        "item_shoes_a": "support",
+        "item_acc_a": "accent"
+      },
+      "visualWeights": {
+        "item_outer_a": "statement",
+        "item_top_a": "supporting",
+        "item_bottom_a": "supporting",
+        "item_shoes_a": "supporting",
+        "item_acc_a": "minor"
+      },
+      "panelId": "panel-marble-slate",
+      "backgroundId": "background-studio-neutral",
+      "suggestions": []
+    }
+  ]
+}`
+
+// defaultUserInstruction — the closing instruction appended to the
+// wardrobe inventory in the user message.
+const defaultUserInstruction = `Create 3-4 unique outfit combinations. Each MUST include a top + bottom + footwear + at least one accessory. Use only IDs from this list.`
+
+// defaultFillerRule — appended to the user message only when the pool
+// contains archetype-default fillers. {{fillerWeight}} and {{quota}} are
+// substituted with the numeric filler weight and per-outfit target. The
+// leading space is intentional — it follows defaultUserInstruction with
+// no separator.
+const defaultFillerRule = " Each item has a `w=` weight: 1.00 means the user owns it, {{fillerWeight}} means it's an archetype-default supplement marked [filler]. Aim for variety: include AROUND {{quota}} [filler] item(s) per outfit, with the remaining slots drawn from the user's owned (w=1.00) items. NEVER repeat the same 3-4 owned items across every outfit when fillers are available — the user's pool of own items is small and they want fresh combinations. Owned items are still the foundation; fillers complement them."
+
+// defaultCriticSystemPrompt — the QA-critic rubric (mootd#64).
+// {{archetypeLine}} and {{weatherLine}} expand to the user's top
+// archetype + current weather (each already newline-terminated, or empty
+// when absent). Resolved by buildCriticSystemPrompt in claude_critic.go.
+const defaultCriticSystemPrompt = `You are a stylist QA reviewer. You are given outfit proposals built from a user's wardrobe and asked to score each one 1-10 on whether it works for the user's archetype and current weather.
+
+Scoring rubric:
+ - 9-10 : exemplary — strong archetype fit, palette coherent, weather-appropriate.
+ - 7-8  : solid — minor friction but the outfit works.
+ - 5-6  : borderline — wearable but feels generic, off-archetype, or weather-mismatched.
+ - 1-4  : bad — should be regenerated. Wrong register, conflicting palette, ignores weather, or bizarre pairing.
+
+Use the full 1-10 range. Don't rate everything 7. Be honest — the service regenerates anything you score below 5.
+
+{{archetypeLine}}{{weatherLine}}
+Return one score per outfit via the rate_outfits tool.`
+
 // buildSystemPrompt constructs the full system prompt with archetype, weather, and history context.
 // It is shared by Ollama, Claude, and OpenAI generators.
 //
@@ -296,7 +433,9 @@ func buildSystemPrompt(userID string, weather Weather, recentBoards []RecentBoar
 		"{{userDataClose}}", userDataClose))
 
 	if len(panels) > 0 || len(backgrounds) > 0 {
-		sb.WriteString("\n\nSURFACES — each outfit MUST include a panelId (the textured surface the flat-lay sits on) and a backgroundId (the ambient environment around the panel). Pick the option whose description, mood, and archetype affinity best matches the outfit's vibe. IDs must be taken verbatim from the lists below.\n")
+		sb.WriteString("\n\n")
+		sb.WriteString(templateBody("outfit_surfaces_instruction", userID, defaultSurfacesInstruction))
+		sb.WriteString("\n")
 		if len(panels) > 0 {
 			sb.WriteString("\nAvailable panels:\n")
 			writeSurfaceList(&sb, panels)
@@ -311,7 +450,7 @@ func buildSystemPrompt(userID string, weather Weather, recentBoards []RecentBoar
 	// from the profile so the model has concrete aesthetics to lean into,
 	// instead of just an archetype name.
 	if len(topArchetypes) > 0 {
-		sb.WriteString("\n\nUSER STYLE ARCHETYPE:\n")
+		var archLines strings.Builder
 		for i, a := range topArchetypes {
 			p, ok := archetype.Profiles[a.Name]
 			if !ok {
@@ -321,7 +460,7 @@ func buildSystemPrompt(userID string, weather Weather, recentBoards []RecentBoar
 			if i > 0 {
 				weight = "secondary"
 			}
-			fmt.Fprintf(&sb,
+			fmt.Fprintf(&archLines,
 				"- %s (%s, score=%.2f): %s\n  Colors: %s. Materials: %s. Key traits: %s.\n",
 				p.Title, weight, a.Score, p.Description,
 				strings.Join(p.ColorSignals, ", "),
@@ -329,17 +468,23 @@ func buildSystemPrompt(userID string, weather Weather, recentBoards []RecentBoar
 				strings.Join(p.KeyTraits, ", "),
 			)
 		}
-		sb.WriteString("Lean into these aesthetics when picking combinations.\n")
+		sb.WriteString("\n\n")
+		sb.WriteString(strings.ReplaceAll(
+			templateBody("outfit_archetype_context", userID, defaultArchetypeContext),
+			"{{archetypeLines}}", archLines.String()))
 	}
 
 	if weather.Temperature != "" && weather.Condition != "" {
 		// Weather strings come from server-controlled metar/forecast paths
 		// today, but defence-in-depth: sanitise anyway. The values are
 		// short enough that truncation never bites.
-		fmt.Fprintf(&sb, "\nWEATHER: %s°%s and %s — choose items appropriate for this weather.\n",
-			sanitiseUserText(weather.Temperature),
-			sanitiseUserText(weather.Unit),
-			sanitiseUserText(weather.Condition))
+		line := templateBody("outfit_weather_line", userID, defaultWeatherLine)
+		line = strings.ReplaceAll(line, "{{temperature}}", sanitiseUserText(weather.Temperature))
+		line = strings.ReplaceAll(line, "{{unit}}", sanitiseUserText(weather.Unit))
+		line = strings.ReplaceAll(line, "{{condition}}", sanitiseUserText(weather.Condition))
+		sb.WriteString("\n")
+		sb.WriteString(line)
+		sb.WriteString("\n")
 	}
 
 	if len(recentBoards) > 0 {
@@ -348,7 +493,9 @@ func buildSystemPrompt(userID string, weather Weather, recentBoards []RecentBoar
 		// could in theory carry an injection vector if a prior call was
 		// already compromised). Wrap the entire region in USER_DATA tags
 		// + sanitise per-field.
-		sb.WriteString("\nRECENTLY WORN (avoid repeating the exact combination):\n")
+		sb.WriteString("\n")
+		sb.WriteString(templateBody("outfit_recent_worn", userID, defaultRecentWornInstruction))
+		sb.WriteString("\n")
 		sb.WriteString(userDataOpen + "\n")
 		for _, b := range recentBoards {
 			name := sanitiseUserText(b.OutfitName)
@@ -370,7 +517,9 @@ func buildSystemPrompt(userID string, weather Weather, recentBoards []RecentBoar
 			}
 		}
 		if hasRichExample {
-			sb.WriteString("\nRECENTLY CHOSEN — the user saved these. Lean into the same stylistic register (item interplay, specificity of language, archetype nods). Do NOT copy them; generate fresh outfits that feel authored by the same person.\n")
+			sb.WriteString("\n")
+			sb.WriteString(templateBody("outfit_recent_chosen", userID, defaultRecentChosenInstruction))
+			sb.WriteString("\n")
 			sb.WriteString(userDataOpen + "\n")
 			for _, b := range recentBoards {
 				name := sanitiseUserText(b.OutfitName)
@@ -403,35 +552,8 @@ func buildSystemPrompt(userID string, weather Weather, recentBoards []RecentBoar
 	// One concrete few-shot example anchors the response shape and the
 	// expected level of stylistic reasoning. The example uses placeholder
 	// IDs that the model knows it must NOT use literally.
-	sb.WriteString(`
-EXAMPLE OUTPUT (uses placeholder IDs — do NOT reuse them; notice description and rationale are specific, short, and free of banned words):
-{
-  "outfits": [
-    {
-      "name": "Charcoal Quiet Authority",
-      "description": "Structured wool jacket sharpens the tonal trouser.",
-      "rationale": "The matte watch keeps the silhouette quiet where the wool wants to shout.",
-      "items": ["item_top_a", "item_bottom_a", "item_shoes_a", "item_outer_a", "item_acc_a"],
-      "layoutRoles": {
-        "item_outer_a": "hero",
-        "item_top_a": "support",
-        "item_bottom_a": "support",
-        "item_shoes_a": "support",
-        "item_acc_a": "accent"
-      },
-      "visualWeights": {
-        "item_outer_a": "statement",
-        "item_top_a": "supporting",
-        "item_bottom_a": "supporting",
-        "item_shoes_a": "supporting",
-        "item_acc_a": "minor"
-      },
-      "panelId": "panel-marble-slate",
-      "backgroundId": "background-studio-neutral",
-      "suggestions": []
-    }
-  ]
-}`)
+	sb.WriteString("\n")
+	sb.WriteString(templateBody("outfit_example_output", userID, defaultExampleOutput))
 
 	return sb.String()
 }
@@ -452,7 +574,7 @@ func BuildSystemPromptForEval(weather Weather, recentBoards []RecentBoard, topAr
 	return buildSystemPrompt("", weather, recentBoards, topArchetypes, panels, backgrounds)
 }
 
-// BuildUserMessage produces a single compact representation of the wardrobe
+// BuildUserMessageForUser produces a single compact representation of the wardrobe
 // (one section grouped by role + a small per-item trait block). Shared by all
 // generators: Ollama, OpenAI, and Claude (text part).
 //
@@ -468,7 +590,7 @@ func BuildSystemPromptForEval(weather Weather, recentBoards []RecentBoard, topAr
 // hint. The quota scales inversely with the user's owned-item count:
 // small wardrobes get a higher target so each outfit pulls in fresh
 // items instead of the LLM looping over the same 3-4 permutations.
-func BuildUserMessage(items []GenItem) string {
+func BuildUserMessageForUser(userID string, items []GenItem) string {
 	type itemRef struct {
 		ID     string
 		Label  string
@@ -544,18 +666,27 @@ func BuildUserMessage(items []GenItem) string {
 	preferenceRule := ""
 	if fillerCount > 0 {
 		quota := fillerQuotaPerOutfit(ownCount, fillerCount)
-		preferenceRule = fmt.Sprintf(
-			" Each item has a `w=` weight: 1.00 means the user owns it, %.2f means it's an archetype-default supplement marked [filler]. Aim for variety: include AROUND %d [filler] item(s) per outfit, with the remaining slots drawn from the user's owned (w=1.00) items. NEVER repeat the same 3-4 owned items across every outfit when fillers are available — the user's pool of own items is small and they want fresh combinations. Owned items are still the foundation; fillers complement them.",
-			FillerWeight, quota,
-		)
+		rule := templateBody("outfit_filler_rule", userID, defaultFillerRule)
+		rule = strings.ReplaceAll(rule, "{{fillerWeight}}", fmt.Sprintf("%.2f", FillerWeight))
+		rule = strings.ReplaceAll(rule, "{{quota}}", fmt.Sprintf("%d", quota))
+		preferenceRule = rule
 	}
 
 	return fmt.Sprintf(
-		"Wardrobe grouped by role:\n%s\n%s%s\nItem details:\n%s%s\n%s\nCreate 3-4 unique outfit combinations. Each MUST include a top + bottom + footwear + at least one accessory. Use only IDs from this list.%s",
+		"Wardrobe grouped by role:\n%s\n%s%s\nItem details:\n%s%s\n%s\n%s%s",
 		userDataOpen, inventory.String(), userDataClose,
 		userDataOpen, details.String(), userDataClose,
+		templateBody("outfit_user_instruction", userID, defaultUserInstruction),
 		preferenceRule,
 	)
+}
+
+// BuildUserMessage renders the wardrobe user message with production
+// prompt templates (empty userID → no A/B routing). Retained for callers
+// that render without a user context — the eval harness and the
+// observability re-render — and for the byte-shape regression tests.
+func BuildUserMessage(items []GenItem) string {
+	return BuildUserMessageForUser("", items)
 }
 
 // fillerQuotaPerOutfit returns the suggested number of [filler] items

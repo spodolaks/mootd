@@ -34,7 +34,7 @@ func (g *OllamaGenerator) Generate(ctx context.Context, req GeneratorRequest) ([
 	}
 
 	sysPrompt := buildSystemPrompt(req.UserID, req.Weather, req.RecentBoards, req.TopArchetypes, req.Panels, req.Backgrounds)
-	userMessage := BuildUserMessage(req.Items)
+	userMessage := BuildUserMessageForUser(req.UserID, req.Items)
 
 	llmContent, err := g.client.chat(ctx, sysPrompt, userMessage)
 	if err != nil {

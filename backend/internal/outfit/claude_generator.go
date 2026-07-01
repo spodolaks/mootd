@@ -278,7 +278,7 @@ func (g *ClaudeGenerator) buildUserContent(ctx context.Context, req GeneratorReq
 	var content []claudeContent
 
 	// Reuse the shared text inventory builder, then append the tool-use instruction.
-	textMsg := BuildUserMessage(req.Items) + "\n\nPropose 3-4 outfits using the propose_outfits tool."
+	textMsg := BuildUserMessageForUser(req.UserID, req.Items) + "\n\nPropose 3-4 outfits using the propose_outfits tool."
 
 	content = append(content, claudeContent{
 		Type: "text",
