@@ -87,6 +87,7 @@ type CallObservation struct {
 	CacheReadTokens  int
 	CacheWriteTokens int
 	PromptVersion    string
+	PromptVariant    string // A/B candidate arm(s) served, e.g. "outfit_system_base@v5"; empty = production
 	RawResponse      string // P1-11 archival: the LLM's text/tool-use payload
 	StartedAt        time.Time
 	EndedAt          time.Time
@@ -158,6 +159,7 @@ func (r *LLMRecorder) Record(ctx context.Context, cc CallContext, obs CallObserv
 		Status:           status,
 		CostUSD:          cost,
 		PromptVersion:    obs.PromptVersion,
+		PromptVariant:    obs.PromptVariant,
 		ErrorMsg:         errorMsg,
 		CreatedAt:        obs.StartedAt.UTC(),
 		// P1-11 archival — truncated for safety; sane payloads are

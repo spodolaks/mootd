@@ -36,6 +36,7 @@ type LLMCall struct {
 	CostUSD          float64   `bson:"costUsd"`
 	PromptHash       string    `bson:"promptHash,omitempty"`    // sha256 of system+user prompt; powers dedupe + "show every call with this prompt"
 	PromptVersion    string    `bson:"promptVersion,omitempty"` // PromptVersion at call time
+	PromptVariant    string    `bson:"promptVariant,omitempty"` // A/B candidate arm(s) served (e.g. "outfit_system_base@v5"); empty = production. Powers /traces A/B split (#154).
 	ErrorMsg         string    `bson:"errorMsg,omitempty"`
 	CreatedAt        time.Time `bson:"createdAt"`
 

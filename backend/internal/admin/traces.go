@@ -16,15 +16,16 @@ import (
 // All fields optional — the empty query returns the most recent
 // page across all users / models / features.
 type TracesQuery struct {
-	UserID     string     // exact match
-	Model      string     // exact match
-	Feature    string     // exact match (e.g. "outfit_generate")
-	Status     string     // "success" | "error" | "timeout"
-	MinCostUSD float64    // >= filter; 0 disables the floor
-	From       *time.Time // createdAt >= From
-	To         *time.Time // createdAt < To (exclusive — half-open interval)
-	Cursor     string     // pagination cursor (last row's _id from previous page)
-	Limit      int        // 1..100; default 25
+	UserID        string     // exact match
+	Model         string     // exact match
+	Feature       string     // exact match (e.g. "outfit_generate")
+	Status        string     // "success" | "error" | "timeout"
+	PromptVariant string     // A/B arm descriptor filter, e.g. "outfit_system_base@v5" (exact match); empty disables
+	MinCostUSD    float64    // >= filter; 0 disables the floor
+	From          *time.Time // createdAt >= From
+	To            *time.Time // createdAt < To (exclusive — half-open interval)
+	Cursor        string     // pagination cursor (last row's _id from previous page)
+	Limit         int        // 1..100; default 25
 }
 
 // TracesPage is the wire shape returned to the admin UI.
@@ -55,6 +56,7 @@ type LLMCallDetail struct {
 	Status           string    `bson:"status" json:"status"`
 	ErrorMsg         string    `bson:"errorMsg,omitempty" json:"errorMsg,omitempty"`
 	PromptVersion    string    `bson:"promptVersion,omitempty" json:"promptVersion,omitempty"`
+	PromptVariant    string    `bson:"promptVariant,omitempty" json:"promptVariant,omitempty"`
 	PromptHash       string    `bson:"promptHash,omitempty" json:"promptHash,omitempty"`
 	SystemPrompt     string    `bson:"systemPrompt,omitempty" json:"systemPrompt,omitempty"`
 	UserMessage      string    `bson:"userMessage,omitempty" json:"userMessage,omitempty"`
@@ -135,6 +137,9 @@ func buildTracesFilter(q TracesQuery) bson.M {
 	}
 	if q.Status != "" {
 		filter["status"] = q.Status
+	}
+	if q.PromptVariant != "" {
+		filter["promptVariant"] = q.PromptVariant
 	}
 	if q.MinCostUSD > 0 {
 		filter["costUsd"] = bson.M{"$gte": q.MinCostUSD}

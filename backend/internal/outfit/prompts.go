@@ -3,6 +3,7 @@ package outfit
 import (
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 
 	"mootd/backend/internal/archetype"
@@ -50,6 +51,42 @@ var promptTemplates PromptTemplateProvider
 // useful for tests that swap fakes.
 func SetPromptTemplateProvider(p PromptTemplateProvider) {
 	promptTemplates = p
+}
+
+// PromptVariantReporter is an optional capability of a
+// PromptTemplateProvider: it reports which A/B candidate arm a user is
+// served for a given template, so the llm_calls ledger can stamp the arm
+// for retrospective A/B analysis (closes the #154 follow-up — before
+// this, every row carried the static PromptVersion for both arms).
+// Detected via type-assert, mirroring the optional Critic capability;
+// providers without it (test fakes) simply don't stamp a variant.
+type PromptVariantReporter interface {
+	// CandidateVersionForUser returns the A/B candidate version served
+	// to userID for template `name`, or 0 when the user is in the
+	// production arm / no active test.
+	CandidateVersionForUser(name, userID string) int
+}
+
+// activePromptVariant returns a compact, filterable descriptor of the
+// A/B candidate arms userID was served across the outfit prompt blocks —
+// e.g. "outfit_system_base@v5" (comma-joined + sorted when more than one
+// test is active). Empty means the production arm for every block: the
+// common case, and always so for empty/anonymous userID since A/B routing
+// serves production to empty userIDs. Stamped onto llm_calls.promptVariant
+// so /traces can split candidate vs production calls.
+func activePromptVariant(userID string) string {
+	reporter, ok := promptTemplates.(PromptVariantReporter)
+	if !ok {
+		return ""
+	}
+	var parts []string
+	for name := range DefaultTemplates() {
+		if v := reporter.CandidateVersionForUser(name, userID); v > 0 {
+			parts = append(parts, fmt.Sprintf("%s@v%d", name, v))
+		}
+	}
+	sort.Strings(parts)
+	return strings.Join(parts, ",")
 }
 
 // DefaultSystemBaseTemplate exposes the hardcoded base prompt

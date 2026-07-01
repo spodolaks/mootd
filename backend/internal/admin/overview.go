@@ -141,6 +141,7 @@ type LLMCallSnapshot struct {
 	CostUSD          float64   `bson:"costUsd" json:"costUsd"`
 	DurationMs       int64     `bson:"durationMs" json:"durationMs"`
 	Status           string    `bson:"status" json:"status"`
+	PromptVariant    string    `bson:"promptVariant,omitempty" json:"promptVariant,omitempty"`
 	CacheReadTokens  int64     `bson:"cacheReadTokens" json:"cacheReadTokens,omitempty"`
 	CacheWriteTokens int64     `bson:"cacheWriteTokens" json:"cacheWriteTokens,omitempty"`
 	CreatedAt        time.Time `bson:"createdAt" json:"createdAt"`

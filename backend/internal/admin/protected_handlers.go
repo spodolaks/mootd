@@ -1515,13 +1515,14 @@ func (h *Handler) exportTracesCSV(w http.ResponseWriter, r *http.Request, q Trac
 				"rowCount":  rowCount,
 				"truncated": rowCount == maxExportRows,
 				"filter": map[string]any{
-					"userId":  q.UserID,
-					"model":   q.Model,
-					"feature": q.Feature,
-					"status":  q.Status,
-					"minCost": q.MinCostUSD,
-					"from":    timeStr(q.From),
-					"to":      timeStr(q.To),
+					"userId":        q.UserID,
+					"model":         q.Model,
+					"feature":       q.Feature,
+					"status":        q.Status,
+					"promptVariant": q.PromptVariant,
+					"minCost":       q.MinCostUSD,
+					"from":          timeStr(q.From),
+					"to":            timeStr(q.To),
 				},
 			},
 		})
@@ -1533,13 +1534,14 @@ func (h *Handler) exportTracesCSV(w http.ResponseWriter, r *http.Request, q Trac
 // only apply to the JSON list path and the caller stitches them in.
 func parseTracesQuery(v url.Values) TracesQuery {
 	return TracesQuery{
-		UserID:     v.Get("userId"),
-		Model:      v.Get("model"),
-		Feature:    v.Get("feature"),
-		Status:     v.Get("status"),
-		MinCostUSD: parseFloat0(v.Get("minCost")),
-		From:       parseTimePtr(v.Get("from")),
-		To:         parseTimePtr(v.Get("to")),
+		UserID:        v.Get("userId"),
+		Model:         v.Get("model"),
+		Feature:       v.Get("feature"),
+		Status:        v.Get("status"),
+		PromptVariant: v.Get("promptVariant"),
+		MinCostUSD:    parseFloat0(v.Get("minCost")),
+		From:          parseTimePtr(v.Get("from")),
+		To:            parseTimePtr(v.Get("to")),
 	}
 }
 

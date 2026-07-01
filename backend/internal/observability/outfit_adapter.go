@@ -39,6 +39,7 @@ func (a *OutfitRecorderAdapter) Record(ctx context.Context, cc outfit.LLMRecorde
 		CacheReadTokens:  obs.CacheReadTokens,
 		CacheWriteTokens: obs.CacheWriteTokens,
 		PromptVersion:    obs.PromptVersion,
+		PromptVariant:    obs.PromptVariant,
 		RawResponse:      obs.RawResponse,
 		StartedAt:        obs.StartedAt,
 		EndedAt:          obs.EndedAt,
