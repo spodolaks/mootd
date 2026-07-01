@@ -11,9 +11,13 @@ import (
 	"time"
 )
 
-// stubUsersRepo implements UsersRepository; only ListSummaries returns data.
-// The rest are no-ops — enough to exercise ListUsers' redaction branch.
-type stubUsersRepo struct{ summaries []UserSummary }
+// stubUsersRepo implements UsersRepository; only ListSummaries and
+// FindDetail return data. The rest are no-ops — enough to exercise the
+// handlers' redaction / PII-gate branches.
+type stubUsersRepo struct {
+	summaries []UserSummary
+	detail    *UserDetail
+}
 
 func (s *stubUsersRepo) ListSummaries(context.Context, UsersQuery) ([]UserSummary, string, error) {
 	// Return a fresh copy each call, like the real Mongo repo (which decodes
@@ -23,7 +27,15 @@ func (s *stubUsersRepo) ListSummaries(context.Context, UsersQuery) ([]UserSummar
 	copy(out, s.summaries)
 	return out, "", nil
 }
-func (s *stubUsersRepo) FindDetail(context.Context, string) (*UserDetail, error) { return nil, nil }
+func (s *stubUsersRepo) FindDetail(context.Context, string) (*UserDetail, error) {
+	if s.detail == nil {
+		return nil, nil
+	}
+	// Fresh copy per call, same reasoning as ListSummaries: the
+	// handler redacts in place.
+	d := *s.detail
+	return &d, nil
+}
 func (s *stubUsersRepo) SearchUsers(context.Context, string, int) ([]SearchHit, error) {
 	return nil, nil
 }
