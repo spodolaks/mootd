@@ -1215,11 +1215,12 @@ func (h *Handler) startEvalRun(w http.ResponseWriter, r *http.Request) {
 
 	runID, err := h.evalsRunner.Start(ctx, body.EvalSetID, body.PromptVersion, adminID)
 	if err != nil {
-		// Loader errors (set not found, no cases) translate to 400;
-		// Mongo errors (create failed) translate to 500. Crude
+		// Loader errors (set not found, no cases) and bad
+		// promptVersion refs translate to 400; Mongo errors (create
+		// failed, override lookup failed) translate to 500. Crude
 		// substring match because the runner returns wrapped errors
 		// with stable prefixes.
-		if strings.Contains(err.Error(), "load tuples") || strings.Contains(err.Error(), "no cases") || strings.Contains(err.Error(), "invalid eval set id") {
+		if strings.Contains(err.Error(), "load tuples") || strings.Contains(err.Error(), "no cases") || strings.Contains(err.Error(), "invalid eval set id") || strings.Contains(err.Error(), "invalid promptVersion") {
 			response.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}

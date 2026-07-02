@@ -59,8 +59,11 @@ func (a *evalGeneratorAdapter) PromptVersionName() string {
 // GenerateForEval is the workhorse. Translates the admin tuple →
 // eval.Tuple, runs the existing harness (which yields prompts +
 // automated checks), and on top calls the live generator with
-// the same translated request.
-func (a *evalGeneratorAdapter) GenerateForEval(ctx context.Context, t admin.EvalTuple) (string, string, int, int, float64, error) {
+// the same translated request. promptOverrides (template name →
+// body, nil for production runs) flow through to both the prompt
+// snapshot and the live LLM call so a draft version is tested
+// exactly as it would ship.
+func (a *evalGeneratorAdapter) GenerateForEval(ctx context.Context, t admin.EvalTuple, promptOverrides map[string]string) (string, string, int, int, float64, error) {
 	if a.gen == nil {
 		return "", "", 0, 0, 0, fmt.Errorf("eval generator not configured")
 	}
@@ -75,7 +78,7 @@ func (a *evalGeneratorAdapter) GenerateForEval(ctx context.Context, t admin.Eval
 	// itself; the harness's checkOutfits() then runs against the
 	// real output. That's exactly what we want for #27 — admin
 	// runs are live-mode.
-	res := eval.Run(eval.RunOptions{Tuple: tuple, Generator: a.gen})
+	res := eval.Run(eval.RunOptions{Tuple: tuple, Generator: a.gen, PromptOverrides: promptOverrides})
 
 	// If the generator failed, the harness records res.Error.
 	// Surface it as the outer error so the per-case row reads

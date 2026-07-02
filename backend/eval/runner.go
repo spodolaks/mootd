@@ -119,6 +119,13 @@ type RunOptions struct {
 	Tuple     Tuple
 	Generator outfit.Generator // injected; runner doesn't pick a provider
 	Verbose   bool
+
+	// PromptOverrides maps template name → body; when set, both the
+	// prompt snapshot and the live generator call render with these
+	// bodies instead of the production templates (used by the admin
+	// eval runner to test a draft version before promotion). nil =
+	// production templates.
+	PromptOverrides map[string]string
 }
 
 // Run prompts construction + (optionally) the LLM, then runs checks.
@@ -136,8 +143,8 @@ func Run(opts RunOptions) Result {
 			Traits:   it.Traits,
 		})
 	}
-	system := outfit.BuildSystemPromptForEval(opts.Tuple.Weather, nil, opts.Tuple.TopArchetypes, nil, nil)
-	user := outfit.BuildUserMessage(items)
+	system := outfit.BuildSystemPromptForEvalWithOverrides(opts.PromptOverrides, opts.Tuple.Weather, nil, opts.Tuple.TopArchetypes, nil, nil)
+	user := outfit.BuildUserMessageWithOverrides(opts.PromptOverrides, items)
 	r.SystemPrompt = system
 	r.UserMessage = user
 	r.SystemTokens = approxTokens(system)
@@ -175,10 +182,11 @@ func Run(opts RunOptions) Result {
 	// Generator call.
 	start := time.Now()
 	req := outfit.GeneratorRequest{
-		UserID:        opts.Tuple.UserID,
-		Items:         items,
-		TopArchetypes: opts.Tuple.TopArchetypes,
-		Weather:       opts.Tuple.Weather,
+		UserID:          opts.Tuple.UserID,
+		Items:           items,
+		TopArchetypes:   opts.Tuple.TopArchetypes,
+		Weather:         opts.Tuple.Weather,
+		PromptOverrides: opts.PromptOverrides,
 	}
 	outfits, _, err := opts.Generator.Generate(contextBg(), req)
 	r.DurationMs = time.Since(start).Milliseconds()

@@ -3,12 +3,21 @@ package admin
 import (
 	"context"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
 	"mootd/backend/internal/shared/response"
 )
+
+// promptNameRe constrains template names: lowercase snake_case with
+// optional dot-separated suffixes — the per-archetype convention
+// "outfit_system_base.creator" (mootd#65). Names embed into the
+// "pt_<name>_v<N>" document id and the /admin/v1/prompts/{name}
+// route, so anything looser invites escaping bugs. Existing seeded
+// names all match.
+var promptNameRe = regexp.MustCompile(`^[a-z0-9_]+(\.[a-z0-9_-]+)*$`)
 
 // itoa is a tiny shorthand. fmt.Sprintf("%d") is the
 // alternative; this keeps the call site readable.
@@ -172,6 +181,13 @@ func (h *Handler) createPromptVersion(w http.ResponseWriter, r *http.Request, na
 	notes := strings.TrimSpace(body.Notes)
 	if notes == "" {
 		response.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "notes is required (audit log rationale)"})
+		return
+	}
+	// New names are created implicitly by the first POST (that's how
+	// per-archetype variants are curated from the UI), so validate
+	// the shape here rather than 404ing unknown names.
+	if len(name) > 80 || !promptNameRe.MatchString(name) {
+		response.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid template name: lowercase letters, digits and underscores, optional dot-separated suffix (e.g. outfit_system_base.creator), max 80 chars"})
 		return
 	}
 

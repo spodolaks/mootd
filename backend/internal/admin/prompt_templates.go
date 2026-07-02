@@ -302,12 +302,27 @@ func (c *CachedPromptTemplates) BodyOrFallback(ctx context.Context, name string)
 		return c.fallback[name]
 	}
 
-	// Best-effort fetch all known names. We don't know the
-	// full set upfront; refresh by iterating fallback keys
-	// (which is the canonical "what templates does the
-	// system care about" list).
-	fresh := map[string]string{}
+	// Best-effort fetch of every production body. Template names
+	// are dynamic — operators create names beyond the seeded set
+	// via the admin API (per-archetype variants like
+	// "outfit_system_base.creator", mootd#65) — so the refresh
+	// unions ListNames() with the fallback keys instead of only
+	// iterating the seeded map. Refreshing only fallback keys
+	// meant a UI-created name was never fetched and silently fell
+	// back forever.
+	names := make(map[string]struct{}, len(c.fallback))
 	for n := range c.fallback {
+		names[n] = struct{}{}
+	}
+	if listed, err := c.repo.ListNames(ctx); err != nil {
+		c.logger.Printf("prompt_templates: list names failed: %v (refreshing seeded keys only)", err)
+	} else {
+		for _, n := range listed {
+			names[n] = struct{}{}
+		}
+	}
+	fresh := map[string]string{}
+	for n := range names {
 		doc, err := c.repo.GetProduction(ctx, n)
 		if err != nil {
 			c.logger.Printf("prompt_templates: read %q failed: %v (using fallback)", n, err)

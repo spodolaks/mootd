@@ -818,10 +818,13 @@ type EvalRunAggregate struct {
 type EvalRunRequest struct {
 	EvalSetId string `json:"evalSetId"`
 
-	// PromptVersion Which prompt template to test. Empty means "use whatever
-	// outfit.PromptVersion currently is" — the production
-	// prompt at boot. A future ticket adds a prompt-versioning
-	// UI that populates this from a registry.
+	// PromptVersion Draft template version to test, as "<name>@v<version>"
+	// (e.g. "outfit_system_base@v4" — same shape as the
+	// llm_calls.promptVariant stamp). The run renders that
+	// version in place of the template's production body for
+	// every case, so a draft can be evaled before promotion;
+	// all other blocks render production. Unknown refs 400.
+	// Empty = production templates.
 	PromptVersion *string `json:"promptVersion,omitempty"`
 }
 

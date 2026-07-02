@@ -244,13 +244,21 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 	// constants. SetPromptTemplateProvider must run before any
 	// outfit-gen call; the buildSystemPrompt path checks the
 	// global at request time so late-binding here is safe.
+	//
+	// promptTemplatesRepo is hoisted so the eval runner (wired
+	// further down) can resolve "name@vN" prompt-version overrides
+	// against the same collection. Interface-typed and only
+	// assigned on successful init, so its nil check is meaningful.
+	var promptTemplatesRepo admin.PromptTemplatesRepository
 	if templatesRepo, err := admin.NewPromptTemplatesMongoRepository(context.Background(), a.MongoClient, a.MongoDB); err == nil {
+		promptTemplatesRepo = templatesRepo
 		// Every admin-editable outfit/moodboard prompt block — the two
 		// original ones plus every block externalised for "make all
-		// editable" — comes from outfit.DefaultTemplates(). Single registry:
-		// SeedPromptTemplates seeds each key and the cache only refreshes
-		// keys present here, so a block is editable end-to-end only once
-		// it's in that map.
+		// editable" — comes from outfit.DefaultTemplates(). SeedPromptTemplates
+		// seeds each key; the cache additionally serves any name found in
+		// the collection (per-archetype variants like
+		// "outfit_system_base.<archetype>" created via the admin API),
+		// with this map as the Mongo-down fallback for the seeded blocks.
 		fallbacks := outfit.DefaultTemplates()
 		if err := admin.SeedPromptTemplates(context.Background(), templatesRepo, fallbacks, a.Logger); err != nil {
 			a.Logger.Printf("admin: prompt template seed failed: %v (falling back to hardcoded constants)", err)
@@ -851,7 +859,11 @@ func (a *App) NewHTTPHandler(workerCtx context.Context) (http.Handler, wardrobe.
 		if j := admin.NewAnthropicJudge(); j != nil {
 			evalJudge = j
 		}
-		evalRunner := admin.NewEvalRunner(evalsRepo, evalsLoader, evalGenerator, evalJudge, a.Logger)
+		// promptTemplatesRepo (hoisted above, nil when its init
+		// failed) lets the runner resolve "name@vN" prompt-version
+		// overrides so a draft template version can be evaled
+		// before promotion.
+		evalRunner := admin.NewEvalRunner(evalsRepo, evalsLoader, evalGenerator, evalJudge, promptTemplatesRepo, a.Logger)
 		adminHandler.WithEvalSuite(evalsRepo, evalsLoader, evalRunner)
 		if evalJudge == nil {
 			a.Logger.Print("admin: eval suite wired without LLM judge (ANTHROPIC_API_KEY unset). Cases run + record automated checks; judgeScore is 0.")
