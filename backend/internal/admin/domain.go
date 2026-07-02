@@ -29,10 +29,10 @@ const (
 	RoleSupport Role = "support"
 	// RoleReadonly grants read on everything; cannot mutate or rerun.
 	RoleReadonly Role = "readonly"
-	// RoleCurator grants only prompts:read — enough for the
-	// archetype-defaults curation surface (Defaults page) and the
-	// read-only Prompts view. No traces, no users, no spend. Used
-	// for contributors whose only job is curating per-archetype
+	// RoleCurator grants the curation surfaces: prompts read +
+	// write (author, promote, A/B, eval runs) and archetype-
+	// defaults write. No traces, no users, no spend. Used for
+	// contributors whose job is curating prompts and per-archetype
 	// defaults.
 	RoleCurator Role = "curator"
 )

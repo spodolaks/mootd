@@ -57,9 +57,12 @@ func TestHasPermission_Curator(t *testing.T) {
 	if !HasPermission(roles, PermDefaultsWrite) {
 		t.Error("curator should have defaults:write (archetype-defaults curation)")
 	}
+	if !HasPermission(roles, PermPromptsWrite) {
+		t.Error("curator should have prompts:write (prompt curation)")
+	}
 	for _, p := range []Permission{
 		PermUsersRead, PermUsersPII, PermTracesRead, PermTracesRerun,
-		PermPromptsWrite, PermDetectionsRerun, PermSpendRead,
+		PermDetectionsRerun, PermSpendRead,
 		PermBudgetsWrite, PermRoutingWrite, PermSessionsView,
 		PermAdminsManage,
 	} {
