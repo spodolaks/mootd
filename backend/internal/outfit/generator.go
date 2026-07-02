@@ -32,6 +32,13 @@ type GeneratorRequest struct {
 	// pre-#67 callers.
 	Creativity float64
 
+	// PromptOverrides maps template name → body and, when set, takes
+	// precedence over the admin-managed prompt-template provider
+	// (including its A/B routing) for those names. The admin eval
+	// runner uses it to render a draft template version exactly as it
+	// would ship if promoted. nil on all production traffic.
+	PromptOverrides map[string]string
+
 	// OnProgress, when non-nil, opts the request into streaming
 	// (mootd#62). Generators that support SSE / streaming JSON
 	// fire callbacks as partial output arrives so the FE can

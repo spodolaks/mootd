@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -431,11 +432,14 @@ func countAndDescribeSet(dir string) (int, string) {
 // outfits + cost out) so admin/ doesn't drag in the outfit package.
 type EvalGenerator interface {
 	// GenerateForEval runs the LLM with the same prompts the
-	// production outfit service would build, and returns the
+	// production outfit service would build — with any supplied
+	// template-body overrides applied (name → body; how the runner
+	// evals a draft version before promotion) — and returns the
 	// generated outfits as a JSON-encodable slice + the dollar cost
 	// + a one-line outfit display name (the first outfit's `name`
-	// field) for table-row use.
-	GenerateForEval(ctx context.Context, tuple EvalTuple) (outfitsJSON string, primaryName string, automatedChecksPassed int, automatedChecksTotal int, costUSD float64, err error)
+	// field) for table-row use. promptOverrides is nil for
+	// production-template runs.
+	GenerateForEval(ctx context.Context, tuple EvalTuple, promptOverrides map[string]string) (outfitsJSON string, primaryName string, automatedChecksPassed int, automatedChecksTotal int, costUSD float64, err error)
 
 	// Provider + Model + PromptVersion echo what the wire reports.
 	// Captured per-run so the run row records exactly which
@@ -657,21 +661,25 @@ type EvalRunner struct {
 	loader    EvalSetLoader
 	generator EvalGenerator
 	judge     EvalJudge
+	templates PromptTemplatesRepository
 	logger    interface{ Printf(string, ...any) }
 }
 
 // NewEvalRunner constructs a runner. `judge` may be nil — when not
 // configured, cases still complete and record automated-check
 // counts; judgeScore is 0 and the FE renders "(no judge)" instead
-// of a number.
+// of a number. `templates` may be nil — starting a run with a
+// promptVersion override is then rejected with a clear error;
+// production-template runs are unaffected.
 func NewEvalRunner(
 	repo EvalsRepository,
 	loader EvalSetLoader,
 	generator EvalGenerator,
 	judge EvalJudge,
+	templates PromptTemplatesRepository,
 	logger interface{ Printf(string, ...any) },
 ) *EvalRunner {
-	return &EvalRunner{repo: repo, loader: loader, generator: generator, judge: judge, logger: logger}
+	return &EvalRunner{repo: repo, loader: loader, generator: generator, judge: judge, templates: templates, logger: logger}
 }
 
 // Start creates an eval_runs row, returns the runId, and spawns a
@@ -682,6 +690,32 @@ func NewEvalRunner(
 func (r *EvalRunner) Start(ctx context.Context, evalSetID, promptVersion, createdBy string) (string, error) {
 	if r == nil || r.repo == nil || r.loader == nil || r.generator == nil {
 		return "", errors.New("admin: eval runner not wired")
+	}
+
+	// Resolve the optional prompt-version override up front — a bad
+	// reference should 400, not create a doomed run. Wire format is
+	// "<name>@v<version>" (see parsePromptVersionRef); the resolved
+	// body is rendered in place of that template's production
+	// version for every case, so the run tests the draft exactly as
+	// it would ship if promoted.
+	promptVersion = strings.TrimSpace(promptVersion)
+	var overrides map[string]string
+	if promptVersion != "" {
+		name, version, err := parsePromptVersionRef(promptVersion)
+		if err != nil {
+			return "", err
+		}
+		if r.templates == nil {
+			return "", errors.New("admin: invalid promptVersion — template overrides unavailable (prompt_templates repo not wired)")
+		}
+		doc, err := r.templates.Get(ctx, fmt.Sprintf("pt_%s_v%d", name, version))
+		if err != nil {
+			return "", fmt.Errorf("resolve prompt version override: %w", err)
+		}
+		if doc == nil {
+			return "", fmt.Errorf("admin: invalid promptVersion %q — version not found (save it in /prompts first)", promptVersion)
+		}
+		overrides = map[string]string{name: doc.Body}
 	}
 
 	// Pre-flight: load tuples now so we can return a sensible 4xx
@@ -727,14 +761,41 @@ func (r *EvalRunner) Start(ctx context.Context, evalSetID, promptVersion, create
 
 	// Detach from the request context — the run outlives the
 	// caller's HTTP request.
-	go r.execute(runID, tuples)
+	go r.execute(runID, tuples, overrides)
 	return runID, nil
+}
+
+// parsePromptVersionRef parses the wire format for "eval this draft
+// template version": "<name>@v<version>", e.g.
+// "outfit_system_base@v4". The name half is a prompt_templates name
+// (archetype-suffixed names like "outfit_system_base.creator" work);
+// the version half is the integer version shown in the /prompts
+// admin UI. Same shape as the llm_calls.promptVariant stamp, so the
+// string an admin sees on the traces firehose works here verbatim.
+func parsePromptVersionRef(ref string) (name string, version int, err error) {
+	badFormat := func() error {
+		return fmt.Errorf("admin: invalid promptVersion %q (want \"<name>@v<version>\", e.g. \"outfit_system_base@v4\")", ref)
+	}
+	at := strings.LastIndex(ref, "@")
+	if at <= 0 || at == len(ref)-1 {
+		return "", 0, badFormat()
+	}
+	name = ref[:at]
+	vs := ref[at+1:]
+	if !strings.HasPrefix(vs, "v") {
+		return "", 0, badFormat()
+	}
+	version, convErr := strconv.Atoi(vs[1:])
+	if convErr != nil || version <= 0 {
+		return "", 0, badFormat()
+	}
+	return name, version, nil
 }
 
 // execute is the goroutine body. Runs the cases concurrently with
 // a worker-pool fan-out, writes per-case results as they land, and
 // finalizes the aggregate at the end.
-func (r *EvalRunner) execute(runID string, tuples []EvalTuple) {
+func (r *EvalRunner) execute(runID string, tuples []EvalTuple, promptOverrides map[string]string) {
 	ctx, cancel := context.WithTimeout(context.Background(), evalRunHardTimeout)
 	defer cancel()
 
@@ -771,7 +832,7 @@ func (r *EvalRunner) execute(runID string, tuples []EvalTuple) {
 			caseStart := time.Now()
 			res := EvalCaseResult{CaseID: tuple.ID, Status: EvalCaseStatusFailed}
 
-			outfitJSON, primaryName, checksPass, checksTotal, genCost, err := r.generator.GenerateForEval(ctx, tuple)
+			outfitJSON, primaryName, checksPass, checksTotal, genCost, err := r.generator.GenerateForEval(ctx, tuple, promptOverrides)
 			res.AutomatedChecksPassed = checksPass
 			res.AutomatedChecksTotal = checksTotal
 			res.OutfitName = primaryName

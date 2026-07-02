@@ -89,7 +89,7 @@ func (g *ClaudeGenerator) Generate(ctx context.Context, req GeneratorRequest) ([
 		return nil, nil, errors.New("claude generator: ANTHROPIC_API_KEY is not set")
 	}
 
-	systemPrompt := buildSystemPrompt(req.UserID, req.Weather, req.RecentBoards, req.TopArchetypes, req.Panels, req.Backgrounds)
+	systemPrompt := buildSystemPromptWithOverrides(req.PromptOverrides, req.UserID, req.Weather, req.RecentBoards, req.TopArchetypes, req.Panels, req.Backgrounds)
 	tool := g.buildOutfitTool(req.Items)
 	userContent := g.buildUserContent(ctx, req)
 
@@ -278,7 +278,7 @@ func (g *ClaudeGenerator) buildUserContent(ctx context.Context, req GeneratorReq
 	var content []claudeContent
 
 	// Reuse the shared text inventory builder, then append the tool-use instruction.
-	textMsg := BuildUserMessageForUser(req.UserID, req.Items) + "\n\nPropose 3-4 outfits using the propose_outfits tool."
+	textMsg := buildUserMessageWithOverrides(req.PromptOverrides, req.UserID, req.Items) + "\n\nPropose 3-4 outfits using the propose_outfits tool."
 
 	content = append(content, claudeContent{
 		Type: "text",

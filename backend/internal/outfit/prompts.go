@@ -145,24 +145,13 @@ func SetPerArchetypeRoutingEnabled(on bool) {
 	perArchetypeRoutingEnabled = on
 }
 
-// getSafetyTemplate returns the template body for
-// "outfit_safety". Same fallback + A/B-routing semantics.
-func getSafetyTemplate(userID string) string {
-	if promptTemplates != nil {
-		if body := promptTemplates.BodyForUser("outfit_safety", userID); body != "" {
-			return body
-		}
-	}
-	return defaultSafetyPrompt
-}
-
 // templateBody returns the admin-managed body for prompt template
 // `name` (production version, or the A/B candidate when userID is
 // in-cohort), falling back to the hardcoded `fallback` constant when
 // no provider is wired or no version has been promoted. Every
 // externalised outfit/moodboard prompt block below getSystemBaseTemplate
-// / getSafetyTemplate resolves through this one helper — same fallback +
-// A/B-routing contract, minus the per-archetype special-case.
+// resolves through this one helper — same fallback + A/B-routing
+// contract, minus the per-archetype special-case.
 func templateBody(name, userID, fallback string) string {
 	if promptTemplates != nil {
 		if body := promptTemplates.BodyForUser(name, userID); body != "" {
@@ -175,8 +164,12 @@ func templateBody(name, userID, fallback string) string {
 // DefaultTemplates returns every admin-editable outfit/moodboard prompt
 // block keyed by template name, with its hardcoded fallback body. app.go
 // seeds these into the prompt_templates collection and hands the same map
-// to the cache (which only refreshes keys it already knows), so a block is
-// editable end-to-end only once it appears here.
+// to the cache as the fallback set. The cache serves any name present in
+// the collection (it refreshes from ListNames, not just these keys), so
+// operator-created names — per-archetype variants like
+// "outfit_system_base.creator" (mootd#65) — work without appearing here;
+// this map exists so the seeded blocks keep functioning when Mongo is
+// unavailable.
 //
 // To make a new part of the prompt editable: (1) add its default constant
 // to this map, and (2) swap the inline string at its render site for a
@@ -452,6 +445,24 @@ Return one score per outfit via the rate_outfits tool.`
 //     available: it replaces a generic prompt with one that carries the
 //     user's actual taste trail.
 func buildSystemPrompt(userID string, weather Weather, recentBoards []RecentBoard, topArchetypes []archetype.ScoredArchetype, panels, backgrounds []SurfaceOption) string {
+	return buildSystemPromptWithOverrides(nil, userID, weather, recentBoards, topArchetypes, panels, backgrounds)
+}
+
+// buildSystemPromptWithOverrides is buildSystemPrompt with per-call
+// template-body overrides (template name → body). An override takes
+// precedence over the admin-managed provider INCLUDING its A/B
+// routing — the eval runner passes the draft version under test so a
+// run renders exactly what would ship if that version were promoted,
+// deterministically. nil / empty map = production behaviour,
+// byte-identical to buildSystemPrompt.
+func buildSystemPromptWithOverrides(overrides map[string]string, userID string, weather Weather, recentBoards []RecentBoard, topArchetypes []archetype.ScoredArchetype, panels, backgrounds []SurfaceOption) string {
+	tmpl := func(name, fallback string) string {
+		if body, ok := overrides[name]; ok && strings.TrimSpace(body) != "" {
+			return body
+		}
+		return templateBody(name, userID, fallback)
+	}
+
 	var sb strings.Builder
 	// mootd#65 — when per-archetype routing is on, pass the top-1
 	// archetype name so the template lookup can prefer
@@ -460,18 +471,36 @@ func buildSystemPrompt(userID string, weather Weather, recentBoards []RecentBoar
 	if len(topArchetypes) > 0 {
 		topArche = topArchetypes[0].Name
 	}
-	sb.WriteString(getSystemBaseTemplate(userID, topArche))
+	// Base block: an override for the archetype-specific name wins
+	// over one for the universal name (so a draft archetype variant
+	// can be evaled without flipping OUTFIT_PER_ARCHETYPE_PROMPTS);
+	// absent both, the provider resolves as in production.
+	base := ""
+	if topArche != "" {
+		if b, ok := overrides["outfit_system_base."+topArche]; ok && strings.TrimSpace(b) != "" {
+			base = b
+		}
+	}
+	if base == "" {
+		if b, ok := overrides["outfit_system_base"]; ok && strings.TrimSpace(b) != "" {
+			base = b
+		}
+	}
+	if base == "" {
+		base = getSystemBaseTemplate(userID, topArche)
+	}
+	sb.WriteString(base)
 
 	// Tell the LLM how to treat the data block. Defence-in-depth alongside
 	// per-string sanitisation in sanitiseUserText. v3.
 	sb.WriteString("\n\n")
-	sb.WriteString(strings.ReplaceAll(strings.ReplaceAll(getSafetyTemplate(userID),
+	sb.WriteString(strings.ReplaceAll(strings.ReplaceAll(tmpl("outfit_safety", defaultSafetyPrompt),
 		"{{userDataOpen}}", userDataOpen),
 		"{{userDataClose}}", userDataClose))
 
 	if len(panels) > 0 || len(backgrounds) > 0 {
 		sb.WriteString("\n\n")
-		sb.WriteString(templateBody("outfit_surfaces_instruction", userID, defaultSurfacesInstruction))
+		sb.WriteString(tmpl("outfit_surfaces_instruction", defaultSurfacesInstruction))
 		sb.WriteString("\n")
 		if len(panels) > 0 {
 			sb.WriteString("\nAvailable panels:\n")
@@ -507,7 +536,7 @@ func buildSystemPrompt(userID string, weather Weather, recentBoards []RecentBoar
 		}
 		sb.WriteString("\n\n")
 		sb.WriteString(strings.ReplaceAll(
-			templateBody("outfit_archetype_context", userID, defaultArchetypeContext),
+			tmpl("outfit_archetype_context", defaultArchetypeContext),
 			"{{archetypeLines}}", archLines.String()))
 	}
 
@@ -515,7 +544,7 @@ func buildSystemPrompt(userID string, weather Weather, recentBoards []RecentBoar
 		// Weather strings come from server-controlled metar/forecast paths
 		// today, but defence-in-depth: sanitise anyway. The values are
 		// short enough that truncation never bites.
-		line := templateBody("outfit_weather_line", userID, defaultWeatherLine)
+		line := tmpl("outfit_weather_line", defaultWeatherLine)
 		line = strings.ReplaceAll(line, "{{temperature}}", sanitiseUserText(weather.Temperature))
 		line = strings.ReplaceAll(line, "{{unit}}", sanitiseUserText(weather.Unit))
 		line = strings.ReplaceAll(line, "{{condition}}", sanitiseUserText(weather.Condition))
@@ -531,7 +560,7 @@ func buildSystemPrompt(userID string, weather Weather, recentBoards []RecentBoar
 		// already compromised). Wrap the entire region in USER_DATA tags
 		// + sanitise per-field.
 		sb.WriteString("\n")
-		sb.WriteString(templateBody("outfit_recent_worn", userID, defaultRecentWornInstruction))
+		sb.WriteString(tmpl("outfit_recent_worn", defaultRecentWornInstruction))
 		sb.WriteString("\n")
 		sb.WriteString(userDataOpen + "\n")
 		for _, b := range recentBoards {
@@ -555,7 +584,7 @@ func buildSystemPrompt(userID string, weather Weather, recentBoards []RecentBoar
 		}
 		if hasRichExample {
 			sb.WriteString("\n")
-			sb.WriteString(templateBody("outfit_recent_chosen", userID, defaultRecentChosenInstruction))
+			sb.WriteString(tmpl("outfit_recent_chosen", defaultRecentChosenInstruction))
 			sb.WriteString("\n")
 			sb.WriteString(userDataOpen + "\n")
 			for _, b := range recentBoards {
@@ -590,7 +619,7 @@ func buildSystemPrompt(userID string, weather Weather, recentBoards []RecentBoar
 	// expected level of stylistic reasoning. The example uses placeholder
 	// IDs that the model knows it must NOT use literally.
 	sb.WriteString("\n")
-	sb.WriteString(templateBody("outfit_example_output", userID, defaultExampleOutput))
+	sb.WriteString(tmpl("outfit_example_output", defaultExampleOutput))
 
 	return sb.String()
 }
@@ -611,6 +640,16 @@ func BuildSystemPromptForEval(weather Weather, recentBoards []RecentBoard, topAr
 	return buildSystemPrompt("", weather, recentBoards, topArchetypes, panels, backgrounds)
 }
 
+// BuildSystemPromptForEvalWithOverrides renders the eval system
+// prompt with per-call template-body overrides (see
+// buildSystemPromptWithOverrides). The admin eval runner passes the
+// draft template version under test; the empty userID keeps A/B
+// routing out of the picture for every non-overridden block, so two
+// runs of the same version stay comparable.
+func BuildSystemPromptForEvalWithOverrides(overrides map[string]string, weather Weather, recentBoards []RecentBoard, topArchetypes []archetype.ScoredArchetype, panels, backgrounds []SurfaceOption) string {
+	return buildSystemPromptWithOverrides(overrides, "", weather, recentBoards, topArchetypes, panels, backgrounds)
+}
+
 // BuildUserMessageForUser produces a single compact representation of the wardrobe
 // (one section grouped by role + a small per-item trait block). Shared by all
 // generators: Ollama, OpenAI, and Claude (text part).
@@ -628,6 +667,20 @@ func BuildSystemPromptForEval(weather Weather, recentBoards []RecentBoard, topAr
 // small wardrobes get a higher target so each outfit pulls in fresh
 // items instead of the LLM looping over the same 3-4 permutations.
 func BuildUserMessageForUser(userID string, items []GenItem) string {
+	return buildUserMessageWithOverrides(nil, userID, items)
+}
+
+// buildUserMessageWithOverrides is BuildUserMessageForUser with
+// per-call template-body overrides — same contract as
+// buildSystemPromptWithOverrides (overrides beat the provider + A/B;
+// nil map = production behaviour).
+func buildUserMessageWithOverrides(overrides map[string]string, userID string, items []GenItem) string {
+	tmpl := func(name, fallback string) string {
+		if body, ok := overrides[name]; ok && strings.TrimSpace(body) != "" {
+			return body
+		}
+		return templateBody(name, userID, fallback)
+	}
 	type itemRef struct {
 		ID     string
 		Label  string
@@ -703,7 +756,7 @@ func BuildUserMessageForUser(userID string, items []GenItem) string {
 	preferenceRule := ""
 	if fillerCount > 0 {
 		quota := fillerQuotaPerOutfit(ownCount, fillerCount)
-		rule := templateBody("outfit_filler_rule", userID, defaultFillerRule)
+		rule := tmpl("outfit_filler_rule", defaultFillerRule)
 		rule = strings.ReplaceAll(rule, "{{fillerWeight}}", fmt.Sprintf("%.2f", FillerWeight))
 		rule = strings.ReplaceAll(rule, "{{quota}}", fmt.Sprintf("%d", quota))
 		preferenceRule = rule
@@ -713,7 +766,7 @@ func BuildUserMessageForUser(userID string, items []GenItem) string {
 		"Wardrobe grouped by role:\n%s\n%s%s\nItem details:\n%s%s\n%s\n%s%s",
 		userDataOpen, inventory.String(), userDataClose,
 		userDataOpen, details.String(), userDataClose,
-		templateBody("outfit_user_instruction", userID, defaultUserInstruction),
+		tmpl("outfit_user_instruction", defaultUserInstruction),
 		preferenceRule,
 	)
 }
@@ -724,6 +777,13 @@ func BuildUserMessageForUser(userID string, items []GenItem) string {
 // observability re-render — and for the byte-shape regression tests.
 func BuildUserMessage(items []GenItem) string {
 	return BuildUserMessageForUser("", items)
+}
+
+// BuildUserMessageWithOverrides is the eval-harness variant of
+// BuildUserMessage: production render (empty userID) with per-call
+// template-body overrides applied.
+func BuildUserMessageWithOverrides(overrides map[string]string, items []GenItem) string {
+	return buildUserMessageWithOverrides(overrides, "", items)
 }
 
 // fillerQuotaPerOutfit returns the suggested number of [filler] items

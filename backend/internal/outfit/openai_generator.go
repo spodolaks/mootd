@@ -46,8 +46,8 @@ func (g *OpenAIGenerator) Generate(ctx context.Context, req GeneratorRequest) ([
 		return nil, nil, errors.New("openai generator: OPENAI_API_KEY is not set")
 	}
 
-	systemPrompt := buildSystemPrompt(req.UserID, req.Weather, req.RecentBoards, req.TopArchetypes, req.Panels, req.Backgrounds)
-	userMessage := BuildUserMessageForUser(req.UserID, req.Items)
+	systemPrompt := buildSystemPromptWithOverrides(req.PromptOverrides, req.UserID, req.Weather, req.RecentBoards, req.TopArchetypes, req.Panels, req.Backgrounds)
+	userMessage := buildUserMessageWithOverrides(req.PromptOverrides, req.UserID, req.Items)
 
 	// mootd#67 — translate user creativity preference to
 	// temperature when supplied; otherwise keep the historical

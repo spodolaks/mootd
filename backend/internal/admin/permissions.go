@@ -112,14 +112,14 @@ var rolePermissions = map[Role]map[Permission]bool{
 		// No PII, no rerun, no writes.
 	},
 	RoleCurator: {
-		// Archetype-defaults curation. prompts:read also unlocks
-		// the read-only Prompts view (the two surfaces share the
-		// listing endpoint), defaults:write authorises add / edit
-		// / delete on archetype defaults — and nothing else in the
-		// panel. defaults:write is intentionally scoped narrower
-		// than prompts:write so a curator can't author prompt
-		// templates or A/B tests.
+		// Prompt + archetype-defaults curation. prompts:write lets
+		// a curator author/version/promote prompt templates, run
+		// A/B tests, and start eval runs (eval-before-promote
+		// shares the permission); defaults:write authorises add /
+		// edit / delete on archetype defaults. Still no traces,
+		// users, spend, or governance surfaces.
 		PermPromptsRead:   true,
+		PermPromptsWrite:  true,
 		PermDefaultsWrite: true,
 	},
 }
