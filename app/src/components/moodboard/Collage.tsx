@@ -1,7 +1,8 @@
 import { Icon } from '@/src/components';
 import { labels, grays } from '@/src/theme/colors';
 import type { OutfitItem, WardrobeItem } from '@/src/domain';
-import React, { useMemo } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
+import type { ImageLoadEventData } from 'expo-image';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Image } from 'expo-image';
 
@@ -600,12 +601,22 @@ export const ITEM_GUTTER = 0.025;
 // them clearly the largest single item without consuming the canvas.
 // Accessories are slightly tucked (the cluster should read as supporting,
 // not competing).
+// mootd#218 — recalibrated for realistic relative proportions. Target order
+// (largest → smallest): outerwear > bottoms ≳ tops > accessories > shoes.
+//   • shoes 0.85 → 0.72 and accessories 0.92 → 0.78: the previous values let
+//     these small items read near garment-size. 0.72 finally honours the
+//     "shoes 60–75% of proportional" rule the comment below already cited.
+//   • bottoms 0.88 → 1.0 and tops 1.0 → 0.95: bottoms (the tallest garment)
+//     were rendering smaller than tops; bottoms now read as the body anchor.
+//     Combined with the aspect-aware area fit (scalePos → fitBoxToAspect),
+//     these weights set each zone's target AREA, so they drive relative size
+//     directly rather than fighting per-photo aspect variance.
 export const ZONE_WEIGHT: Record<ItemZone, number> = {
   outerwear: 1.05,
-  tops: 1.0,
-  bottoms: 0.88,
-  shoes: 0.85,
-  accessories: 0.92,
+  tops: 0.95,
+  bottoms: 1.0,
+  shoes: 0.72,
+  accessories: 0.78,
 };
 
 // Replaces the old flat ROLE_SCALE. Hero is stronger (1.15 vs 1.12) and
@@ -711,6 +722,61 @@ export const scalePos = (
   };
 };
 
+// Panel aspect ratio (height ÷ width). The collage panel is portrait 3:4
+// (see styles.collage / collageFill), so 1 unit of height-% spans 4/3 as
+// many pixels as 1 unit of width-%. fitBoxToAspect needs this to reason
+// about real (pixel) areas across the two mismatched percentage axes.
+export const PANEL_ASPECT = 4 / 3;
+
+// mootd#218 — make an item render at a CONSISTENT footprint regardless of its
+// photo's aspect ratio. scalePos produces a target *cell* (w% × h%) whose area
+// encodes the zone/role/weight calibration; but the garment is drawn with
+// contentFit="contain", so a tall photo in a wide cell (or vice-versa) only
+// fills part of it — and two items of the same zone end up visibly different
+// sizes purely because their photos are shaped differently.
+//
+// fitBoxToAspect reshapes the cell to the image's true aspect ratio while
+// PRESERVING the cell's pixel area, then re-centers it on the cell. After this,
+// contentFit="contain" fills the box exactly, so every item of a given zone
+// occupies the same area no matter how its photo is cropped. `aspect` is the
+// image's natural width ÷ height (from onLoad).
+// Fraction of the zone cell's area an item fills after aspect-fitting. The
+// cell anchors/positions were tuned for the old contentFit="contain" behaviour
+// where the garment rendered SMALLER than its cell; filling 100% of the cell
+// area would crowd neighbours, so we hold a little back to preserve the gutter
+// the layout assumes. Tune up toward 1.0 for bigger items, down for airier
+// spacing. (mootd#218)
+export const AREA_FILL = 0.9;
+
+export const fitBoxToAspect = (cell: ZonePos, aspect: number): ZonePos => {
+  if (!(aspect > 0)) return cell;
+  const pct = (v: `${number}%`) => parseFloat(v.slice(0, -1));
+  const w = pct(cell.w);
+  const h = pct(cell.h);
+  const cx = pct(cell.l) + w / 2;
+  const cy = pct(cell.t) + h / 2;
+
+  // Work in pixel units with panel width = 1: a width-% maps to w/100, a
+  // height-% maps to (h/100)*PANEL_ASPECT. Preserve that pixel area (less the
+  // AREA_FILL margin) at the image's aspect ratio (aspect = pxW / pxH).
+  const area = (w / 100) * ((h / 100) * PANEL_ASPECT) * AREA_FILL;
+  const pxH = Math.sqrt(area / aspect);
+  const pxW = pxH * aspect;
+
+  let newW = pxW * 100;
+  let newH = (pxH / PANEL_ASPECT) * 100;
+
+  // Safety: never let a very wide/tall garment exceed the 80% usable span
+  // (10%–90% panel safe band). Scale both axes together so aspect is kept.
+  const overflow = Math.max(newW / 80, newH / 80, 1);
+  newW /= overflow;
+  newH /= overflow;
+
+  const l = Math.max(10, Math.min(90 - newW, cx - newW / 2));
+  const t = Math.max(10, Math.min(90 - newH, cy - newH / 2));
+  return { l: `${l}%`, t: `${t}%`, w: `${newW}%`, h: `${newH}%` };
+};
+
 // ---------- Collage component ----------
 
 export interface CollageProps {
@@ -770,6 +836,27 @@ export const Collage: React.FC<CollageProps> = ({
     return map;
   }, [snapshots]);
 
+  // mootd#218 — natural aspect ratio (w÷h) of each item's loaded image, keyed
+  // by itemId. Populated from the image onLoad; consumed by fitBoxToAspect so
+  // every garment fills a consistent target area instead of letterboxing by a
+  // photo-dependent amount. Unknown until an image loads → that item uses its
+  // raw zone cell for the first paint, then reflows once the aspect is known.
+  const [aspects, setAspects] = useState<Map<string, number>>(new Map());
+  const handleImageLoad = useCallback((itemId: string, e: ImageLoadEventData) => {
+    const w = e.source?.width;
+    const h = e.source?.height;
+    if (!w || !h) return;
+    const aspect = w / h;
+    setAspects(prev => {
+      // Skip the state update (and the re-layout it triggers) when the aspect
+      // is unchanged, so a re-render can't loop through onLoad.
+      if (prev.get(itemId) === aspect) return prev;
+      const next = new Map(prev);
+      next.set(itemId, aspect);
+      return next;
+    });
+  }, []);
+
   // Pick local fallback panel + background per outfit identity. Memoized on
   // the item-id tuple + archetype fingerprint so the same card keeps the
   // same surface across re-renders, but different outfits get different
@@ -827,7 +914,13 @@ export const Collage: React.FC<CollageProps> = ({
       // role='accent'.
       const role = layoutRoles?.[itemId];
       const weight = visualWeights?.[itemId];
-      const pos = scalePos(basePos, zone, role, weight, activeZoneCount);
+      const cell = scalePos(basePos, zone, role, weight, activeZoneCount);
+      // mootd#218 — reshape the cell to the image's true aspect ratio (keeping
+      // its area) so the garment fills its box instead of letterboxing by a
+      // photo-dependent amount. Falls back to the raw cell until onLoad reports
+      // the aspect (first paint), then reflows.
+      const aspect = aspects.get(itemId);
+      const pos = aspect ? fitBoxToAspect(cell, aspect) : cell;
       return { itemId, item, snapshot, zone, pos };
     });
 
@@ -924,7 +1017,7 @@ export const Collage: React.FC<CollageProps> = ({
       ...p,
       rotation: rotationByIndex.get(i) ?? 0,
     }));
-  }, [itemIds, itemMap, snapshotMap, layoutRoles, visualWeights, seed]);
+  }, [itemIds, itemMap, snapshotMap, layoutRoles, visualWeights, seed, aspects]);
 
   const collageBg = grays.gray6[colorScheme];
   const iconFallbackColor = labels.quaternary[colorScheme];
@@ -974,6 +1067,7 @@ export const Collage: React.FC<CollageProps> = ({
             style={styles.collageItem}
             contentFit="contain"
             cachePolicy="memory-disk"
+            onLoad={e => handleImageLoad(itemId, e)}
           />
         ) : onItemPress ? (
           <View style={styles.missingAffordance}>
